@@ -65,19 +65,19 @@ def main():
     
     # Step 1: Generate random permutation
     run_command(
-        f"python3 random_permutation_graphblas.py {args.matrix} --seed {args.seed} --output permutation.txt",
+        f"python3 random_permutation_graphblas.py {args.matrix} --seed {args.seed} --output test/permutation.txt",
         "[1/5] Generating random permutation"
     )
     
     # Step 2: Reorder matrix (1D)
     run_command(
-        f"python3 reorder_matrix_graphblas.py {args.matrix} permutation.txt 1D reordered_1d.mtx",
+        f"python3 reorder_matrix_graphblas.py {args.matrix} permutation.txt 1D test/reordered_1d.mtx",
         "[2/5] Reordering matrix (1D - rows only)"
     )
     
     # Step 3: Reorder matrix (2D)
     run_command(
-        f"python3 reorder_matrix_graphblas.py {args.matrix} permutation.txt 2D reordered_2d.mtx",
+        f"python3 reorder_matrix_graphblas.py {args.matrix} permutation.txt 2D test/reordered_2d.mtx",
         "[3/5] Reordering matrix (2D - rows and columns)"
     )
     
@@ -112,9 +112,9 @@ def main():
     print("Pipeline Test Complete!")
     print("=" * 50)
     print("Generated files:")
-    print("  - permutation.txt (1-based permutation vector)")
-    print("  - reordered_1d.mtx (row-reordered matrix)")
-    print("  - reordered_2d.mtx (row+column-reordered matrix)")
+    print("  - test/permutation.txt (1-based permutation vector)")
+    print("  - test/reordered_1d.mtx (row-reordered matrix)")
+    print("  - test/reordered_2d.mtx (row+column-reordered matrix)")
     print()
 
 

@@ -4,3 +4,6 @@
 [submodule "ccutils"]
 	path = ccutils
 	url = https://github.com/ThomasPasquali/ccutils.git
+[submodule "MtxPerm"]
+	path = MtxPerm
+	url = https://github.com/HicrestLaboratory/MtxPerm.git
