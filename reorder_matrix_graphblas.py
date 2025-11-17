@@ -59,11 +59,11 @@ def _dtype_token(mat: Matrix) -> str:
 def save_mm(path: Path, mat: Matrix) -> None:
     """Write *mat* to *path* using **1‑based** coordinates.
 
-    Uses GraphBLAS native I/O with 1-based indexing for Matrix Market format.
+    Uses GraphBLAS native I/O with proper Matrix Market banner.
     """
     from graphblas import io
-    # GraphBLAS io.mmwrite should handle 1-based indexing correctly for Matrix Market format
-    io.mmwrite(str(path), mat)
+    # Use mmwrite with empty comment to get clean Matrix Market format
+    io.mmwrite(str(path), mat, comment="")
 
 # ---------------------------------------------------------------------------
 # Core routine – permutation application.
