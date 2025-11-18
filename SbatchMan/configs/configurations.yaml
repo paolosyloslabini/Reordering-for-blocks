@@ -1,0 +1,25 @@
+baldo:
+  scheduler: slurm
+  configs:
+    perm:
+      template_path: /home/paolo.syloslabini/ReorderingSurvey-2026/SbatchMan/configs/baldo/perm.sh
+      partition: short
+      nodes: 1
+      ntasks: 1
+      cpus_per_task: 1
+      account: flavio.vella
+      time: 00:02:00
+      gpus: '0'
+      exclusive: false
+      scheduler: slurm
+    SpMV:
+      template_path: /home/paolo.syloslabini/ReorderingSurvey-2026/SbatchMan/configs/baldo/SpMV.sh
+      partition: short
+      nodes: 1
+      ntasks: 1
+      cpus_per_task: 1
+      account: flavio.vella
+      time: 00:02:00
+      gpus: '1'
+      exclusive: false
+      scheduler: slurm

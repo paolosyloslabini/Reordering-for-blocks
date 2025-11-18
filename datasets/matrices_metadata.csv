@@ -1,0 +1,8 @@
+Name,Category,Group,MatrixID,NumRows,NumCols,Nonzeros,Symmetric,SparsityRatio,Link,ImageLink,Source,Params
+bcspwr10,small-matrices-test,HB,22,5300,5300,21842,Yes,0.0007775721,https://sparse.tamu.edu/HB/bcspwr10,https://suitesparse-collection-website.herokuapp.com/files/HB/bcspwr10.png,SuiteSparse,
+bcsstk08,small-matrices-test,HB,30,1074,1074,12960,Yes,0.0112356044,https://sparse.tamu.edu/HB/bcsstk08,https://suitesparse-collection-website.herokuapp.com/files/HB/bcsstk08.png,SuiteSparse,
+bcsstk09,small-matrices-test,HB,31,1083,1083,18437,Yes,0.0157193051,https://sparse.tamu.edu/HB/bcsstk09,https://suitesparse-collection-website.herokuapp.com/files/HB/bcsstk09.png,SuiteSparse,
+bcsstk10,small-matrices-test,HB,32,1086,1086,22070,Yes,0.0187129683,https://sparse.tamu.edu/HB/bcsstk10,https://suitesparse-collection-website.herokuapp.com/files/HB/bcsstk10.png,SuiteSparse,
+bcsstk11,small-matrices-test,HB,33,1473,1473,34241,Yes,0.0157812335,https://sparse.tamu.edu/HB/bcsstk11,https://suitesparse-collection-website.herokuapp.com/files/HB/bcsstk11.png,SuiteSparse,
+bcsstk12,small-matrices-test,HB,34,1473,1473,34241,Yes,0.0157812335,https://sparse.tamu.edu/HB/bcsstk12,https://suitesparse-collection-website.herokuapp.com/files/HB/bcsstk12.png,SuiteSparse,
+bcsstk13,small-matrices-test,HB,35,2003,2003,83883,Yes,0.0209079790,https://sparse.tamu.edu/HB/bcsstk13,https://suitesparse-collection-website.herokuapp.com/files/HB/bcsstk13.png,SuiteSparse,

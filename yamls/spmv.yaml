@@ -1,0 +1,17 @@
+variables:
+  mtx: 'datasets/matrices_list_mtx.txt'
+  perm: 
+    - "graphblas"
+
+preprocess: |
+  source ~/.venv/bin/activate
+  mtx_name=$(basename {mtx})
+
+jobs:
+  - config: "SpMV"
+    config_jobs:
+
+      - tag: "CuSPARSE"
+        variables:
+          mtx: 'datasets/matrices_list.txt'
+        command: "./spmv {mtx} --perm perms/{perm}/$mtx_name.perm"
