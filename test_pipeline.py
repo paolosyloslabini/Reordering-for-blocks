@@ -65,7 +65,7 @@ def main():
     
     # Step 1: Generate random permutation
     run_command(
-        f"python3 random_permutation_graphblas.py {args.matrix} --seed {args.seed} --output test/permutation.txt",
+        f"python3 MtxPerm/random_permutation_graphblas.py {args.matrix} --seed {args.seed} --output test/permutation.txt",
         "[1/5] Generating random permutation"
     )
     
