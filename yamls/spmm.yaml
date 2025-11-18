@@ -1,0 +1,17 @@
+variables:
+  mtx: 'datasets/matrices_list_mtx.txt'
+  perm: 
+    - "graphblas"
+
+preprocess: |
+  source ~/.venv/bin/activate
+  mtx_name=$(basename {mtx} .mtx)
+  perm_path=perms/{perm}/${mtx_name}.perm
+  module load CUDA/
+
+jobs:
+  - config: "SpMM"
+    config_jobs:
+
+      - tag: "CuSPARSE_CSR_SPMM"
+        command: "python3 operations/cuSPARSE_CSR_SPMM {mtx} --perm_rows $perm_path --perm_cols $perm_path"

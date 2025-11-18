@@ -1,7 +1,5 @@
 variables:
-  mtx: 'datasets/matrices_list_mtx.txt'
-  
-  rabbit_flag: ['a', 'b']
+  mtx: 'datasets/matrices_list_mtx.txt'  
 
 jobs:
   - config: "perm"
@@ -10,9 +8,11 @@ jobs:
       - tag: "GraphBLAS"
         preprocess: |
           source ~/.venv/bin/activate
+          mtx_name=$(basename {mtx} .mtx)
           mkdir -p perms/graphblas
-          mtx_name=$(basename {mtx})
-        command: "python3 MtxPerm/random_permutation_graphblas.py {mtx} --output perms/graphblas/$mtx_name.perm"
+          perm_path=perms/graphblas/${mtx_name}.perm
+
+        command: "python3 MtxPerm/random_permutation_graphblas.py {mtx} --output $perm_path"
 
       # - tag: "RabbitOrder"
       #  command: "rabbit_order/rabbit_order {mtx} {rabbit_flag}"
