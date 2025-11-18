@@ -71,13 +71,13 @@ def main():
     
     # Step 2: Reorder matrix (1D)
     run_command(
-        f"python3 reorder_matrix_graphblas.py {args.matrix} permutation.txt 1D test/reordered_1d.mtx",
+        f"python3 reorder_matrix_graphblas.py {args.matrix} test/permutation.txt 1D test/reordered_1d.mtx",
         "[2/5] Reordering matrix (1D - rows only)"
     )
     
     # Step 3: Reorder matrix (2D)
     run_command(
-        f"python3 reorder_matrix_graphblas.py {args.matrix} permutation.txt 2D test/reordered_2d.mtx",
+        f"python3 reorder_matrix_graphblas.py {args.matrix} test/permutation.txt 2D test/reordered_2d.mtx",
         "[3/5] Reordering matrix (2D - rows and columns)"
     )
     
