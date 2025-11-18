@@ -94,14 +94,14 @@ def main():
         
         print("  Testing 1D reordered matrix:")
         run_command(
-            f"python3 simple_cusparse_spmm.py reordered_1d.mtx --n-iterations {args.iterations}",
+            f"python3 operators/simple_cusparse_spmm.py test/reordered_1d.mtx --n-iterations {args.iterations}",
             "  1D reordered SpMM",
             skip_on_error=True
         )
         
         print("  Testing 2D reordered matrix:")
         run_command(
-            f"python3 simple_cusparse_spmm.py reordered_2d.mtx --n-iterations {args.iterations}",
+            f"python3 operators/simple_cusparse_spmm.py test/reordered_2d.mtx --n-iterations {args.iterations}",
             "  2D reordered SpMM",
             skip_on_error=True
         )
