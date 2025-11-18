@@ -39,7 +39,7 @@ def load_mm(path: Path) -> Matrix:
 
 def _dtype_token(mat: Matrix) -> str:
     """Return the Matrix‑Market dtype keyword for *mat*."""
-    if mat.is_iso and mat.nvals == 0:
+    if mat.nvals == 0:
         return "pattern"
     # GraphBLAS type names map well enough to MM tokens.
     name = mat.type.__name__.lower()
@@ -59,11 +59,10 @@ def _dtype_token(mat: Matrix) -> str:
 def save_mm(path: Path, mat: Matrix) -> None:
     """Write *mat* to *path* using **1‑based** coordinates.
 
-    Uses GraphBLAS native I/O with proper Matrix Market banner.
+    Uses GraphBLAS io.mmwrite which properly writes Matrix Market format.
     """
     from graphblas import io
-    # mmwrite automatically writes proper Matrix Market format with banner
-    # Uses 1-based indexing as per Matrix Market standard
+    # io.mmwrite writes proper Matrix Market format with banner and 1-based indices
     io.mmwrite(str(path), mat)
 
 # ---------------------------------------------------------------------------
@@ -83,9 +82,9 @@ def apply_permutation(
 
     # Apply the permutation. GraphBLAS supports Pythonic slicing.
     if rtype.upper() == "2D":
-        A = A[idx, :][:, idx]  # reorder rows then columns
+        A = A[idx, :][:, idx].new()  # reorder rows then columns
     else:  # "1D"
-        A = A[idx, :]          # reorder rows only
+        A = A[idx, :].new()          # reorder rows only
 
     save_mm(out_path, A)
 
