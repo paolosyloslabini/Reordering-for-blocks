@@ -10,8 +10,7 @@ jobs:
           source ~/.venv/bin/activate
           mtx_name=$(basename {mtx} .mtx)
           mkdir -p perms/graphblas
-          perm_path=perms/graphblas/${mtx_name}.perm
-
+          perm_path=perms/graphblas/$mtx_name.perm
         command: "python3 MtxPerm/random_permutation_graphblas.py {mtx} --output $perm_path"
 
       # - tag: "RabbitOrder"

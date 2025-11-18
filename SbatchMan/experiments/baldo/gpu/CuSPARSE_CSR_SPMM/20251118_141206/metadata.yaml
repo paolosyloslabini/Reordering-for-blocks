@@ -1,0 +1,26 @@
+archive_name: null
+cluster_name: baldo
+command: python3 operations/simple_cusparse_spmm.py /home/paolo.syloslabini/ReorderingSurvey-2026/datasets/small-matrices-test/SuiteSparse_10000_100000_7/HB/bcsstk08/bcsstk08.mtx
+  --perm_rows $perm_path --perm_cols $perm_path
+config_name: gpu
+exitcode: 2
+exp_dir: baldo/gpu/CuSPARSE_CSR_SPMM/20251118_141206
+job_id: 77081
+postprocess: null
+preprocess: 'source ~/.venv/bin/activate
+
+  mtx_name=$(basename /home/paolo.syloslabini/ReorderingSurvey-2026/datasets/small-matrices-test/SuiteSparse_10000_100000_7/HB/bcsstk08/bcsstk08.mtx
+  .mtx)
+
+  perm_path=perms/graphblas/$mtx_name.perm
+
+  module load CUDA/
+
+  '
+scheduler: slurm
+status: FAILED
+tag: CuSPARSE_CSR_SPMM
+timestamp: '20251118_141206'
+variables:
+  mtx: /home/paolo.syloslabini/ReorderingSurvey-2026/datasets/small-matrices-test/SuiteSparse_10000_100000_7/HB/bcsstk08/bcsstk08.mtx
+  perm: graphblas

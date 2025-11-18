@@ -13,5 +13,5 @@ baldo:
   configs:
     - name: "perm"
 
-    - name: "SpMV"
+    - name: "gpu"
       gpus: 1

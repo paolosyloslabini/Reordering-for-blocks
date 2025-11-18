@@ -1,0 +1,25 @@
+archive_name: null
+cluster_name: baldo
+command: python3 MtxPerm/random_permutation_graphblas.py /home/paolo.syloslabini/ReorderingSurvey-2026/datasets/small-matrices-test/SuiteSparse_10000_100000_7/HB/bcsstk10/bcsstk10.mtx
+  --output $perm_path
+config_name: perm
+exitcode: 0
+exp_dir: baldo/perm/GraphBLAS/20251118_135823_3
+job_id: 77061
+postprocess: null
+preprocess: 'source ~/.venv/bin/activate
+
+  mtx_name=$(basename /home/paolo.syloslabini/ReorderingSurvey-2026/datasets/small-matrices-test/SuiteSparse_10000_100000_7/HB/bcsstk10/bcsstk10.mtx
+  .mtx)
+
+  mkdir -p perms/graphblas
+
+  perm_path=perms/graphblas/$mtx_name.perm
+
+  '
+scheduler: slurm
+status: COMPLETED
+tag: GraphBLAS
+timestamp: '20251118_135823'
+variables:
+  mtx: /home/paolo.syloslabini/ReorderingSurvey-2026/datasets/small-matrices-test/SuiteSparse_10000_100000_7/HB/bcsstk10/bcsstk10.mtx
