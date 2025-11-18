@@ -14,10 +14,12 @@ from scipy.io import mmread
 def main():
     parser = argparse.ArgumentParser(description='Minimal cuSPARSE CSR SpMM using CuPy')
     parser.add_argument('matrix_path', help='Path to Matrix Market file')
+    parser.add_argument('--perm_rows', type=str, default=None, help='Path to row permutation file)')
+    parser.add_argument('--perm_cols', type=str, default=None, help='Path to cols permutation file)')
     parser.add_argument('--alpha', type=float, default=1.0, help='Alpha scalar (default: 1.0)')
     parser.add_argument('--beta', type=float, default=0.0, help='Beta scalar (default: 0.0)')
     parser.add_argument('--n-cols', type=int, default=32, help='Number of columns in dense matrix B (default: 32)')
-    parser.add_argument('--n-iterations', type=int, default=10, help='Number of timing iterations (default: 10)')
+    parser.add_argument('--n-iterations', type=int, default=5, help='Number of timing iterations (default: 5)')
     
     args = parser.parse_args()
     
@@ -26,11 +28,21 @@ def main():
     beta = args.beta
     n_cols = args.n_cols
     n_iterations = args.n_iterations
-    
+    perm_rows_path = args.perm_rows
+    perm_cols_path = args.perm_cols
+
     # Load sparse matrix from MatrixMarket
     A_cpu = mmread(matrix_path).tocsr().astype(cp.float32)
     m, n = A_cpu.shape
-    
+
+    # Apply permutation if provided
+    if perm_rows_path:
+        perm_rows = cp.loadtxt(perm_rows_path, dtype=cp.int64) - 1
+        A_cpu = A_cpu[perm_rows.get(), :].tocsr()
+    if perm_cols_path:
+        perm_cols = cp.loadtxt(perm_cols_path, dtype=cp.int64) - 1
+        A_cpu = A_cpu[:, perm_cols.get()].tocsr()
+
     # Transfer to GPU
     A_gpu = cupyx_sp.csr_matrix(A_cpu)
     
