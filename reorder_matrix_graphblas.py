@@ -62,8 +62,9 @@ def save_mm(path: Path, mat: Matrix) -> None:
     Uses GraphBLAS native I/O with proper Matrix Market banner.
     """
     from graphblas import io
-    # Use mmwrite with empty comment to get clean Matrix Market format
-    io.mmwrite(str(path), mat, comment="")
+    # mmwrite automatically writes proper Matrix Market format with banner
+    # Uses 1-based indexing as per Matrix Market standard
+    io.mmwrite(str(path), mat)
 
 # ---------------------------------------------------------------------------
 # Core routine – permutation application.
