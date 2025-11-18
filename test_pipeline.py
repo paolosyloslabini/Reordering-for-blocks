@@ -83,7 +83,7 @@ def main():
     
     # Step 4: Run SpMM on original matrix
     gpu_available = run_command(
-        f"python3 simple_cusparse_spmm.py {args.matrix} --n-iterations {args.iterations}",
+        f"python3 operators/simple_cusparse_spmm.py {args.matrix} --n-iterations {args.iterations}",
         "[4/5] Running cuSPARSE SpMM on original matrix",
         skip_on_error=True
     )
