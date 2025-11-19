@@ -2,7 +2,7 @@
 
 from sbatchman import jobs_list
 
-jobs = jobs_list(from_archived=True, tag = ["CuSPARSE_CSR_SPMM",], status = ["COMPLETED",])
+jobs = jobs_list(from_archived=True, tag = "CuSPARSE_CSR_SPMM", status = ["COMPLETED",])
 for job in jobs:
     command, pos_args, named_args = job.parse_command_args()
     print(command)
