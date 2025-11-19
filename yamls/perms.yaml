@@ -1,17 +1,33 @@
 variables:
-  mtx: 'datasets/matrices_list_mtx.txt'  
+  mtx: 'datasets/matrices_list_mtx.txt'
+preprocess: |
+    mtx_name=$(basename {mtx} .mtx)
+    source ~/.venv/bin/activate
 
 jobs:
   - config: "perm"
     config_jobs:
 
-      - tag: "GraphBLAS"
+      - tag: "random"
         preprocess: |
-          source ~/.venv/bin/activate
-          mtx_name=$(basename {mtx} .mtx)
           mkdir -p perms/graphblas
           perm_path=perms/graphblas/$mtx_name.perm
-        command: "python3 MtxPerm/random_permutation_graphblas.py {mtx} --output $perm_path"
+        command: "python3 MtxPerm/RANDOM/random_permutation_graphblas.py {mtx} --output $perm_path"
 
-      # - tag: "RabbitOrder"
-      #  command: "rabbit_order/rabbit_order {mtx} {rabbit_flag}"
+      - tag: "SB_degree"
+        preprocess: |
+          mkdir -p perms/SB_degree
+          perm_path=perms/SB_degree/$mtx_name.perm
+        command: "./MtxPerm/SPARSEBASE/build/degree_perm {mtx} $perm_path"
+
+      - tag: "SB_gray"
+        preprocess: |
+          mkdir -p perms/SB_gray
+          perm_path=perms/SB_gray/$mtx_name.perm
+        command: "./MtxPerm/SPARSEBASE/build/gray_perm {mtx} $perm_path"
+
+      - tag: "SB_rcm"
+        preprocess: |
+          mkdir -p perms/SB_rcm
+          perm_path=perms/SB_rcm/$mtx_name.perm
+        command: "./MtxPerm/SPARSEBASE/build/rcm_perm {mtx} $perm_path"

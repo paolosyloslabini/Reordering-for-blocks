@@ -2,6 +2,9 @@ variables:
   mtx: 'datasets/matrices_list_mtx.txt'
   perm: 
     - "graphblas"
+    - "SB_degree"
+    - "SB_gray"
+    - "SB_rcm"
 
 preprocess: |
   source ~/.venv/bin/activate
@@ -14,4 +17,4 @@ jobs:
     config_jobs:
 
       - tag: "CuSPARSE_CSR_SPMM"
-        command: "python3 operators/simple_cusparse_spmm.py {mtx} --perm_rows $perm_path --perm_cols $perm_path"
+        command: "python3 operators/cusparse_csr_spmm.py {mtx} --perm_rows $perm_path --perm_cols $perm_path"
