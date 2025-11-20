@@ -88,3 +88,14 @@ def time_operation(operation, n_iterations=5):
         timings.append(elapsed_ms)
     
     return sum(timings) / len(timings)
+
+
+def print_timer(label, time_ms):
+    """
+    Print timing information in C++-compatible format.
+    
+    Args:
+        label: Timer label (e.g., 'loading', 'execution')
+        time_ms: Time in milliseconds
+    """
+    print(f"<Timer>[{label}] {time_ms:.6f} ms", flush=True)

@@ -7,7 +7,8 @@ No fallbacks - raises error if GPU/cuSPARSE unavailable.
 import sys
 import argparse
 import cupy as cp
-from cusparse_utils import load_and_permute_matrix, convert_to_gpu, time_operation
+import time
+from cusparse_utils import load_and_permute_matrix, convert_to_gpu, time_operation, print_timer
 
 
 def main():
@@ -23,11 +24,15 @@ def main():
     args = parser.parse_args()
     
     # Load and permute matrix
+    t0 = time.perf_counter()
     A_cpu = load_and_permute_matrix(args.matrix_path, args.perm_rows, args.perm_cols)
+    loading_ms = (time.perf_counter() - t0) * 1000
     m, n = A_cpu.shape
 
     # Convert to CSR and transfer to GPU
+    t0 = time.perf_counter()
     A_gpu = convert_to_gpu(A_cpu, 'csr')
+    transfer_ms = (time.perf_counter() - t0) * 1000
     
     # Create dense matrix B (n x n_cols) and C (m x n_cols) on GPU
     B_gpu = cp.random.randn(n, args.n_cols, dtype=cp.float32)
@@ -38,7 +43,10 @@ def main():
         return args.alpha * A_gpu.dot(B_gpu) + args.beta * C_gpu
     
     avg_time_ms = time_operation(spmm_op, args.n_iterations)
-    print(f"TIMING_MS:{avg_time_ms:.3f}")
+    
+    print_timer("loading", loading_ms)
+    print_timer("transfer", transfer_ms)
+    print_timer("operation", avg_time_ms)
     return 0
 
 
