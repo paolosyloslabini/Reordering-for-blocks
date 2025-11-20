@@ -31,3 +31,27 @@ jobs:
           mkdir -p perms/SB_rcm
           perm_path=perms/SB_rcm/$mtx_name.perm
         command: "./MtxPerm/SPARSEBASE/build/rcm_perm {mtx} $perm_path"
+
+      - tag: "SB_metis"
+        preprocess: |
+          mkdir -p perms/SB_metis
+          perm_path=perms/SB_metis/$mtx_name.perm
+        command: "./MtxPerm/SPARSEBASE/build/metis_perm {mtx} $perm_path"
+
+      - tag: "SB_amd"
+        preprocess: |
+          mkdir -p perms/SB_amd
+          perm_path=perms/SB_amd/$mtx_name.perm
+        command: "./MtxPerm/SPARSEBASE/build/amd_perm {mtx} $perm_path"
+
+      - tag: "SB_rabbit"
+        preprocess: |
+          mkdir -p perms/SB_rabbit
+          perm_path=perms/SB_rabbit/$mtx_name.perm
+        command: "./MtxPerm/SPARSEBASE/build/rabbit_perm {mtx} $perm_path"
+
+      - tag: "SB_patoh"
+        preprocess: |
+          mkdir -p perms/SB_patoh
+          perm_path=perms/SB_patoh/$mtx_name.perm
+        command: "./MtxPerm/SPARSEBASE/build/patoh_perm {mtx} $perm_path"
