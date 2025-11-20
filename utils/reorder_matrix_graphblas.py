@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Apply a permutation to a Matrix Market file using SuiteSparse GraphBLAS.
+"""Apply a permutation to a Matrix Market file using SuiteSparse GraphBLAS.
 
 This is a drop‑in replacement for the earlier SciPy version but avoids the
 costly CSR → COO → CSR round‑trips by keeping everything inside the GraphBLAS
 runtime.
 
-The permutation file is expected to contain **1‑based** indices, one per line.
+The permutation file is expected to contain **1‑based** indices on a single line (space-separated).
 Depending on ``rtype``:
 - ``1D``: Permute **rows only**.
 - ``2D``: Permute **both rows and columns** with the same permutation.
@@ -76,7 +76,7 @@ def apply_permutation(
 
     A = load_mm(matrix)
 
-    # Permutation vector: file stores 1‑based indices → convert to 0‑based.
+    # Permutation vector: file stores 1‑based indices on single line (space-separated) → convert to 0‑based.
     p = np.loadtxt(perm, dtype=np.int64) - 1
     idx = p.tolist()
 
