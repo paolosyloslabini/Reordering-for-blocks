@@ -36,7 +36,7 @@ jobs:
         preprocess: |
           mkdir -p perms/SB_metis
           perm_path=perms/SB_metis/$mtx_name.perm
-        command: "./MtxPerm/SPARSEBASE/build/metis_perm {mtx} $perm_path"
+        command: "./MtxPerm/SPARSEBASE/build/metis_perm {mtx} $perm_path --niter 1"
 
       - tag: "SB_amd"
         preprocess: |
