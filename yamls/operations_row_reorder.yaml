@@ -21,7 +21,11 @@ jobs:
         command: "python3 operators/cusparse_bsr_spmv.py {mtx} --perm perms/{perm}/$mtx_name.perm --blocksize {block_size} --perm-type ROW"
       - tag: "CUSPARSE_SPMV_CSR_ROW"
         command: "python3 operators/cusparse_csr_spmv.py {mtx} --perm perms/{perm}/$mtx_name.perm --perm-type ROW"
+
       - tag: "CUSPARSE_SPMM_BSR_ROW"
         command: "python3 operators/cusparse_bsr_spmm.py {mtx} --perm perms/{perm}/$mtx_name.perm --blocksize {block_size} --perm-type ROW"
       - tag: "CUSPARSE_SPMM_CSR_ROW"
         command: "python3 operators/cusparse_csr_spmm.py {mtx} --perm perms/{perm}/$mtx_name.perm --perm-type ROW"
+
+      - tag: "SMAT_SPMM_ROW"
+        command: "python3 operators/smat_spmm.py {mtx} --perm perms/{perm}/$mtx_name.perm --blocksize {block_size} --perm-type ROW"
