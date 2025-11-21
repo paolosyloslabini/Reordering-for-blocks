@@ -25,7 +25,7 @@ echo "Repository: ${SMAT_REPO}"
 echo ""
 
 # Step 1: Check prerequisites
-echo "[1/4] Checking prerequisites..."
+echo "[1/5] Checking prerequisites..."
 if ! command -v nvcc &> /dev/null; then
     echo "ERROR: nvcc (CUDA compiler) not found in PATH"
     echo "Please install CUDA Toolkit 12.0+ and ensure nvcc is in PATH"
@@ -41,9 +41,14 @@ fi
 GCC_VERSION=$(gcc --version | head -1)
 echo "✓ GCC found: $GCC_VERSION"
 
+# Check for gflags (optional - will try to install if missing)
+if ! command -v pkg-config &> /dev/null || ! pkg-config --exists gflags; then
+    echo "⚠ gflags not found - will attempt to install or use compile.sh instead"
+fi
+
 # Step 2: Clone repository
 echo ""
-echo "[2/4] Cloning SMaT repository..."
+echo "[2/5] Cloning SMaT repository..."
 if [ -d "${SMAT_DIR}" ]; then
     echo "Directory already exists: ${SMAT_DIR}"
     read -p "Update existing installation? (y/n) " -n 1 -r
@@ -59,9 +64,34 @@ else
 fi
 echo "✓ Repository ready at ${SMAT_DIR}"
 
-# Step 3: Build CUDA binaries
+# Step 3: Try to build/install gflags if needed
 echo ""
-echo "[3/4] Building SMaT CUDA kernels..."
+echo "[3/5] Checking gflags dependency..."
+GFLAGS_FOUND=0
+
+# Check if gflags is already available
+if pkg-config --exists gflags 2>/dev/null; then
+    echo "✓ gflags found via pkg-config"
+    GFLAGS_FOUND=1
+elif [ -f "/usr/include/gflags/gflags.h" ] || [ -f "/usr/local/include/gflags/gflags.h" ]; then
+    echo "✓ gflags headers found in system"
+    GFLAGS_FOUND=1
+fi
+
+# If not found, suggest installation
+if [ $GFLAGS_FOUND -eq 0 ]; then
+    echo "⚠ gflags not found. Attempting to use compile.sh (which may not need gflags)"
+    echo ""
+    echo "If compilation fails, install gflags manually:"
+    echo "  Ubuntu/Debian: sudo apt-get install libgflags-dev"
+    echo "  CentOS/RHEL:   sudo yum install gflags-devel"
+    echo "  From source:   git clone https://github.com/gflags/gflags.git && cd gflags && mkdir build && cd build && cmake .. && make && sudo make install"
+    echo ""
+fi
+
+# Step 4: Build CUDA binaries
+echo ""
+echo "[4/5] Building SMaT CUDA kernels..."
 cd "${SMAT_DIR}"
 
 # Try the provided compile script first
@@ -85,9 +115,9 @@ fi
 
 echo "✓ Build completed"
 
-# Step 4: Verify binary
+# Step 5: Verify binary
 echo ""
-echo "[4/4] Verifying installation..."
+echo "[5/5] Verifying installation..."
 BINARY_PATHS=(
     "${SMAT_DIR}/src/cuda_hgemm/output/bin/hgemm"
     "${SMAT_DIR}/build/bin/hgemm"
