@@ -2,8 +2,8 @@ variables:
   mtx: 'datasets/matrices_list_mtx.txt'
   perm: 
     - random1D
-    - degree_perm
-    - gray_perm
+    - SB_degree
+    - SB_gray
   operator:
     - cusparse_csr_spmm
     - cusparse_bsr_spmm

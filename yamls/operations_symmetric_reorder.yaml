@@ -2,12 +2,12 @@ variables:
   mtx: 'datasets/matrices_list_mtx.txt'
   perm: 
     - random1D
-    - amd_perm
-    - degree_perm
-    - metis_perm
-    - rcm_perm
-    - rabbit_perm
-    - patoh_perm
+    - SB_amd
+    - SB_degree
+    - SB_metis
+    - SB_rcm
+    - SB_rabbit
+    - SB_patoh
 
   operator:
     - cusparse_csr_spmm

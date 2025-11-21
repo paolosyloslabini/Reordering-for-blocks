@@ -39,9 +39,11 @@ def main():
     B_gpu = cp.random.randn(n, args.n_cols, dtype=cp.float32)
     C_gpu = cp.random.randn(m, args.n_cols, dtype=cp.float32)
     
-    # Time the operation
+    # Time the operation (touch result to ensure computation)
     def spmm_op():
-        return args.alpha * A_gpu.dot(B_gpu) + args.beta * C_gpu
+        result = args.alpha * A_gpu.dot(B_gpu) + args.beta * C_gpu
+        _ = result[0, 0]  # Force evaluation
+        return result
     
     avg_time_ms = time_operation(spmm_op, args.n_iterations)
     

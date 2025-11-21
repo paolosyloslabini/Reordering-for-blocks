@@ -101,6 +101,9 @@ def convert_to_gpu(A_cpu, sparse_format='csr', blocksize=8):
     if sparse_format == 'csr':
         return cupyx_sp.csr_matrix(A_cpu)
     elif sparse_format == 'bsr':
+        if blocksize is None:
+            raise ValueError("blocksize must be specified for BSR format")
+        blocksize = int(blocksize)  # Ensure it's an int
         A_bsr_cpu = A_cpu.tobsr(blocksize=(blocksize, blocksize))
         return cupyx_sp.bsr_matrix(A_bsr_cpu)
     elif sparse_format == 'coo':
