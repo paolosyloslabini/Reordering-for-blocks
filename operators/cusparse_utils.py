@@ -104,6 +104,16 @@ def convert_to_gpu(A_cpu, sparse_format='csr', blocksize=8):
         if blocksize is None:
             raise ValueError("blocksize must be specified for BSR format")
         blocksize = int(blocksize)  # Ensure it's an int
+        
+        # Pad matrix if dimensions are not divisible by blocksize
+        m, n = A_cpu.shape
+        m_pad = -(-m // blocksize) * blocksize  # Ceiling division
+        n_pad = -(-n // blocksize) * blocksize
+        
+        if m_pad != m or n_pad != n:
+            # Resize matrix to padded dimensions (fills with zeros)
+            A_cpu = A_cpu.resize((m_pad, n_pad))
+        
         A_bsr_cpu = A_cpu.tobsr(blocksize=(blocksize, blocksize))
         return cupyx_sp.bsr_matrix(A_bsr_cpu)
     elif sparse_format == 'coo':
