@@ -34,6 +34,27 @@ def find_smat_binary():
     )
 
 
+def setup_smat_environment():
+    """
+    Set up environment variables for smat binary execution.
+    Adds locally installed gflags library path to LD_LIBRARY_PATH.
+    """
+    env = os.environ.copy()
+    
+    # Check for locally installed gflags
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    gflags_lib_path = os.path.join(script_dir, "smat/gflags_install/lib")
+    
+    if os.path.exists(gflags_lib_path):
+        # Add gflags lib path to LD_LIBRARY_PATH
+        if 'LD_LIBRARY_PATH' in env:
+            env['LD_LIBRARY_PATH'] = f"{gflags_lib_path}:{env['LD_LIBRARY_PATH']}"
+        else:
+            env['LD_LIBRARY_PATH'] = gflags_lib_path
+    
+    return env
+
+
 def run_smat_spmm(matrix_path, perm_path=None, perm_type='ROW', 
                   n_cols=32, blocksize=8, n_iterations=5, 
                   alpha=1.0, beta=0.0, dtype=np.float32):
@@ -109,7 +130,8 @@ def run_smat_spmm(matrix_path, perm_path=None, perm_type='ROW',
             cmd,
             capture_output=True,
             text=True,
-            timeout=300  # 5 minute timeout
+            timeout=300,  # 5 minute timeout
+            env=setup_smat_environment()  # Set up environment with gflags lib path
         )
         total_ms = (time.perf_counter() - t0) * 1000
         
