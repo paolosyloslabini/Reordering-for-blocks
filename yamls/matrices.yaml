@@ -10,3 +10,14 @@ small-matrices-test:
     min_nnzs: 10000
     max_nnzs: 100000
     limit: 7
+
+big-matrices-test:
+    min_nnzs: 500000
+    max_nnzs: 1000000
+    limit: 5
+
+all-matrices:
+  suite_sparse_matrix_range:
+    min_nnzs: 10000
+    max_nnzs: 1000000
+
