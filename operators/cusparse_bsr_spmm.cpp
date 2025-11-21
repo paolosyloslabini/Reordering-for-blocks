@@ -95,7 +95,7 @@ CSRMatrix readMatrixMarketCSR(const char* filename) {
 }
 
 void printTimer(const char* name, double ms) {
-    std::cout << "<Timer name=\"" << name << "\" value=\"" << ms << "\"/>" << std::endl;
+    std::cout << "<Timer>[" << name << "] " << ms << " ms" << std::endl;
 }
 
 int main(int argc, char** argv) {
