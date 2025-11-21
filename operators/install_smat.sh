@@ -68,6 +68,7 @@ cd "${SMAT_DIR}"
 if [ -f "src/cuda_hgemm/compile.sh" ]; then
     echo "Using provided compile.sh script..."
     cd src/cuda_hgemm
+    chmod +x compile.sh build.sh 2>/dev/null || true
     bash compile.sh
     cd "${SMAT_DIR}"
 elif [ -f "CMakeLists.txt" ]; then
