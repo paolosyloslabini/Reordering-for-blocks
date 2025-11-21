@@ -9,18 +9,19 @@ import argparse
 import cupy as cp
 import time
 from cusparse_utils import load_and_permute_matrix, convert_to_gpu, time_operation, print_timer
+from config import ALPHA_DEFAULT, BETA_DEFAULT, SPMM_N_COLS_DEFAULT, N_ITERATIONS_DEFAULT, BSR_BLOCKSIZE_DEFAULT, PERM_TYPE_DEFAULT
 
 
 def main():
     parser = argparse.ArgumentParser(description='cuSPARSE BSR SpMM using CuPy')
     parser.add_argument('matrix_path', help='Path to Matrix Market file')
     parser.add_argument('--perm', type=str, default=None, help='Path to permutation file')
-    parser.add_argument('--perm-type', type=str, default='ROW', help='Type of permutation: ROW, SYMMETRIC, or ASYMMETRIC (default: ROW)')
-    parser.add_argument('--alpha', type=float, default=1.0, help='Alpha scalar (default: 1.0)')
-    parser.add_argument('--beta', type=float, default=0.0, help='Beta scalar (default: 0.0)')
-    parser.add_argument('--n-cols', type=int, default=32, help='Number of columns in dense matrix B (default: 32)')
-    parser.add_argument('--n-iterations', type=int, default=5, help='Number of timing iterations (default: 5)')
-    parser.add_argument('--blocksize', type=int, default=8, help='Block size for BSR format (default: 8)')
+    parser.add_argument('--perm-type', type=str, default=PERM_TYPE_DEFAULT, help=f'Type of permutation: ROW, SYMMETRIC, or ASYMMETRIC (default: {PERM_TYPE_DEFAULT})')
+    parser.add_argument('--alpha', type=float, default=ALPHA_DEFAULT, help=f'Alpha scalar (default: {ALPHA_DEFAULT})')
+    parser.add_argument('--beta', type=float, default=BETA_DEFAULT, help=f'Beta scalar (default: {BETA_DEFAULT})')
+    parser.add_argument('--n-cols', type=int, default=SPMM_N_COLS_DEFAULT, help=f'Number of columns in dense matrix B (default: {SPMM_N_COLS_DEFAULT})')
+    parser.add_argument('--n-iterations', type=int, default=N_ITERATIONS_DEFAULT, help=f'Number of timing iterations (default: {N_ITERATIONS_DEFAULT})')
+    parser.add_argument('--blocksize', type=int, default=BSR_BLOCKSIZE_DEFAULT, help=f'Block size for BSR format (default: {BSR_BLOCKSIZE_DEFAULT})')
     
     args = parser.parse_args()
     
@@ -39,11 +40,9 @@ def main():
     B_gpu = cp.random.randn(n, args.n_cols, dtype=cp.float32)
     C_gpu = cp.random.randn(m, args.n_cols, dtype=cp.float32)
     
-    # Time the operation (touch result to ensure computation)
+    # Time the operation
     def spmm_op():
-        result = args.alpha * A_gpu.dot(B_gpu) + args.beta * C_gpu
-        _ = result[0, 0]  # Force evaluation
-        return result
+        return args.alpha * A_gpu.dot(B_gpu) + args.beta * C_gpu
     
     avg_time_ms = time_operation(spmm_op, args.n_iterations)
     

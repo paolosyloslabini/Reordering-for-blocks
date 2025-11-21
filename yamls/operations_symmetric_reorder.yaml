@@ -8,12 +8,9 @@ variables:
     - SB_rcm
     - SB_rabbit
     - SB_patoh
-
-  operator:
-    - cusparse_csr_spmm
-    - cusparse_bsr_spmm
-    - cusparse_csr_spmv
-    - cusparse_bsr_spmv
+  block_size:
+    - 8
+    - 32
 
 preprocess: |
   source ~/.venv/bin/activate
@@ -24,5 +21,12 @@ jobs:
   - config: "gpu"
     config_jobs:
 
-      - tag: "CUSPARSE_SYMMETRIC"
-        command: "python3 operators/{operator}.py {mtx} --perm perms/{perm}/$mtx_name.perm --perm-type SYMMETRIC"
+      - tag: "CUSPARSE_SPMV_BSR_SYMMETRIC"
+        command: "python3 operators/cusparse_bsr_spmv.py {mtx} --perm perms/{perm}/$mtx_name.perm --blocksize {block_size} --perm-type SYMMETRIC"
+      - tag: "CUSPARSE_SPMV_CSR_SYMMETRIC"
+        command: "python3 operators/cusparse_csr_spmv.py {mtx} --perm perms/{perm}/$mtx_name.perm --perm-type SYMMETRIC"
+
+      - tag: "CUSPARSE_SPMM_BSR_SYMMETRIC"
+        command: "python3 operators/cusparse_bsr_spmm.py {mtx} --perm perms/{perm}/$mtx_name.perm --blocksize {block_size} --perm-type SYMMETRIC"
+      - tag: "CUSPARSE_SPMM_CSR_SYMMETRIC"
+        command: "python3 operators/cusparse_csr_spmm.py {mtx} --perm perms/{perm}/$mtx_name.perm --perm-type SYMMETRIC"
