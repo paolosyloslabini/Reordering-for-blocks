@@ -5,7 +5,6 @@ variables:
     - SB_degree
     - SB_gray
   block_size:
-    - 8
     - 32
 
 preprocess: |

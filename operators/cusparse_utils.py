@@ -111,8 +111,11 @@ def convert_to_gpu(A_cpu, sparse_format='csr', blocksize=8):
         n_pad = -(-n // blocksize) * blocksize
         
         if m_pad != m or n_pad != n:
-            # Resize matrix to padded dimensions (fills with zeros)
-            A_cpu = A_cpu.resize((m_pad, n_pad))
+            # Create padded matrix and copy data
+            from scipy.sparse import csr_matrix as scipy_csr
+            A_padded = scipy_csr((m_pad, n_pad), dtype=A_cpu.dtype)
+            A_padded[:m, :n] = A_cpu
+            A_cpu = A_padded
         
         A_bsr_cpu = A_cpu.tobsr(blocksize=(blocksize, blocksize))
         return cupyx_sp.bsr_matrix(A_bsr_cpu)

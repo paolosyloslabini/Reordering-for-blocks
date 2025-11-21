@@ -47,10 +47,10 @@ def main():
         
         # Print smat output in a box
         if results['smat_output'].strip():
-            print("\n┌─── SMaT Output " + "─" * 100 + "┐")
+            print("\n┌─── SMaT Output " + "─" * 60 + "┐")
             for line in results['smat_output'].strip().split('\n'):
-                print(f"│ {line:<116} │")
-            print("└" + "─" * 118 + "┘\n")
+                print(f"│ {line[:76]:<76} │")
+            print("└" + "─" * 78 + "┘\n")
         
         return 0
         

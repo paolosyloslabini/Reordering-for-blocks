@@ -1,7 +1,6 @@
 variables:
   mtx: 'datasets/matrices_list_mtx.txt'
   block_size:
-    - 8
     - 32
 
 preprocess: |
@@ -18,10 +17,10 @@ jobs:
 #      - tag: "CUSPARSE_SPMV_CSR_NO_REORDER"
 #        command: "python3 operators/cusparse_csr_spmv.py {mtx}"
 
-#      - tag: "CUSPARSE_SPMM_BSR_NO_REORDER"
-#        command: "python3 operators/cusparse_bsr_spmm.py {mtx} --blocksize {block_size}"
-#      - tag: "CUSPARSE_SPMM_CSR_NO_REORDER"
-#        command: "python3 operators/cusparse_csr_spmm.py {mtx}"
+      - tag: "CUSPARSE_SPMM_BSR_NO_REORDER"
+        command: "python3 operators/cusparse_bsr_spmm.py {mtx} --blocksize {block_size}"
+      - tag: "CUSPARSE_SPMM_CSR_NO_REORDER"
+        command: "python3 operators/cusparse_csr_spmm.py {mtx}"
 
       - tag: "SMAT_SPMM_NO_REORDER"
         command: "python3 operators/smat_spmm.py {mtx} --blocksize {block_size}"
