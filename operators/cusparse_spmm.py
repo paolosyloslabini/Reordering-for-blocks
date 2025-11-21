@@ -8,7 +8,8 @@ No fallbacks - raises error if GPU/cuSPARSE unavailable.
 import sys
 import argparse
 import cupy as cp
-from cusparse_utils import load_and_permute_matrix, convert_to_gpu, time_operation
+import time
+from cusparse_utils import load_and_permute_matrix, convert_to_gpu, time_operation, print_timer
 
 
 def main():
@@ -16,8 +17,8 @@ def main():
     parser.add_argument('matrix_path', help='Path to Matrix Market file')
     parser.add_argument('--format', type=str, default='csr', choices=['csr', 'bsr', 'coo'],
                         help='Sparse matrix format: csr, bsr, or coo (default: csr)')
-    parser.add_argument('--perm_rows', type=str, default=None, help='Path to row permutation file)')
-    parser.add_argument('--perm_cols', type=str, default=None, help='Path to cols permutation file)')
+    parser.add_argument('--perm', type=str, default=None, help='Path to permutation file')
+    parser.add_argument('--perm-type', type=str, default='ROW', help='Type of permutation: ROW, SYMMETRIC, or ASYMMETRIC (default: ROW)')
     parser.add_argument('--alpha', type=float, default=1.0, help='Alpha scalar (default: 1.0)')
     parser.add_argument('--beta', type=float, default=0.0, help='Beta scalar (default: 0.0)')
     parser.add_argument('--n-cols', type=int, default=32, help='Number of columns in dense matrix B (default: 32)')
@@ -27,11 +28,15 @@ def main():
     args = parser.parse_args()
     
     # Load and permute matrix
-    A_cpu = load_and_permute_matrix(args.matrix_path, args.perm_rows, args.perm_cols)
+    t0 = time.perf_counter()
+    A_cpu = load_and_permute_matrix(args.matrix_path, args.perm, args.perm_type)
+    loading_ms = (time.perf_counter() - t0) * 1000
     m, n = A_cpu.shape
 
     # Convert to requested format and transfer to GPU
+    t0 = time.perf_counter()
     A_gpu = convert_to_gpu(A_cpu, args.format, args.blocksize)
+    transfer_ms = (time.perf_counter() - t0) * 1000
     
     # Create dense matrix B (n x n_cols) and C (m x n_cols) on GPU
     B_gpu = cp.random.randn(n, args.n_cols, dtype=cp.float32)
@@ -42,8 +47,10 @@ def main():
         return args.alpha * A_gpu.dot(B_gpu) + args.beta * C_gpu
     
     avg_time_ms = time_operation(spmm_op, args.n_iterations)
-    print(f"FORMAT:{args.format.upper()}")
-    print(f"TIMING_MS:{avg_time_ms:.3f}")
+    
+    print_timer("loading", loading_ms)
+    print_timer("transfer", transfer_ms)
+    print_timer("operation", avg_time_ms)
     return 0
 
 

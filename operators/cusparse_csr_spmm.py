@@ -14,8 +14,8 @@ from cusparse_utils import load_and_permute_matrix, convert_to_gpu, time_operati
 def main():
     parser = argparse.ArgumentParser(description='Minimal cuSPARSE CSR SpMM using CuPy')
     parser.add_argument('matrix_path', help='Path to Matrix Market file')
-    parser.add_argument('--perm_rows', type=str, default=None, help='Path to row permutation file)')
-    parser.add_argument('--perm_cols', type=str, default=None, help='Path to cols permutation file)')
+    parser.add_argument('--perm', type=str, default=None, help='Path to permutation file')
+    parser.add_argument('--perm-type', type=str, default='ROW', help='Type of permutation: ROW, SYMMETRIC, or ASYMMETRIC (default: ROW)')
     parser.add_argument('--alpha', type=float, default=1.0, help='Alpha scalar (default: 1.0)')
     parser.add_argument('--beta', type=float, default=0.0, help='Beta scalar (default: 0.0)')
     parser.add_argument('--n-cols', type=int, default=32, help='Number of columns in dense matrix B (default: 32)')
@@ -25,7 +25,7 @@ def main():
     
     # Load and permute matrix
     t0 = time.perf_counter()
-    A_cpu = load_and_permute_matrix(args.matrix_path, args.perm_rows, args.perm_cols)
+    A_cpu = load_and_permute_matrix(args.matrix_path, args.perm, args.perm_type)
     loading_ms = (time.perf_counter() - t0) * 1000
     m, n = A_cpu.shape
 
