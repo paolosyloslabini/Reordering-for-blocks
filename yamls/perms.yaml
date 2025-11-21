@@ -8,11 +8,17 @@ jobs:
   - config: "perm"
     config_jobs:
 
-      - tag: "random"
+      - tag: "random1D"
         preprocess: |
-          mkdir -p perms/graphblas
-          perm_path=perms/graphblas/$mtx_name.perm
-        command: "python3 MtxPerm/RANDOM/random_permutation_graphblas.py {mtx} --output $perm_path"
+          mkdir -p perms/random1D
+          perm_path=perms/random1D/$mtx_name.perm
+        command: "python3 MtxPerm/RANDOM/GB_random_permutation_1d.py {mtx} --output $perm_path"
+
+      - tag: "random2D"
+        preprocess: |
+          mkdir -p perms/random2D
+          perm_path=perms/random2D/$mtx_name.perm
+        command: "python3 MtxPerm/RANDOM/GB_random_permutation_2d.py {mtx} --output $perm_path"
 
       - tag: "SB_degree"
         preprocess: |

@@ -1,0 +1,19 @@
+variables:
+  mtx: 'datasets/matrices_list_mtx.txt'
+  operator:
+    - cusparse_csr_spmm
+    - cusparse_bsr_spmm
+    - cusparse_csr_spmv
+    - cusparse_bsr_spmv
+
+preprocess: |
+  source ~/.venv/bin/activate
+  mtx_name=$(basename {mtx} .mtx)
+  module load CUDA/
+
+jobs:
+  - config: "gpu"
+    config_jobs:
+
+      - tag: "CUSPARSE_NO_REORDER"
+        command: "python3 operators/{operator}.py {mtx}"

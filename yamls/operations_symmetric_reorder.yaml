@@ -1,0 +1,28 @@
+variables:
+  mtx: 'datasets/matrices_list_mtx.txt'
+  perm: 
+    - random1D
+    - amd_perm
+    - degree_perm
+    - metis_perm
+    - rcm_perm
+    - rabbit_perm
+    - patoh_perm
+
+  operator:
+    - cusparse_csr_spmm
+    - cusparse_bsr_spmm
+    - cusparse_csr_spmv
+    - cusparse_bsr_spmv
+
+preprocess: |
+  source ~/.venv/bin/activate
+  mtx_name=$(basename {mtx} .mtx)
+  module load CUDA/
+
+jobs:
+  - config: "gpu"
+    config_jobs:
+
+      - tag: "CUSPARSE_SYMMETRIC"
+        command: "python3 operators/{operator}.py {mtx} --perm perms/{perm}/$mtx_name.perm --perm-type SYMMETRIC"
