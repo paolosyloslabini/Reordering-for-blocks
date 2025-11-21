@@ -214,6 +214,16 @@ int main(int argc, char** argv) {
     CHECK_CUDA(cudaMalloc(&d_bsrVal, bsrValSize));
     CHECK_CUDA(cudaMalloc(&d_bsrColInd, bsrColIndSize));
     
+    // Validate CSR data before conversion
+    std::vector<int> h_csrRowPtr(csr.m + 1);
+    CHECK_CUDA(cudaMemcpy(h_csrRowPtr.data(), d_csrRowPtr, (csr.m + 1) * sizeof(int), cudaMemcpyDeviceToHost));
+    std::cerr << "CSR validation: rowPtr[0]=" << h_csrRowPtr[0] << ", rowPtr[" << csr.m << "]=" << h_csrRowPtr[csr.m] 
+              << " (should be " << csr.nnz << ")" << std::endl;
+    if (h_csrRowPtr[csr.m] != csr.nnz) {
+        std::cerr << "ERROR: CSR rowPtr inconsistent!" << std::endl;
+        return 1;
+    }
+    
     CHECK_CUSPARSE(cusparseScsr2bsr(
         handle,
         CUSPARSE_DIRECTION_ROW,

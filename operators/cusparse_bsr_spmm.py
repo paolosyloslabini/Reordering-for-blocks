@@ -38,6 +38,11 @@ def main():
             mat = mat[:, col_perm]
             print(f"DEBUG: After col perm: {mat.shape[0]} x {mat.shape[1]}, nnz={mat.nnz}", file=sys.stderr)
     
+    # Ensure the matrix is in canonical CSR format (sorted indices, no duplicates)
+    mat.sort_indices()
+    mat.sum_duplicates()
+    print(f"DEBUG: After sort/dedup: {mat.shape[0]} x {mat.shape[1]}, nnz={mat.nnz}", file=sys.stderr)
+    
     # Save permuted matrix to temp file
     with tempfile.NamedTemporaryFile(suffix=".mtx", delete=False) as tmp:
         scipy.io.mmwrite(tmp.name, mat)
