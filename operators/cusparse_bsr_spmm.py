@@ -6,6 +6,12 @@ import tempfile
 import os
 import sys
 from cusparse_utils import load_and_permute_matrix
+from config import (
+    BSR_BLOCKSIZE_DEFAULT,
+    PERM_TYPE_DEFAULT,
+    SPMM_N_COLS_DEFAULT,
+    N_ITERATIONS_DEFAULT
+)
 
 
 def main():
@@ -13,10 +19,10 @@ def main():
     parser = argparse.ArgumentParser(description="Wrapper for C++ cuSPARSE BSR SpMM operator with permutation support.")
     parser.add_argument("mtx", help="Input matrix Market file")
     parser.add_argument("--perm", help="Permutation file (optional)")
-    parser.add_argument("--blocksize", type=int, default=8, help="Block size for BSR conversion")
-    parser.add_argument("--perm-type", choices=["ROW", "SYMMETRIC", "ASYMMETRIC"], default="ROW", help="Permutation type")
-    parser.add_argument("--n-cols", type=int, default=32, help="Number of columns in dense B")
-    parser.add_argument("--n-iterations", type=int, default=5, help="Number of SpMM iterations")
+    parser.add_argument("--blocksize", type=int, default=BSR_BLOCKSIZE_DEFAULT, help="Block size for BSR conversion")
+    parser.add_argument("--perm-type", choices=["ROW", "SYMMETRIC", "ASYMMETRIC"], default=PERM_TYPE_DEFAULT, help="Permutation type")
+    parser.add_argument("--n-cols", type=int, default=SPMM_N_COLS_DEFAULT, help="Number of columns in dense B")
+    parser.add_argument("--n-iterations", type=int, default=N_ITERATIONS_DEFAULT, help="Number of SpMM iterations")
     args = parser.parse_args()
 
     # Load and permute matrix (uses shared utility function)
