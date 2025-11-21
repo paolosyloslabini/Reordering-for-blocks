@@ -3,11 +3,11 @@ variables:
   perm: 
     - random1D
     - SB_amd
-    - SB_degree
-    - SB_metis
-    - SB_rcm
-    - SB_rabbit
-    - SB_patoh
+  #  - SB_degree
+  #  - SB_metis
+  #  - SB_rcm
+  #  - SB_rabbit
+  #  - SB_patoh
   block_size:
     - 32
 
