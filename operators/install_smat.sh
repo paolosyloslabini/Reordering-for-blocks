@@ -80,13 +80,36 @@ fi
 
 # If not found, suggest installation
 if [ $GFLAGS_FOUND -eq 0 ]; then
-    echo "⚠ gflags not found. Attempting to use compile.sh (which may not need gflags)"
+    echo "⚠ gflags not found. Installing locally to ${SMAT_DIR}/gflags_install"
     echo ""
-    echo "If compilation fails, install gflags manually:"
-    echo "  Ubuntu/Debian: sudo apt-get install libgflags-dev"
-    echo "  CentOS/RHEL:   sudo yum install gflags-devel"
-    echo "  From source:   git clone https://github.com/gflags/gflags.git && cd gflags && mkdir build && cd build && cmake .. && make && sudo make install"
-    echo ""
+    
+    # Build gflags locally
+    GFLAGS_INSTALL_DIR="${SMAT_DIR}/gflags_install"
+    cd /tmp
+    
+    if [ ! -d "gflags" ]; then
+        echo "Cloning gflags..."
+        git clone --depth 1 https://github.com/gflags/gflags.git
+    fi
+    
+    cd gflags
+    mkdir -p build
+    cd build
+    
+    echo "Building gflags..."
+    cmake .. -DCMAKE_INSTALL_PREFIX="${GFLAGS_INSTALL_DIR}" -DBUILD_SHARED_LIBS=ON -DBUILD_STATIC_LIBS=ON
+    make -j$(nproc)
+    make install
+    
+    echo "✓ gflags installed to ${GFLAGS_INSTALL_DIR}"
+    
+    # Set environment for subsequent CMake
+    export CMAKE_PREFIX_PATH="${GFLAGS_INSTALL_DIR}:${CMAKE_PREFIX_PATH}"
+    export LD_LIBRARY_PATH="${GFLAGS_INSTALL_DIR}/lib:${LD_LIBRARY_PATH}"
+    export PKG_CONFIG_PATH="${GFLAGS_INSTALL_DIR}/lib/pkgconfig:${PKG_CONFIG_PATH}"
+    
+    cd "${SMAT_DIR}"
+    GFLAGS_FOUND=1
 fi
 
 # Step 4: Build CUDA binaries
@@ -105,6 +128,13 @@ elif [ -f "CMakeLists.txt" ]; then
     echo "Using CMake build system..."
     mkdir -p build
     cd build
+    
+    # Add gflags path if we installed it locally
+    GFLAGS_INSTALL_DIR="${SMAT_DIR}/gflags_install"
+    if [ -d "${GFLAGS_INSTALL_DIR}" ]; then
+        export CMAKE_PREFIX_PATH="${GFLAGS_INSTALL_DIR}:${CMAKE_PREFIX_PATH}"
+    fi
+    
     cmake .. -DCMAKE_CUDA_ARCHITECTURES=80  # A100: 80, H100: 90
     make -j$(nproc)
     cd "${SMAT_DIR}"
