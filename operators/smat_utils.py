@@ -105,9 +105,10 @@ def run_smat_spmm(matrix_path, perm_path=None, perm_type='ROW',
         if not isinstance(A_cpu, csr_matrix):
             A_cpu = A_cpu.tocsr()
         
-        # Sum duplicates before FP16 conversion
-        # FP16 astype() has issues with duplicate entries in scipy
-        A_cpu.sum_duplicates()
+        # Ensure indices are sorted before FP16 conversion
+        # Permutation operations may leave indices unsorted, and scipy's
+        # astype() requires canonical format (sorted indices, no duplicates)
+        A_cpu.sort_indices()
         
         # SMaT uses FP16 for tensor cores, so convert to float16 before writing
         # This prevents overflow/underflow issues when smat reads the matrix
