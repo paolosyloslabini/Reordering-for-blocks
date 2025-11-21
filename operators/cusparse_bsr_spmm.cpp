@@ -127,12 +127,17 @@ int main(int argc, char** argv) {
     CSRMatrix csr = readMatrixMarketCSR(matrixFile);
     auto end = std::chrono::high_resolution_clock::now();
     double loadingMs = std::chrono::duration<double, std::milli>(end - start).count();
+    
+    std::cerr << "Matrix dimensions: " << csr.m << " x " << csr.n << ", nnz = " << csr.nnz << std::endl;
 
     // Calculate padded dimensions for BSR (must be multiple of blockDim)
     int mb = (csr.m + blockDim - 1) / blockDim;
     int nb = (csr.n + blockDim - 1) / blockDim;
     int padded_m = mb * blockDim;
     int padded_n = nb * blockDim;
+    
+    std::cerr << "Block dimensions: mb=" << mb << ", nb=" << nb 
+              << ", padded: " << padded_m << "x" << padded_n << std::endl;
 
     // Allocate device memory for CSR
     float *d_csrVal, *d_B, *d_C;
