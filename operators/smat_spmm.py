@@ -45,11 +45,12 @@ def main():
         operation_ms = results.get('smat_kernel_ms') or results['smat_total_ms']
         print_timer("operation", operation_ms)
         
-        # Optionally print full smat output for debugging
-        if '--verbose' in sys.argv:
-            print("\n=== SMaT Output ===")
-            print(results['smat_output'])
-            print("===================\n")
+        # Print smat output in a box
+        if results['smat_output'].strip():
+            print("\n┌─── SMaT Output " + "─" * 60 + "┐")
+            for line in results['smat_output'].strip().split('\n'):
+                print(f"│ {line[:76]:<76} │")
+            print("└" + "─" * 78 + "┘\n")
         
         return 0
         
