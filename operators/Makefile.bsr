@@ -1,0 +1,21 @@
+# Makefile for cuSPARSE BSR operators
+# Requires CUDA toolkit with cuSPARSE
+
+NVCC = nvcc
+CUDA_PATH ?= /usr/local/cuda
+CXXFLAGS = -O3 -std=c++11
+NVCCFLAGS = -O3 -arch=sm_80 -std=c++11
+INCLUDES = -I$(CUDA_PATH)/include
+LIBS = -L$(CUDA_PATH)/lib64 -lcusparse -lcudart
+
+TARGETS = cusparse_bsr_spmm
+
+all: $(TARGETS)
+
+cusparse_bsr_spmm: cusparse_bsr_spmm.cpp
+	$(NVCC) $(NVCCFLAGS) $(INCLUDES) $< -o $@ $(LIBS)
+
+clean:
+	rm -f $(TARGETS)
+
+.PHONY: all clean

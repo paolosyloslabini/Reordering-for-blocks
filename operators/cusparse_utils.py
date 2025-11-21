@@ -92,8 +92,8 @@ def convert_to_gpu(A_cpu, sparse_format='csr', blocksize=8):
     
     Args:
         A_cpu: CPU sparse matrix (CSR format)
-        sparse_format: Target format ('csr', 'bsr', 'coo')
-        blocksize: Block size for BSR format
+        sparse_format: Target format ('csr', 'coo')
+        blocksize: Ignored (BSR uses C++ implementation)
     
     Returns:
         GPU sparse matrix in requested format
@@ -101,29 +101,11 @@ def convert_to_gpu(A_cpu, sparse_format='csr', blocksize=8):
     if sparse_format == 'csr':
         return cupyx_sp.csr_matrix(A_cpu)
     elif sparse_format == 'bsr':
-        if blocksize is None:
-            raise ValueError("blocksize must be specified for BSR format")
-        blocksize = int(blocksize)  # Ensure it's an int
-        
-        # Pad matrix if dimensions are not divisible by blocksize
-        m, n = A_cpu.shape
-        m_pad = -(-m // blocksize) * blocksize  # Ceiling division
-        n_pad = -(-n // blocksize) * blocksize
-        
-        if m_pad != m or n_pad != n:
-            # Create padded matrix using lil format (efficient for modifications)
-            from scipy.sparse import lil_matrix
-            A_lil = lil_matrix((m_pad, n_pad), dtype=A_cpu.dtype)
-            A_lil[:m, :n] = A_cpu.tolil()
-            A_cpu = A_lil.tocsr()
-        
-        # Transfer to GPU as CSR first, then convert to BSR on GPU
-        # According to CuPy docs: pass scipy sparse matrix to constructor
-        A_gpu_csr = cupyx_sp.csr_matrix(A_cpu)
-        
-        # Convert to BSR on GPU using tobsr() method
-        A_gpu_bsr = A_gpu_csr.tobsr(blocksize=(blocksize, blocksize))
-        return A_gpu_bsr
+        # BSR format is handled by C++ binary (operators/cusparse_bsr_spmm)
+        # This should not be called from Python operators
+        raise NotImplementedError(
+            "BSR format not supported in Python. Use C++ binary: operators/cusparse_bsr_spmm"
+        )
     elif sparse_format == 'coo':
         return cupyx_sp.coo_matrix(A_cpu.tocoo())
     else:

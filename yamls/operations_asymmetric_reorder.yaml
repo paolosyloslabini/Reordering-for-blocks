@@ -20,7 +20,7 @@ jobs:
 #        command: "python3 operators/cusparse_csr_spmv.py {mtx} --perm perms/{perm}/$mtx_name.perm --perm-type ASYMMETRIC"
 
       - tag: "CUSPARSE_SPMM_BSR_ASYMMETRIC"
-        command: "python3 operators/cusparse_bsr_spmm.py {mtx} --perm perms/{perm}/$mtx_name.perm --blocksize {block_size} --perm-type ASYMMETRIC"
+        command: "python3 operators/cusparse_bsr_spmm_wrapper.py {mtx} --perm perms/{perm}/$mtx_name.perm --blocksize {block_size} --perm-type ASYMMETRIC"
       - tag: "CUSPARSE_SPMM_CSR_ASYMMETRIC"
         command: "python3 operators/cusparse_csr_spmm.py {mtx} --perm perms/{perm}/$mtx_name.perm --perm-type ASYMMETRIC"
 
