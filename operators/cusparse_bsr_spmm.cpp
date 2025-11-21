@@ -219,7 +219,13 @@ int main(int argc, char** argv) {
         d_bsrVal, d_bsrRowPtr, d_bsrColInd));
     #pragma GCC diagnostic pop
     
+    CHECK_CUDA(cudaDeviceSynchronize());
     std::cerr << "BSR conversion complete: nnzb=" << nnzb << std::endl;
+    
+    // Verify BSR data on host
+    std::vector<int> h_bsrRowPtr(mb + 1);
+    CHECK_CUDA(cudaMemcpy(h_bsrRowPtr.data(), d_bsrRowPtr, (mb + 1) * sizeof(int), cudaMemcpyDeviceToHost));
+    std::cerr << "BSR row ptr check: first=" << h_bsrRowPtr[0] << ", last=" << h_bsrRowPtr[mb] << " (should be " << nnzb << ")" << std::endl;
 
     // Use legacy BSR SpMM API (generic API doesn't support BSR in CUDA 12.5)
     // cusparseSbsrmm: C = alpha * op(A) * B + beta * C
@@ -230,7 +236,7 @@ int main(int argc, char** argv) {
     #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     std::cerr << "Calling cusparseSbsrmm with: mb=" << mb << ", nCols=" << nCols 
               << ", nb=" << nb << ", nnzb=" << nnzb << ", blockDim=" << blockDim 
-              << ", ldb=" << padded_n << ", ldc=" << padded_m << std::endl;
+              << ", ldb=" << nCols << ", ldc=" << nCols << std::endl;
     CHECK_CUSPARSE(cusparseSbsrmm(
         handle,
         CUSPARSE_DIRECTION_ROW,
@@ -240,9 +246,9 @@ int main(int argc, char** argv) {
         &alpha,
         descrC,
         d_bsrVal, d_bsrRowPtr, d_bsrColInd, blockDim,
-        d_B, padded_n,
+        d_B, nCols,
         &beta,
-        d_C, padded_m));
+        d_C, nCols));
     CHECK_CUDA(cudaDeviceSynchronize());
     
     // Benchmark
@@ -263,9 +269,9 @@ int main(int argc, char** argv) {
             &alpha,
             descrC,
             d_bsrVal, d_bsrRowPtr, d_bsrColInd, blockDim,
-            d_B, padded_n,
+            d_B, nCols,
             &beta,
-            d_C, padded_m));
+            d_C, nCols));
         
         CHECK_CUDA(cudaEventRecord(stopEvent));
         CHECK_CUDA(cudaEventSynchronize(stopEvent));
