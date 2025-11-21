@@ -214,36 +214,25 @@ int main(int argc, char** argv) {
         d_bsrVal, d_bsrRowPtr, d_bsrColInd));
     #pragma GCC diagnostic pop
 
-    // Create matrix descriptors for generic API
-    // BSR matrix: mb x nb blocks, each block is blockDim x blockDim
-    // Dense matrices: must match actual padded dimensions
-    cusparseSpMatDescr_t matA;
-    cusparseDnMatDescr_t matB, matC;
-    CHECK_CUSPARSE(cusparseCreateBsr(
-        &matA, mb, nb, nnzb,
-        blockDim, blockDim,
-        d_bsrRowPtr, d_bsrColInd, d_bsrVal,
-        CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I,
-        CUSPARSE_INDEX_BASE_ZERO, CUDA_R_32F,
-        CUSPARSE_ORDER_ROW));
-    CHECK_CUSPARSE(cusparseCreateDnMat(&matB, padded_n, nCols, nCols, d_B, CUDA_R_32F, CUSPARSE_ORDER_ROW));
-    CHECK_CUSPARSE(cusparseCreateDnMat(&matC, padded_m, nCols, nCols, d_C, CUDA_R_32F, CUSPARSE_ORDER_ROW));
-    
-    // Allocate buffer
-    size_t bufferSize;
-    CHECK_CUSPARSE(cusparseSpMM_bufferSize(
-        handle, CUSPARSE_OPERATION_NON_TRANSPOSE, CUSPARSE_OPERATION_NON_TRANSPOSE,
-        &alpha, matA, matB, &beta, matC, CUDA_R_32F,
-        CUSPARSE_SPMM_ALG_DEFAULT, &bufferSize));
-    
-    void* buffer;
-    CHECK_CUDA(cudaMalloc(&buffer, bufferSize));
+    // Use legacy BSR SpMM API (generic API doesn't support BSR in CUDA 12.5)
+    // cusparseSbsrmm: C = alpha * op(A) * B + beta * C
+    // where A is BSR (mb x nb blocks), B and C are dense
     
     // Warm-up
-    CHECK_CUSPARSE(cusparseSpMM(
-        handle, CUSPARSE_OPERATION_NON_TRANSPOSE, CUSPARSE_OPERATION_NON_TRANSPOSE,
-        &alpha, matA, matB, &beta, matC, CUDA_R_32F,
-        CUSPARSE_SPMM_ALG_DEFAULT, buffer));
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    CHECK_CUSPARSE(cusparseSbsrmm(
+        handle,
+        CUSPARSE_DIRECTION_ROW,
+        CUSPARSE_OPERATION_NON_TRANSPOSE,
+        CUSPARSE_OPERATION_NON_TRANSPOSE,
+        mb, nCols, nb, nnzb,
+        &alpha,
+        descrC,
+        d_bsrVal, d_bsrRowPtr, d_bsrColInd, blockDim,
+        d_B, padded_n,
+        &beta,
+        d_C, padded_m));
     CHECK_CUDA(cudaDeviceSynchronize());
     
     // Benchmark
@@ -255,10 +244,18 @@ int main(int argc, char** argv) {
     for (int iter = 0; iter < nIterations; iter++) {
         CHECK_CUDA(cudaEventRecord(startEvent));
         
-        CHECK_CUSPARSE(cusparseSpMM(
-            handle, CUSPARSE_OPERATION_NON_TRANSPOSE, CUSPARSE_OPERATION_NON_TRANSPOSE,
-            &alpha, matA, matB, &beta, matC, CUDA_R_32F,
-            CUSPARSE_SPMM_ALG_DEFAULT, buffer));
+        CHECK_CUSPARSE(cusparseSbsrmm(
+            handle,
+            CUSPARSE_DIRECTION_ROW,
+            CUSPARSE_OPERATION_NON_TRANSPOSE,
+            CUSPARSE_OPERATION_NON_TRANSPOSE,
+            mb, nCols, nb, nnzb,
+            &alpha,
+            descrC,
+            d_bsrVal, d_bsrRowPtr, d_bsrColInd, blockDim,
+            d_B, padded_n,
+            &beta,
+            d_C, padded_m));
         
         CHECK_CUDA(cudaEventRecord(stopEvent));
         CHECK_CUDA(cudaEventSynchronize(stopEvent));
@@ -267,12 +264,10 @@ int main(int argc, char** argv) {
         CHECK_CUDA(cudaEventElapsedTime(&ms, startEvent, stopEvent));
         totalMs += ms;
     }
+    #pragma GCC diagnostic pop
     float avgMs = totalMs / nIterations;
     
     // Cleanup
-    CHECK_CUSPARSE(cusparseDestroySpMat(matA));
-    CHECK_CUSPARSE(cusparseDestroyDnMat(matB));
-    CHECK_CUSPARSE(cusparseDestroyDnMat(matC));
     CHECK_CUSPARSE(cusparseDestroyMatDescr(descrA));
     CHECK_CUSPARSE(cusparseDestroyMatDescr(descrC));
     CHECK_CUSPARSE(cusparseDestroy(handle));
@@ -284,7 +279,6 @@ int main(int argc, char** argv) {
     CHECK_CUDA(cudaFree(d_bsrColInd));
     CHECK_CUDA(cudaFree(d_B));
     CHECK_CUDA(cudaFree(d_C));
-    CHECK_CUDA(cudaFree(buffer));
     CHECK_CUDA(cudaEventDestroy(startEvent));
     CHECK_CUDA(cudaEventDestroy(stopEvent));
     
