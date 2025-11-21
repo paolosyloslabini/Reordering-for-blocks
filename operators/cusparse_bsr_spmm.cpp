@@ -18,71 +18,80 @@
         if (err != cudaSuccess) { \
             std::cerr << "CUDA error at " << __FILE__ << ":" << __LINE__ << ": " \
                       << cudaGetErrorString(err) << std::endl; \
+            exit(1); \
+        } \
+    } while (0)
 
-            // Simple CSR matrix struct
-            struct CSRMatrix {
-                int m, n, nnz;
-                std::vector<float> values;
-                std::vector<int> rowPtr;
-                std::vector<int> colInd;
-            };
+#define CHECK_CUSPARSE(call) \
+    do { \
+        cusparseStatus_t err = call; \
+        if (err != CUSPARSE_STATUS_SUCCESS) { \
+            std::cerr << "cuSPARSE error at " << __FILE__ << ":" << __LINE__ << std::endl; \
+            exit(1); \
+        } \
+    } while (0)
 
-            // Read Matrix Market file as CSR
-            CSRMatrix readMatrixMarketCSR(const char* filename) {
-                std::ifstream file(filename);
-                if (!file.is_open()) {
-                    std::cerr << "Failed to open file: " << filename << std::endl;
-                    exit(1);
-                }
-                std::string line;
-                do {
-                    std::getline(file, line);
-                } while (line[0] == '%');
-                int m, n, nnz;
-                std::istringstream iss(line);
-                iss >> m >> n >> nnz;
-                std::vector<int> row_indices(nnz), col_indices(nnz);
-                std::vector<float> values(nnz);
-                for (int i = 0; i < nnz; i++) {
-                    int row, col;
-                    float val;
-                    file >> row >> col >> val;
-                    row--; col--;
-                    row_indices[i] = row;
-                    col_indices[i] = col;
-                    values[i] = val;
-                }
-                file.close();
-                // Build CSR
-                std::vector<int> rowPtr(m + 1, 0);
-                for (int i = 0; i < nnz; i++) rowPtr[row_indices[i] + 1]++;
-                for (int i = 0; i < m; i++) rowPtr[i + 1] += rowPtr[i];
-                std::vector<int> colInd(nnz);
-                std::vector<float> csrVal(nnz);
-                std::vector<int> next(m, 0);
-                for (int i = 0; i < nnz; i++) {
-                    int row = row_indices[i];
-                    int dest = rowPtr[row] + next[row];
-                    colInd[dest] = col_indices[i];
-                    csrVal[dest] = values[i];
-                    next[row]++;
-                }
-                return {m, n, nnz, csrVal, rowPtr, colInd};
-            }
-            bsr.bsrColInd.push_back(blockCols[i][j]);
-            bsr.values.insert(bsr.values.end(), 
-                            blockData[i][j].begin(), 
-                            blockData[i][j].end());
-        }
+// Simple CSR matrix struct
+struct CSRMatrix {
+    int m, n, nnz;
+    std::vector<float> values;
+    std::vector<int> rowPtr;
+    std::vector<int> colInd;
+};
+
+// Read Matrix Market file as CSR
+CSRMatrix readMatrixMarketCSR(const char* filename) {
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        std::cerr << "Failed to open file: " << filename << std::endl;
+        exit(1);
     }
     
-    bsr.nnzb = bsr.bsrRowPtr[mb];
+    std::string line;
+    do {
+        std::getline(file, line);
+    } while (line[0] == '%');
     
-    std::cout << "Loaded matrix: " << m << "x" << n << " with " << nnz << " nonzeros" << std::endl;
-    std::cout << "BSR format: " << mb << "x" << nb << " blocks (" << blockDim << "x" << blockDim << "), " 
-              << bsr.nnzb << " non-zero blocks" << std::endl;
+    int m, n, nnz;
+    std::istringstream iss(line);
+    iss >> m >> n >> nnz;
     
-    return bsr;
+    std::vector<int> row_indices(nnz), col_indices(nnz);
+    std::vector<float> values(nnz);
+    
+    for (int i = 0; i < nnz; i++) {
+        int row, col;
+        float val;
+        file >> row >> col >> val;
+        row--; col--;  // Convert to 0-based
+        row_indices[i] = row;
+        col_indices[i] = col;
+        values[i] = val;
+    }
+    file.close();
+    
+    // Build CSR
+    std::vector<int> rowPtr(m + 1, 0);
+    for (int i = 0; i < nnz; i++) {
+        rowPtr[row_indices[i] + 1]++;
+    }
+    for (int i = 0; i < m; i++) {
+        rowPtr[i + 1] += rowPtr[i];
+    }
+    
+    std::vector<int> colInd(nnz);
+    std::vector<float> csrVal(nnz);
+    std::vector<int> next(m, 0);
+    
+    for (int i = 0; i < nnz; i++) {
+        int row = row_indices[i];
+        int dest = rowPtr[row] + next[row];
+        colInd[dest] = col_indices[i];
+        csrVal[dest] = values[i];
+        next[row]++;
+    }
+    
+    return {m, n, nnz, csrVal, rowPtr, colInd};
 }
 
 void printTimer(const char* name, double ms) {
@@ -113,7 +122,6 @@ int main(int argc, char** argv) {
         }
     }
     
-
     // Load matrix as CSR
     auto start = std::chrono::high_resolution_clock::now();
     CSRMatrix csr = readMatrixMarketCSR(matrixFile);
@@ -153,34 +161,52 @@ int main(int argc, char** argv) {
     cusparseHandle_t handle;
     CHECK_CUSPARSE(cusparseCreate(&handle));
 
+    // Create matrix descriptors for CSR format
+    cusparseMatDescr_t descrA;
+    CHECK_CUSPARSE(cusparseCreateMatDescr(&descrA));
+    CHECK_CUSPARSE(cusparseSetMatType(descrA, CUSPARSE_MATRIX_TYPE_GENERAL));
+    CHECK_CUSPARSE(cusparseSetMatIndexBase(descrA, CUSPARSE_INDEX_BASE_ZERO));
+
+    cusparseMatDescr_t descrC;
+    CHECK_CUSPARSE(cusparseCreateMatDescr(&descrC));
+    CHECK_CUSPARSE(cusparseSetMatType(descrC, CUSPARSE_MATRIX_TYPE_GENERAL));
+    CHECK_CUSPARSE(cusparseSetMatIndexBase(descrC, CUSPARSE_INDEX_BASE_ZERO));
+
     // Convert CSR to BSR on device
     int mb = (csr.m + blockDim - 1) / blockDim;
     int nb = (csr.n + blockDim - 1) / blockDim;
     int nnzb = 0;
     int *d_bsrRowPtr;
     CHECK_CUDA(cudaMalloc(&d_bsrRowPtr, (mb + 1) * sizeof(int)));
+    
     // Get nnzb
     CHECK_CUSPARSE(cusparseXcsr2bsrNnz(
         handle,
         CUSPARSE_DIRECTION_ROW,
         csr.m, csr.n,
+        descrA,
         d_csrRowPtr, d_csrColInd,
         blockDim,
+        descrC,
         d_bsrRowPtr,
         &nnzb));
+    
     float *d_bsrVal;
     int *d_bsrColInd;
     CHECK_CUDA(cudaMalloc(&d_bsrVal, nnzb * blockDim * blockDim * sizeof(float)));
     CHECK_CUDA(cudaMalloc(&d_bsrColInd, nnzb * sizeof(int)));
+    
     CHECK_CUSPARSE(cusparseScsr2bsr(
         handle,
         CUSPARSE_DIRECTION_ROW,
         csr.m, csr.n,
+        descrA,
         d_csrVal, d_csrRowPtr, d_csrColInd,
         blockDim,
+        descrC,
         d_bsrVal, d_bsrRowPtr, d_bsrColInd));
 
-    // Create matrix descriptors
+    // Create matrix descriptors for generic API
     cusparseSpMatDescr_t matA;
     cusparseDnMatDescr_t matB, matC;
     CHECK_CUSPARSE(cusparseCreateBsr(
@@ -237,7 +263,12 @@ int main(int argc, char** argv) {
     CHECK_CUSPARSE(cusparseDestroySpMat(matA));
     CHECK_CUSPARSE(cusparseDestroyDnMat(matB));
     CHECK_CUSPARSE(cusparseDestroyDnMat(matC));
+    CHECK_CUSPARSE(cusparseDestroyMatDescr(descrA));
+    CHECK_CUSPARSE(cusparseDestroyMatDescr(descrC));
     CHECK_CUSPARSE(cusparseDestroy(handle));
+    CHECK_CUDA(cudaFree(d_csrVal));
+    CHECK_CUDA(cudaFree(d_csrRowPtr));
+    CHECK_CUDA(cudaFree(d_csrColInd));
     CHECK_CUDA(cudaFree(d_bsrVal));
     CHECK_CUDA(cudaFree(d_bsrRowPtr));
     CHECK_CUDA(cudaFree(d_bsrColInd));

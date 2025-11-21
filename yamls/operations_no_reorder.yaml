@@ -18,7 +18,7 @@ jobs:
 #        command: "python3 operators/cusparse_csr_spmv.py {mtx}"
 
       - tag: "CUSPARSE_SPMM_BSR_NO_REORDER"
-        command: "python3 operators/cusparse_bsr_spmm_wrapper.py {mtx} --blocksize {block_size}"
+        command: "python3 operators/cusparse_bsr_spmm.py {mtx} --blocksize {block_size}"
       - tag: "CUSPARSE_SPMM_CSR_NO_REORDER"
         command: "python3 operators/cusparse_csr_spmm.py {mtx}"
 

@@ -5,12 +5,8 @@ import subprocess
 import tempfile
 import os
 import sys
+from cusparse_utils import load_permutation_file
 
-def apply_permutation_csr(matrix, perm):
-    # Apply row and column permutation to CSR matrix
-    matrix = matrix[perm, :]
-    matrix = matrix[:, perm]
-    return matrix
 
 def main():
     import argparse
@@ -28,15 +24,16 @@ def main():
 
     # Apply permutation if provided
     if args.perm:
-        perm = np.loadtxt(args.perm, dtype=int) - 1  # Convert to 0-based
-        if args.perm_type == "ROW":
-            mat = mat[perm, :]
-        elif args.perm_type == "SYMMETRIC":
-            mat = apply_permutation_csr(mat, perm)
-        elif args.perm_type == "ASYMMETRIC":
-            # For asymmetric, you may want to use different row/col perms
-            mat = mat[perm, :]
-            # mat = mat[:, col_perm] if you have a separate col_perm
+        row_perm, col_perm = load_permutation_file(args.perm, args.perm_type)
+        
+        # Apply row permutation
+        if row_perm is not None:
+            mat = mat[row_perm, :]
+        
+        # Apply column permutation
+        if col_perm is not None:
+            mat = mat[:, col_perm]
+    
     # Save permuted matrix to temp file
     with tempfile.NamedTemporaryFile(suffix=".mtx", delete=False) as tmp:
         scipy.io.mmwrite(tmp.name, mat)
