@@ -179,7 +179,9 @@ int main(int argc, char** argv) {
     int *d_bsrRowPtr;
     CHECK_CUDA(cudaMalloc(&d_bsrRowPtr, (mb + 1) * sizeof(int)));
     
-    // Get nnzb
+    // Get nnzb (using legacy API - no modern replacement available)
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     CHECK_CUSPARSE(cusparseXcsr2bsrNnz(
         handle,
         CUSPARSE_DIRECTION_ROW,
@@ -205,6 +207,7 @@ int main(int argc, char** argv) {
         blockDim,
         descrC,
         d_bsrVal, d_bsrRowPtr, d_bsrColInd));
+    #pragma GCC diagnostic pop
 
     // Create matrix descriptors for generic API
     cusparseSpMatDescr_t matA;
