@@ -127,17 +127,12 @@ int main(int argc, char** argv) {
     CSRMatrix csr = readMatrixMarketCSR(matrixFile);
     auto end = std::chrono::high_resolution_clock::now();
     double loadingMs = std::chrono::duration<double, std::milli>(end - start).count();
-    
-    std::cerr << "Matrix dimensions: " << csr.m << " x " << csr.n << ", nnz = " << csr.nnz << std::endl;
 
     // Calculate padded dimensions for BSR (must be multiple of blockDim)
     int mb = (csr.m + blockDim - 1) / blockDim;
     int nb = (csr.n + blockDim - 1) / blockDim;
     int padded_m = mb * blockDim;
     int padded_n = nb * blockDim;
-    
-    std::cerr << "Block dimensions: mb=" << mb << ", nb=" << nb 
-              << ", padded: " << padded_m << "x" << padded_n << std::endl;
 
     // Allocate device memory for CSR
     float *d_csrVal, *d_B, *d_C;
@@ -203,26 +198,10 @@ int main(int argc, char** argv) {
         d_bsrRowPtr,
         &nnzb));
     
-    CHECK_CUDA(cudaDeviceSynchronize());
-    std::cerr << "After cusparseXcsr2bsrNnz: nnzb=" << nnzb << std::endl;
-    
     float *d_bsrVal;
     int *d_bsrColInd;
-    size_t bsrValSize = (size_t)nnzb * blockDim * blockDim * sizeof(float);
-    size_t bsrColIndSize = (size_t)nnzb * sizeof(int);
-    std::cerr << "Allocating BSR arrays: bsrVal=" << bsrValSize << " bytes, bsrColInd=" << bsrColIndSize << " bytes" << std::endl;
-    CHECK_CUDA(cudaMalloc(&d_bsrVal, bsrValSize));
-    CHECK_CUDA(cudaMalloc(&d_bsrColInd, bsrColIndSize));
-    
-    // Validate CSR data before conversion
-    std::vector<int> h_csrRowPtr(csr.m + 1);
-    CHECK_CUDA(cudaMemcpy(h_csrRowPtr.data(), d_csrRowPtr, (csr.m + 1) * sizeof(int), cudaMemcpyDeviceToHost));
-    std::cerr << "CSR validation: rowPtr[0]=" << h_csrRowPtr[0] << ", rowPtr[" << csr.m << "]=" << h_csrRowPtr[csr.m] 
-              << " (should be " << csr.nnz << ")" << std::endl;
-    if (h_csrRowPtr[csr.m] != csr.nnz) {
-        std::cerr << "ERROR: CSR rowPtr inconsistent!" << std::endl;
-        return 1;
-    }
+    CHECK_CUDA(cudaMalloc(&d_bsrVal, (size_t)nnzb * blockDim * blockDim * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&d_bsrColInd, (size_t)nnzb * sizeof(int)));
     
     CHECK_CUSPARSE(cusparseScsr2bsr(
         handle,

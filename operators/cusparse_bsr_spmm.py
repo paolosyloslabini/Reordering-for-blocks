@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 import os
 import sys
-from cusparse_utils import load_permutation_file
+from cusparse_utils import load_and_permute_matrix
 
 
 def main():
@@ -19,29 +19,8 @@ def main():
     parser.add_argument("--n-iterations", type=int, default=5, help="Number of SpMM iterations")
     args = parser.parse_args()
 
-    # Load matrix
-    mat = scipy.io.mmread(args.mtx).tocsr()
-    print(f"DEBUG: Loaded matrix: {mat.shape[0]} x {mat.shape[1]}, nnz={mat.nnz}", file=sys.stderr)
-
-    # Apply permutation if provided
-    if args.perm:
-        row_perm, col_perm = load_permutation_file(args.perm, args.perm_type)
-        print(f"DEBUG: Permutation type: {args.perm_type}, row_perm: {row_perm is not None}, col_perm: {col_perm is not None}", file=sys.stderr)
-        
-        # Apply row permutation
-        if row_perm is not None:
-            mat = mat[row_perm, :]
-            print(f"DEBUG: After row perm: {mat.shape[0]} x {mat.shape[1]}, nnz={mat.nnz}", file=sys.stderr)
-        
-        # Apply column permutation
-        if col_perm is not None:
-            mat = mat[:, col_perm]
-            print(f"DEBUG: After col perm: {mat.shape[0]} x {mat.shape[1]}, nnz={mat.nnz}", file=sys.stderr)
-    
-    # Ensure the matrix is in canonical CSR format (sorted indices, no duplicates)
-    mat.sort_indices()
-    mat.sum_duplicates()
-    print(f"DEBUG: After sort/dedup: {mat.shape[0]} x {mat.shape[1]}, nnz={mat.nnz}", file=sys.stderr)
+    # Load and permute matrix (uses shared utility function)
+    mat = load_and_permute_matrix(args.mtx, args.perm, args.perm_type)
     
     # Save permuted matrix to temp file
     with tempfile.NamedTemporaryFile(suffix=".mtx", delete=False) as tmp:

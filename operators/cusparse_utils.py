@@ -83,6 +83,11 @@ def load_and_permute_matrix(matrix_path, perm_path=None, perm_type='ROW', dtype=
         if perm_type.upper() == 'SYMMETRIC' and m != n:
             raise ValueError(f"SYMMETRIC permutation requires square matrix, got {m}x{n}")
     
+    # Ensure canonical CSR format (sorted indices, no duplicates)
+    # This is important after permutations which can create unsorted/duplicate entries
+    A_cpu.sort_indices()
+    A_cpu.sum_duplicates()
+    
     return A_cpu
 
 
