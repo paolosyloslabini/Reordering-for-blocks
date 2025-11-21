@@ -12,14 +12,14 @@ jobs:
           mtx_name=$(basename {mtx} .mtx)
           mkdir -p perms/random1D
           perm_path=perms/random1D/$mtx_name.perm
-        command: "python3 MtxPerm/RANDOM/GB_random_permutation_1d.py {mtx} --output $perm_path"
+        command: "python3 MtxPerm/RANDOM/GB_random_permutation_1d.py {mtx} $perm_path"
 
       - tag: "random2D"
         preprocess: |
           mtx_name=$(basename {mtx} .mtx)
           mkdir -p perms/random2D
           perm_path=perms/random2D/$mtx_name.perm
-        command: "python3 MtxPerm/RANDOM/GB_random_permutation_2d.py {mtx} --output $perm_path"
+        command: "python3 MtxPerm/RANDOM/GB_random_permutation_2d.py {mtx} $perm_path"
 
       - tag: "SB_degree"
         preprocess: |
