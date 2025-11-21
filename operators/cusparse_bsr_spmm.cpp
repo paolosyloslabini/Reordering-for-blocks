@@ -203,10 +203,16 @@ int main(int argc, char** argv) {
         d_bsrRowPtr,
         &nnzb));
     
+    CHECK_CUDA(cudaDeviceSynchronize());
+    std::cerr << "After cusparseXcsr2bsrNnz: nnzb=" << nnzb << std::endl;
+    
     float *d_bsrVal;
     int *d_bsrColInd;
-    CHECK_CUDA(cudaMalloc(&d_bsrVal, nnzb * blockDim * blockDim * sizeof(float)));
-    CHECK_CUDA(cudaMalloc(&d_bsrColInd, nnzb * sizeof(int)));
+    size_t bsrValSize = (size_t)nnzb * blockDim * blockDim * sizeof(float);
+    size_t bsrColIndSize = (size_t)nnzb * sizeof(int);
+    std::cerr << "Allocating BSR arrays: bsrVal=" << bsrValSize << " bytes, bsrColInd=" << bsrColIndSize << " bytes" << std::endl;
+    CHECK_CUDA(cudaMalloc(&d_bsrVal, bsrValSize));
+    CHECK_CUDA(cudaMalloc(&d_bsrColInd, bsrColIndSize));
     
     CHECK_CUSPARSE(cusparseScsr2bsr(
         handle,
