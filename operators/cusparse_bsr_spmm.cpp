@@ -128,31 +128,38 @@ int main(int argc, char** argv) {
     auto end = std::chrono::high_resolution_clock::now();
     double loadingMs = std::chrono::duration<double, std::milli>(end - start).count();
 
+    // Calculate padded dimensions for BSR (must be multiple of blockDim)
+    int mb = (csr.m + blockDim - 1) / blockDim;
+    int nb = (csr.n + blockDim - 1) / blockDim;
+    int padded_m = mb * blockDim;
+    int padded_n = nb * blockDim;
+
     // Allocate device memory for CSR
     float *d_csrVal, *d_B, *d_C;
     int *d_csrRowPtr, *d_csrColInd;
     size_t csrValSize = csr.nnz * sizeof(float);
     size_t csrRowPtrSize = (csr.m + 1) * sizeof(int);
     size_t csrColIndSize = csr.nnz * sizeof(int);
-    size_t denseSize = csr.n * nCols * sizeof(float);
+    size_t denseBSize = padded_n * nCols * sizeof(float);
+    size_t denseCSize = padded_m * nCols * sizeof(float);
 
     start = std::chrono::high_resolution_clock::now();
     CHECK_CUDA(cudaMalloc(&d_csrVal, csrValSize));
     CHECK_CUDA(cudaMalloc(&d_csrRowPtr, csrRowPtrSize));
     CHECK_CUDA(cudaMalloc(&d_csrColInd, csrColIndSize));
-    CHECK_CUDA(cudaMalloc(&d_B, denseSize));
-    CHECK_CUDA(cudaMalloc(&d_C, csr.m * nCols * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(&d_B, denseBSize));
+    CHECK_CUDA(cudaMalloc(&d_C, denseCSize));
 
     CHECK_CUDA(cudaMemcpy(d_csrVal, csr.values.data(), csrValSize, cudaMemcpyHostToDevice));
     CHECK_CUDA(cudaMemcpy(d_csrRowPtr, csr.rowPtr.data(), csrRowPtrSize, cudaMemcpyHostToDevice));
     CHECK_CUDA(cudaMemcpy(d_csrColInd, csr.colInd.data(), csrColIndSize, cudaMemcpyHostToDevice));
 
-    // Initialize B and C with random data
-    std::vector<float> B(csr.n * nCols), C(csr.m * nCols);
+    // Initialize B and C with random data (use padded dimensions)
+    std::vector<float> B(padded_n * nCols, 0.0f), C(padded_m * nCols, 0.0f);
     for (auto& v : B) v = static_cast<float>(rand()) / RAND_MAX;
     for (auto& v : C) v = static_cast<float>(rand()) / RAND_MAX;
-    CHECK_CUDA(cudaMemcpy(d_B, B.data(), denseSize, cudaMemcpyHostToDevice));
-    CHECK_CUDA(cudaMemcpy(d_C, C.data(), csr.m * nCols * sizeof(float), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(d_B, B.data(), denseBSize, cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(d_C, C.data(), denseCSize, cudaMemcpyHostToDevice));
 
     end = std::chrono::high_resolution_clock::now();
     double transferMs = std::chrono::duration<double, std::milli>(end - start).count();
@@ -173,8 +180,6 @@ int main(int argc, char** argv) {
     CHECK_CUSPARSE(cusparseSetMatIndexBase(descrC, CUSPARSE_INDEX_BASE_ZERO));
 
     // Convert CSR to BSR on device
-    int mb = (csr.m + blockDim - 1) / blockDim;
-    int nb = (csr.n + blockDim - 1) / blockDim;
     int nnzb = 0;
     int *d_bsrRowPtr;
     CHECK_CUDA(cudaMalloc(&d_bsrRowPtr, (mb + 1) * sizeof(int)));
@@ -210,6 +215,8 @@ int main(int argc, char** argv) {
     #pragma GCC diagnostic pop
 
     // Create matrix descriptors for generic API
+    // BSR matrix: mb x nb blocks, each block is blockDim x blockDim
+    // Dense matrices: must match actual padded dimensions
     cusparseSpMatDescr_t matA;
     cusparseDnMatDescr_t matB, matC;
     CHECK_CUSPARSE(cusparseCreateBsr(
@@ -219,8 +226,8 @@ int main(int argc, char** argv) {
         CUSPARSE_INDEX_32I, CUSPARSE_INDEX_32I,
         CUSPARSE_INDEX_BASE_ZERO, CUDA_R_32F,
         CUSPARSE_ORDER_ROW));
-    CHECK_CUSPARSE(cusparseCreateDnMat(&matB, csr.n, nCols, nCols, d_B, CUDA_R_32F, CUSPARSE_ORDER_ROW));
-    CHECK_CUSPARSE(cusparseCreateDnMat(&matC, csr.m, nCols, nCols, d_C, CUDA_R_32F, CUSPARSE_ORDER_ROW));
+    CHECK_CUSPARSE(cusparseCreateDnMat(&matB, padded_n, nCols, nCols, d_B, CUDA_R_32F, CUSPARSE_ORDER_ROW));
+    CHECK_CUSPARSE(cusparseCreateDnMat(&matC, padded_m, nCols, nCols, d_C, CUDA_R_32F, CUSPARSE_ORDER_ROW));
     
     // Allocate buffer
     size_t bufferSize;
