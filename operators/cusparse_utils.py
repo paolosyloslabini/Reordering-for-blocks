@@ -111,14 +111,19 @@ def convert_to_gpu(A_cpu, sparse_format='csr', blocksize=8):
         n_pad = -(-n // blocksize) * blocksize
         
         if m_pad != m or n_pad != n:
-            # Create padded matrix and copy data
-            from scipy.sparse import csr_matrix as scipy_csr
-            A_padded = scipy_csr((m_pad, n_pad), dtype=A_cpu.dtype)
-            A_padded[:m, :n] = A_cpu
-            A_cpu = A_padded
+            # Create padded matrix using lil format (efficient for modifications)
+            from scipy.sparse import lil_matrix
+            A_lil = lil_matrix((m_pad, n_pad), dtype=A_cpu.dtype)
+            A_lil[:m, :n] = A_cpu.tolil()
+            A_cpu = A_lil.tocsr()
         
-        A_bsr_cpu = A_cpu.tobsr(blocksize=(blocksize, blocksize))
-        return cupyx_sp.bsr_matrix(A_bsr_cpu)
+        # Transfer to GPU as CSR first, then convert to BSR on GPU
+        # According to CuPy docs: pass scipy sparse matrix to constructor
+        A_gpu_csr = cupyx_sp.csr_matrix(A_cpu)
+        
+        # Convert to BSR on GPU using tobsr() method
+        A_gpu_bsr = A_gpu_csr.tobsr(blocksize=(blocksize, blocksize))
+        return A_gpu_bsr
     elif sparse_format == 'coo':
         return cupyx_sp.coo_matrix(A_cpu.tocoo())
     else:
