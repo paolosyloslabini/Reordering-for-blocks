@@ -218,6 +218,8 @@ int main(int argc, char** argv) {
         descrC,
         d_bsrVal, d_bsrRowPtr, d_bsrColInd));
     #pragma GCC diagnostic pop
+    
+    std::cerr << "BSR conversion complete: nnzb=" << nnzb << std::endl;
 
     // Use legacy BSR SpMM API (generic API doesn't support BSR in CUDA 12.5)
     // cusparseSbsrmm: C = alpha * op(A) * B + beta * C
@@ -226,6 +228,9 @@ int main(int argc, char** argv) {
     // Warm-up
     #pragma GCC diagnostic push
     #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    std::cerr << "Calling cusparseSbsrmm with: mb=" << mb << ", nCols=" << nCols 
+              << ", nb=" << nb << ", nnzb=" << nnzb << ", blockDim=" << blockDim 
+              << ", ldb=" << padded_n << ", ldc=" << padded_m << std::endl;
     CHECK_CUSPARSE(cusparseSbsrmm(
         handle,
         CUSPARSE_DIRECTION_ROW,

@@ -21,18 +21,22 @@ def main():
 
     # Load matrix
     mat = scipy.io.mmread(args.mtx).tocsr()
+    print(f"DEBUG: Loaded matrix: {mat.shape[0]} x {mat.shape[1]}, nnz={mat.nnz}", file=sys.stderr)
 
     # Apply permutation if provided
     if args.perm:
         row_perm, col_perm = load_permutation_file(args.perm, args.perm_type)
+        print(f"DEBUG: Permutation type: {args.perm_type}, row_perm: {row_perm is not None}, col_perm: {col_perm is not None}", file=sys.stderr)
         
         # Apply row permutation
         if row_perm is not None:
             mat = mat[row_perm, :]
+            print(f"DEBUG: After row perm: {mat.shape[0]} x {mat.shape[1]}, nnz={mat.nnz}", file=sys.stderr)
         
         # Apply column permutation
         if col_perm is not None:
             mat = mat[:, col_perm]
+            print(f"DEBUG: After col perm: {mat.shape[0]} x {mat.shape[1]}, nnz={mat.nnz}", file=sys.stderr)
     
     # Save permuted matrix to temp file
     with tempfile.NamedTemporaryFile(suffix=".mtx", delete=False) as tmp:
