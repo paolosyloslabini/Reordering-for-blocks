@@ -105,9 +105,23 @@ def run_smat_spmm(matrix_path, perm_path=None, perm_type='ROW',
         if not isinstance(A_cpu, csr_matrix):
             A_cpu = A_cpu.tocsr()
         
+        # SMaT uses FP16 for tensor cores, so convert to float16 before writing
+        # This prevents overflow/underflow issues when smat reads the matrix
+        A_fp16 = A_cpu.astype(np.float16)
+        
+        # Check for inf/nan values that could result from float16 overflow
+        if np.any(np.isinf(A_fp16.data)) or np.any(np.isnan(A_fp16.data)):
+            # Some values overflow in FP16, try normalizing
+            max_val = np.abs(A_cpu.data).max()
+            if max_val > 65504:  # FP16 max is ~65504
+                # Normalize to prevent overflow
+                scale_factor = 65000 / max_val
+                A_fp16 = (A_cpu * scale_factor).astype(np.float16)
+                print(f"WARNING: Matrix values scaled by {scale_factor:.6f} to fit in FP16 range")
+        
         # Write to MTX file
         t0 = time.perf_counter()
-        mmwrite(tmp_mtx_path, A_cpu)
+        mmwrite(tmp_mtx_path, A_fp16)
         write_ms = (time.perf_counter() - t0) * 1000
         
         # Step 3: Find and call smat binary
