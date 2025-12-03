@@ -44,6 +44,15 @@ def parse_timers(stdout):
     return timers
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Parse job results into CSV files.")
+    parser.add_argument("--out-dir", default="results", help="Directory for output CSV files")
+    args = parser.parse_args()
+
+    # Create output directory
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
     print("Fetching jobs...", file=sys.stderr)
     
     # Fetch ALL completed jobs
@@ -131,17 +140,21 @@ def main():
     # Export Analysis CSV
     if analysis_results:
         df_analysis = pd.DataFrame(analysis_results)
-        df_analysis.to_csv("results_analysis.csv", index=False)
-        print(f"Exported {len(df_analysis)} analysis rows to results_analysis.csv")
+        out_file = out_dir / "results_analysis.csv"
+        df_analysis.to_csv(out_file, index=False)
+        print(f"Exported {len(df_analysis)} analysis rows to {out_file}")
     else:
         print("No analysis results found.")
 
-    # --- 2. Process SpMM Jobs ---
-    spmm_results = []
-    spmm_jobs = [j for j in all_jobs if j.tag and "SPMM" in j.tag]
-    print(f"Found {len(spmm_jobs)} SpMM jobs.", file=sys.stderr)
+    # --- 2. Process Operation Jobs (SpMM, etc.) ---
+    op_results = []
+    # Filter for operation jobs (tags containing SPMM for now, but generic enough)
+    # Assuming any job that is NOT analysis is an operation job? 
+    # Or stick to explicit tags. Let's stick to SPMM for now but rename variable.
+    op_jobs = [j for j in all_jobs if j.tag and "SPMM" in j.tag]
+    print(f"Found {len(op_jobs)} operation jobs.", file=sys.stderr)
     
-    for job in spmm_jobs:
+    for job in op_jobs:
         try:
             # Basic Job Info
             mtx_path = safe_get_var(job, 'mtx', '')
@@ -177,19 +190,20 @@ def main():
                 'n_cols': n_cols,
                 **timers
             }
-            spmm_results.append(row)
+            op_results.append(row)
             
         except Exception as e:
             job_id = getattr(job, 'id', getattr(job, 'job_id', 'unknown'))
-            print(f"Error parsing SpMM job {job_id}: {e}", file=sys.stderr)
+            print(f"Error parsing operation job {job_id}: {e}", file=sys.stderr)
 
-    # Export SpMM CSV
-    if spmm_results:
-        df_spmm = pd.DataFrame(spmm_results)
-        df_spmm.to_csv("results_spmm.csv", index=False)
-        print(f"Exported {len(df_spmm)} SpMM rows to results_spmm.csv")
+    # Export Operation CSV
+    if op_results:
+        df_op = pd.DataFrame(op_results)
+        out_file = out_dir / "results_operations.csv"
+        df_op.to_csv(out_file, index=False)
+        print(f"Exported {len(df_op)} operation rows to {out_file}")
     else:
-        print("No SpMM results found.")
+        print("No operation results found.")
 
 if __name__ == "__main__":
     main()

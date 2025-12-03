@@ -8,8 +8,8 @@ import numpy as np
 
 def main():
     parser = argparse.ArgumentParser(description="Generate plots from analysis results.")
-    parser.add_argument("--spmm", default="results_spmm.csv", help="Path to results_spmm.csv")
-    parser.add_argument("--analysis", default="results_analysis.csv", help="Path to results_analysis.csv")
+    parser.add_argument("--operations", default="results/results_operations.csv", help="Path to results_operations.csv")
+    parser.add_argument("--analysis", default="results/results_analysis.csv", help="Path to results_analysis.csv")
     parser.add_argument("--out", default="plots", help="Directory for output plot files")
     args = parser.parse_args()
 
@@ -19,35 +19,35 @@ def main():
 
     # Load data
     try:
-        df_spmm = pd.read_csv(args.spmm)
+        df_op = pd.read_csv(args.operations)
         df_analysis = pd.read_csv(args.analysis)
     except Exception as e:
         print(f"Error reading CSVs: {e}")
         sys.exit(1)
 
-    if df_spmm.empty or df_analysis.empty:
+    if df_op.empty or df_analysis.empty:
         print("One of the CSVs is empty.")
         sys.exit(1)
 
-    print(f"Loaded {len(df_spmm)} SpMM rows and {len(df_analysis)} analysis rows.")
+    print(f"Loaded {len(df_op)} operation rows and {len(df_analysis)} analysis rows.")
 
     # Merge dataframes
     # Keys: matrix, perm, perm_type
     # Note: perm can be 'None' (string) or NaN. Let's normalize.
     
-    for df in [df_spmm, df_analysis]:
+    for df in [df_op, df_analysis]:
         df['perm'] = df['perm'].fillna('None').astype(str)
         df['perm_type'] = df['perm_type'].fillna('UNKNOWN').astype(str)
         df['matrix'] = df['matrix'].astype(str)
 
     # Merge
-    df = pd.merge(df_spmm, df_analysis, on=['matrix', 'perm', 'perm_type'], how='left')
+    df = pd.merge(df_op, df_analysis, on=['matrix', 'perm', 'perm_type'], how='left')
     print(f"Merged DataFrame has {len(df)} rows.")
     
     # Debug: Check for merge issues
     if df.empty:
         print("Merged DataFrame is empty! Check if keys (matrix, perm, perm_type) match in both CSVs.")
-        print("SpMM keys sample:", df_spmm[['matrix', 'perm', 'perm_type']].head().to_dict('records'))
+        print("Operation keys sample:", df_op[['matrix', 'perm', 'perm_type']].head().to_dict('records'))
         print("Analysis keys sample:", df_analysis[['matrix', 'perm', 'perm_type']].head().to_dict('records'))
         return
 
