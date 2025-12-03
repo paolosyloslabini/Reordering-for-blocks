@@ -43,10 +43,18 @@ def main():
     # Merge
     df = pd.merge(df_spmm, df_analysis, on=['matrix', 'perm', 'perm_type'], how='left')
     print(f"Merged DataFrame has {len(df)} rows.")
+    
+    # Debug: Check for merge issues
+    if df.empty:
+        print("Merged DataFrame is empty! Check if keys (matrix, perm, perm_type) match in both CSVs.")
+        print("SpMM keys sample:", df_spmm[['matrix', 'perm', 'perm_type']].head().to_dict('records'))
+        print("Analysis keys sample:", df_analysis[['matrix', 'perm', 'perm_type']].head().to_dict('records'))
+        return
 
     # Basic cleanup
     if 'time_operation_ms' not in df.columns or 'nnz' not in df.columns:
         print("Missing required columns (time_operation_ms, nnz).")
+        print("Columns found:", df.columns.tolist())
         return
 
     # Calculate GFLOPS
@@ -65,6 +73,7 @@ def main():
     
     # Filter for BSR/SMAT algorithms
     block_algos = df[df['algo'].str.contains('BSR|SMAT', case=False, regex=True, na=False)].copy()
+    print(f"Found {len(block_algos)} rows matching BSR/SMAT algorithms.")
     
     if not block_algos.empty:
         # We need to extract the correct block_density for each row based on block_size
@@ -75,6 +84,7 @@ def main():
             
             # Iterate over unique block sizes present in the data
             unique_block_sizes = block_algos['block_size'].dropna().unique()
+            print(f"Unique block sizes found: {unique_block_sizes}")
             
             for bs in unique_block_sizes:
                 try:
@@ -83,14 +93,18 @@ def main():
                     if col_name in block_algos.columns:
                         mask = (block_algos['block_size'] == bs)
                         block_algos.loc[mask, 'active_block_density'] = block_algos.loc[mask, col_name]
+                    else:
+                        print(f"Warning: Column {col_name} not found in DataFrame.")
                 except ValueError:
                     continue
             
             # Drop rows where we couldn't find density info
             plot_data = block_algos.dropna(subset=['active_block_density', 'gflops'])
+            print(f"Rows with valid density and gflops: {len(plot_data)}")
             
             if not plot_data.empty:
                 unique_algos = plot_data['algo'].unique()
+                print(f"Plotting for algorithms: {unique_algos}")
                 
                 for algo in unique_algos:
                     algo_data = plot_data[plot_data['algo'] == algo]
