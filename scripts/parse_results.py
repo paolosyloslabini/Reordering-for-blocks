@@ -6,6 +6,23 @@ import sys
 from pathlib import Path
 from sbatchman import jobs_list
 
+# Default configuration
+DEFAULT_N_COLS = 32
+DEFAULT_BLOCK_SIZE = 0
+
+def safe_get_var(job, key, default, cast_type=str):
+    """Safely extract a variable from job.variables with type casting."""
+    # Ensure variables dict exists
+    variables = getattr(job, 'variables', {}) or {}
+    value = variables.get(key)
+    
+    if value is None:
+        return default
+    try:
+        return cast_type(value)
+    except (ValueError, TypeError):
+        return default
+
 def get_matrix_name(path):
     """Extract matrix filename from path."""
     return Path(path).name
@@ -57,9 +74,9 @@ def main():
     for job in analysis_jobs:
         try:
             # Parse variables
-            mtx_path = job.variables.get('mtx', '')
+            mtx_path = safe_get_var(job, 'mtx', '')
             matrix_name = get_matrix_name(mtx_path)
-            perm = job.variables.get('perm', 'None')
+            perm = safe_get_var(job, 'perm', 'None')
             
             # Determine perm_type from tag or command
             # The tag is usually ANALYSIS_ROW, ANALYSIS_SYMMETRIC, etc.
@@ -113,9 +130,9 @@ def main():
     for job in spmm_jobs:
         try:
             # Basic Job Info
-            mtx_path = job.variables.get('mtx', '')
+            mtx_path = safe_get_var(job, 'mtx', '')
             matrix_name = get_matrix_name(mtx_path)
-            perm = job.variables.get('perm', 'None')
+            perm = safe_get_var(job, 'perm', 'None')
             
             # Determine perm_type and algo from tag
             tag = job.tag
@@ -136,18 +153,9 @@ def main():
             # This makes it future-proof for new algorithms
             algo = tag
             
-            # Block Size (only relevant for BSR/SMAT)
-            # Try to get from variables, default to 0
-            try:
-                block_size = int(job.variables.get('block_size', 0))
-            except (ValueError, TypeError):
-                block_size = 0
-            
-            # N_COLS (Dense matrix columns)
-            try:
-                n_cols = int(job.variables.get('n_cols', 32))
-            except (ValueError, TypeError):
-                n_cols = 32
+            # Extract variables safely
+            block_size = safe_get_var(job, 'block_size', DEFAULT_BLOCK_SIZE, int)
+            n_cols = safe_get_var(job, 'n_cols', DEFAULT_N_COLS, int)
 
             # Parse Timers
             timers = parse_timers(job.get_stdout())
