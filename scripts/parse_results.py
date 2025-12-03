@@ -223,7 +223,9 @@ def main():
         
         # Print a preview
         print("\nPreview:")
-        print(df[['matrix', 'algo', 'perm', 'time_operation_ms', 'block_density']].head())
+        preview_cols = ['matrix', 'algo', 'perm', 'time_operation_ms', 'block_density']
+        available_cols = [c for c in preview_cols if c in df.columns]
+        print(df[available_cols].head())
     else:
         print("No results found to export.")
 
