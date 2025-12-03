@@ -128,6 +128,16 @@ def main():
         subset = df[df['matrix'].isin(top_matrices)]
         
         if not subset.empty:
+            # Ensure 'None' (no reorder) is included and sorted first if possible
+            # Convert perm to string to handle potential NaN/None types
+            subset['perm'] = subset['perm'].astype(str)
+            
+            # Custom sort order: None first, then alphabetical
+            perms = sorted(subset['perm'].unique())
+            if 'None' in perms:
+                perms.remove('None')
+                perms.insert(0, 'None')
+                
             g = sns.catplot(
                 data=subset, 
                 kind="bar",
@@ -138,7 +148,8 @@ def main():
                 col_wrap=1,
                 height=4, 
                 aspect=2,
-                sharey=False # Allow different scales for different matrices
+                sharey=False, # Allow different scales for different matrices
+                order=perms # Enforce order
             )
             g.set_axis_labels("Permutation", "Time (ms)")
             g.set_titles("{col_name}")
