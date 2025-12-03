@@ -93,10 +93,13 @@ def main():
                 key = (matrix_name, perm, perm_type)
                 analysis_cache[key] = data
             else:
-                print(f"Warning: Could not find JSON in output for job {job.id} ({tag})", file=sys.stderr)
+                # Try to get job ID safely for logging
+                job_id = getattr(job, 'id', getattr(job, 'job_id', 'unknown'))
+                print(f"Warning: Could not find JSON in output for job {job_id} ({tag})", file=sys.stderr)
                 
         except Exception as e:
-            print(f"Error parsing analysis job {job.id}: {e}", file=sys.stderr)
+            job_id = getattr(job, 'id', getattr(job, 'job_id', 'unknown'))
+            print(f"Error parsing analysis job {job_id}: {e}", file=sys.stderr)
 
     print(f"Cached analysis results for {len(analysis_cache)} configurations.", file=sys.stderr)
 
@@ -147,8 +150,11 @@ def main():
                 continue
                 
             # Build Row
+            # Note: sbatchman Job object might use job_id instead of id
+            job_id = getattr(job, 'id', getattr(job, 'job_id', 'unknown'))
+            
             row = {
-                'job_id': job.id,
+                'job_id': job_id,
                 'tag': tag,
                 'matrix': matrix_name,
                 'perm': perm,
@@ -190,7 +196,8 @@ def main():
             results.append(row)
             
         except Exception as e:
-            print(f"Error parsing SpMM job {job.id}: {e}", file=sys.stderr)
+            job_id = getattr(job, 'id', getattr(job, 'job_id', 'unknown'))
+            print(f"Error parsing SpMM job {job_id}: {e}", file=sys.stderr)
 
     # 4. Export to CSV
     if results:
