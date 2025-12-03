@@ -69,87 +69,80 @@ def main():
     # Set style
     sns.set_theme(style="whitegrid")
     
-    # --- Plot: GFLOPS vs Block Density (BSR/SMAT) ---
+    # --- Plot: GFLOPS vs Block Density ---
     
-    # Filter for BSR/SMAT algorithms
-    block_algos = df[df['algo'].str.contains('BSR|SMAT', case=False, regex=True, na=False)].copy()
-    print(f"Found {len(block_algos)} rows matching BSR/SMAT algorithms.")
+    # Create a unique identifier for each operation configuration
+    # Combine algo and block_size (if present)
+    if 'block_size' in df.columns:
+        df['op_id'] = df.apply(
+            lambda row: f"{row['algo']}_bs{int(row['block_size'])}" if pd.notnull(row['block_size']) and row['block_size'] > 0 else row['algo'], 
+            axis=1
+        )
+    else:
+        df['op_id'] = df['algo']
+
+    if 'op_id' in df.columns:
+        print("Unique operations found:", df['op_id'].unique())
     
-    if not block_algos.empty:
-        # We need to extract the correct block_density for each row based on block_size
-        # block_size should be in the dataframe
-        if 'block_size' in block_algos.columns:
-            # Create a new column 'active_block_density'
-            block_algos['active_block_density'] = np.nan
-            
-            # Iterate over unique block sizes present in the data
-            unique_block_sizes = block_algos['block_size'].dropna().unique()
-            print(f"Unique block sizes found: {unique_block_sizes}")
-            
-            for bs in unique_block_sizes:
-                try:
-                    bs_int = int(bs)
-                    col_name = f'block_density_{bs_int}'
-                    if col_name in block_algos.columns:
-                        mask = (block_algos['block_size'] == bs)
-                        block_algos.loc[mask, 'active_block_density'] = block_algos.loc[mask, col_name]
-                    else:
-                        print(f"Warning: Column {col_name} not found in DataFrame.")
-                except ValueError:
-                    continue
-            
-            # Drop rows where we couldn't find density info
-            plot_data = block_algos.dropna(subset=['active_block_density', 'gflops'])
-            print(f"Rows with valid density and gflops: {len(plot_data)}")
-            
-            if not plot_data.empty:
-                unique_algos = plot_data['algo'].unique()
-                print(f"Plotting for algorithms: {unique_algos}")
+    # Let's find all block_density_* columns
+    density_cols = [c for c in df.columns if c.startswith('block_density_')]
+    print(f"Found density columns: {density_cols}")
+    
+    if not density_cols:
+        print("No block_density columns found in analysis data.")
+        return
+
+    unique_ops = df['op_id'].unique()
+    
+    for op in unique_ops:
+        op_data = df[df['op_id'] == op]
+        
+        # For each available block density metric, generate a plot
+        for dens_col in density_cols:
+            # Extract block size from column name (block_density_32 -> 32)
+            try:
+                bs = dens_col.split('_')[-1]
+            except:
+                bs = "unknown"
                 
-                for algo in unique_algos:
-                    algo_data = plot_data[plot_data['algo'] == algo]
-                    
-                    # 1. Original Matrices Only (perm == 'None')
-                    original_data = algo_data[algo_data['perm'] == 'None']
-                    
-                    if not original_data.empty:
-                        plt.figure(figsize=(10, 6))
-                        sns.scatterplot(
-                            data=original_data,
-                            x='active_block_density',
-                            y='gflops',
-                            alpha=0.7
-                        )
-                        plt.title(f"GFLOPS vs Block Density ({algo}) - Original Matrices")
-                        plt.xlabel("Block Density")
-                        plt.ylabel("GFLOPS")
-                        plt.xscale('log')
-                        plt.tight_layout()
-                        safe_algo_name = algo.replace('/', '_').replace(' ', '_')
-                        plt.savefig(out_dir / f"gflops_vs_density_{safe_algo_name}_original.png")
-                        plt.close()
-                        print(f"Generated gflops_vs_density_{safe_algo_name}_original.png")
-                    
-                    # 2. All Matrices
-                    if not algo_data.empty:
-                        plt.figure(figsize=(10, 6))
-                        sns.scatterplot(
-                            data=algo_data,
-                            x='active_block_density',
-                            y='gflops',
-                            alpha=0.5
-                        )
-                        plt.title(f"GFLOPS vs Block Density ({algo}) - All Matrices")
-                        plt.xlabel("Block Density")
-                        plt.ylabel("GFLOPS")
-                        plt.xscale('log')
-                        plt.tight_layout()
-                        safe_algo_name = algo.replace('/', '_').replace(' ', '_')
-                        plt.savefig(out_dir / f"gflops_vs_density_{safe_algo_name}_all.png")
-                        plt.close()
-                        print(f"Generated gflops_vs_density_{safe_algo_name}_all.png")
-        else:
-            print("block_size column missing in SpMM results.")
+            # 1. Original Matrices Only
+            original_data = op_data[op_data['perm'] == 'None']
+            if not original_data.empty:
+                plt.figure(figsize=(10, 6))
+                sns.scatterplot(
+                    data=original_data,
+                    x=dens_col,
+                    y='gflops',
+                    alpha=0.7
+                )
+                plt.title(f"GFLOPS vs Block Density {bs} ({op}) - Original Matrices")
+                plt.xlabel(f"Block Density (Block Size {bs})")
+                plt.ylabel("GFLOPS")
+                plt.xscale('log')
+                plt.tight_layout()
+                safe_op_name = op.replace('/', '_').replace(' ', '_')
+                plt.savefig(out_dir / f"gflops_vs_density{bs}_{safe_op_name}_original.png")
+                plt.close()
+                print(f"Generated gflops_vs_density{bs}_{safe_op_name}_original.png")
+
+            # 2. All Matrices
+            if not op_data.empty:
+                plt.figure(figsize=(10, 6))
+                sns.scatterplot(
+                    data=op_data,
+                    x=dens_col,
+                    y='gflops',
+                    alpha=0.5
+                )
+                plt.title(f"GFLOPS vs Block Density {bs} ({op}) - All Matrices")
+                plt.xlabel(f"Block Density (Block Size {bs})")
+                plt.ylabel("GFLOPS")
+                plt.xscale('log')
+                plt.tight_layout()
+                safe_op_name = op.replace('/', '_').replace(' ', '_')
+                plt.savefig(out_dir / f"gflops_vs_density{bs}_{safe_op_name}_all.png")
+                plt.close()
+                print(f"Generated gflops_vs_density{bs}_{safe_op_name}_all.png")
 
     print(f"All plots saved to {out_dir}")
 
