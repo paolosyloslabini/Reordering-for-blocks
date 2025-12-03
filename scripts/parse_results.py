@@ -143,6 +143,12 @@ def main():
             except (ValueError, TypeError):
                 block_size = 0
             
+            # N_COLS (Dense matrix columns)
+            try:
+                n_cols = int(job.variables.get('n_cols', 32))
+            except (ValueError, TypeError):
+                n_cols = 32
+
             # Parse Timers
             timers = parse_timers(job.get_stdout())
             if not timers:
@@ -161,6 +167,7 @@ def main():
                 'perm_type': perm_type,
                 'algo': algo,
                 'block_size': block_size if block_size > 0 else None,
+                'n_cols': n_cols,
                 **timers
             }
             

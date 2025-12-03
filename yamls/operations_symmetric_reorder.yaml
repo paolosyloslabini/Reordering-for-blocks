@@ -10,6 +10,8 @@ variables:
   #  - SB_patoh
   block_size:
     - 32
+  n_cols:
+    - 32
 
 preprocess: |
   source ~/.venv/bin/activate
@@ -26,9 +28,9 @@ jobs:
 #        command: "python3 operators/cusparse_csr_spmv.py {mtx} --perm perms/{perm}/$mtx_name.perm --perm-type SYMMETRIC"
 
       - tag: "CUSPARSE_SPMM_BSR_SYMMETRIC"
-        command: "python3 operators/cusparse_bsr_spmm.py {mtx} --perm perms/{perm}/$mtx_name.perm --blocksize {block_size} --perm-type SYMMETRIC"
+        command: "python3 operators/cusparse_bsr_spmm.py {mtx} --perm perms/{perm}/$mtx_name.perm --blocksize {block_size} --perm-type SYMMETRIC --n-cols {n_cols}"
       - tag: "CUSPARSE_SPMM_CSR_SYMMETRIC"
-        command: "python3 operators/cusparse_csr_spmm.py {mtx} --perm perms/{perm}/$mtx_name.perm --perm-type SYMMETRIC"
+        command: "python3 operators/cusparse_csr_spmm.py {mtx} --perm perms/{perm}/$mtx_name.perm --perm-type SYMMETRIC --n-cols {n_cols}"
 
       - tag: "SMAT_SPMM_SYMMETRIC"
-        command: "python3 operators/smat_spmm.py {mtx} --perm perms/{perm}/$mtx_name.perm --blocksize {block_size} --perm-type SYMMETRIC"
+        command: "python3 operators/smat_spmm.py {mtx} --perm perms/{perm}/$mtx_name.perm --blocksize {block_size} --perm-type SYMMETRIC --n-cols {n_cols}"

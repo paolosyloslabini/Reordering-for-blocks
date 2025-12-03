@@ -4,6 +4,8 @@ variables:
     - random2D
   block_size:
     - 32
+  n_cols:
+    - 32
 
 preprocess: |
   source ~/.venv/bin/activate
@@ -20,9 +22,9 @@ jobs:
 #        command: "python3 operators/cusparse_csr_spmv.py {mtx} --perm perms/{perm}/$mtx_name.perm --perm-type ASYMMETRIC"
 
       - tag: "CUSPARSE_SPMM_BSR_ASYMMETRIC"
-        command: "python3 operators/cusparse_bsr_spmm.py {mtx} --perm perms/{perm}/$mtx_name.perm --blocksize {block_size} --perm-type ASYMMETRIC"
+        command: "python3 operators/cusparse_bsr_spmm.py {mtx} --perm perms/{perm}/$mtx_name.perm --blocksize {block_size} --perm-type ASYMMETRIC --n-cols {n_cols}"
       - tag: "CUSPARSE_SPMM_CSR_ASYMMETRIC"
-        command: "python3 operators/cusparse_csr_spmm.py {mtx} --perm perms/{perm}/$mtx_name.perm --perm-type ASYMMETRIC"
+        command: "python3 operators/cusparse_csr_spmm.py {mtx} --perm perms/{perm}/$mtx_name.perm --perm-type ASYMMETRIC --n-cols {n_cols}"
 
       - tag: "SMAT_SPMM_ASYMMETRIC"
-        command: "python3 operators/smat_spmm.py {mtx} --perm perms/{perm}/$mtx_name.perm --blocksize {block_size} --perm-type ASYMMETRIC"
+        command: "python3 operators/smat_spmm.py {mtx} --perm perms/{perm}/$mtx_name.perm --blocksize {block_size} --perm-type ASYMMETRIC --n-cols {n_cols}"

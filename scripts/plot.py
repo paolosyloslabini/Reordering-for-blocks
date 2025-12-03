@@ -39,124 +39,71 @@ def main():
     # Set style
     sns.set_theme(style="whitegrid")
     
-    # --- Plot 1: Algorithm Performance Overview (Boxplot) ---
-    if 'algo' in df.columns and 'time_operation_ms' in df.columns:
-        plt.figure(figsize=(12, 6))
-        # Filter out extreme outliers for better visualization if needed, or use log scale
-        sns.boxplot(data=df, x='algo', y='time_operation_ms', hue='perm_type')
-        plt.title("Execution Time Distribution by Algorithm and Permutation Type")
-        plt.yscale('log')
-        plt.ylabel("Time (ms) - Log Scale")
-        plt.xticks(rotation=45)
-        plt.tight_layout()
-        plt.savefig(out_dir / "algo_performance_boxplot.png")
-        plt.close()
-        print("Generated algo_performance_boxplot.png")
-
-    # --- Plot 2: Block Density vs Performance (Scatter) ---
-    # Filter for BSR/SMAT algorithms where block density matters
-    if 'block_density' in df.columns and 'time_operation_ms' in df.columns:
-        block_algos = df[df['algo'].str.contains('BSR|SMAT', case=False, regex=True, na=False)]
-        if not block_algos.empty:
-            plt.figure(figsize=(10, 6))
-            sns.scatterplot(
-                data=block_algos, 
-                x='block_density', 
-                y='time_operation_ms', 
-                hue='algo', 
-                style='perm_type',
-                alpha=0.7
-            )
-            plt.title("Block Density vs Execution Time (BSR & SMAT)")
-            plt.xlabel("Block Density (NNZ / Block Area)")
-            plt.ylabel("Time (ms) - Log Scale")
-            plt.yscale('log')
-            plt.xscale('log') # Block density often spans orders of magnitude
-            plt.tight_layout()
-            plt.savefig(out_dir / "block_density_vs_time.png")
-            plt.close()
-            print("Generated block_density_vs_time.png")
-
-    # --- Plot 3: Bandwidth vs Performance (Scatter) ---
-    if 'bandwidth_avg' in df.columns and 'time_operation_ms' in df.columns:
-        plt.figure(figsize=(10, 6))
-        sns.scatterplot(
-            data=df, 
-            x='bandwidth_avg', 
-            y='time_operation_ms', 
-            hue='algo',
-            alpha=0.6
-        )
-        plt.title("Average Bandwidth vs Execution Time")
-        plt.xlabel("Average Bandwidth")
-        plt.ylabel("Time (ms) - Log Scale")
-        plt.yscale('log')
-        plt.xscale('log')
-        plt.tight_layout()
-        plt.savefig(out_dir / "bandwidth_vs_time.png")
-        plt.close()
-        print("Generated bandwidth_vs_time.png")
-
-    # --- Plot 4: Locality vs Performance (Scatter) ---
-    if 'locality_avg_row_spread' in df.columns and 'time_operation_ms' in df.columns:
-        plt.figure(figsize=(10, 6))
-        sns.scatterplot(
-            data=df, 
-            x='locality_avg_row_spread', 
-            y='time_operation_ms', 
-            hue='algo',
-            alpha=0.6
-        )
-        plt.title("Average Row Spread (Locality) vs Execution Time")
-        plt.xlabel("Average Row Spread")
-        plt.ylabel("Time (ms) - Log Scale")
-        plt.yscale('log')
-        plt.xscale('log')
-        plt.tight_layout()
-        plt.savefig(out_dir / "locality_vs_time.png")
-        plt.close()
-        print("Generated locality_vs_time.png")
-
-    # --- Plot 5: Permutation Impact per Matrix (Bar plot for subset) ---
-    if 'matrix' in df.columns and 'perm' in df.columns:
-        # Pick top 3 matrices by NNZ to show detailed breakdown
-        if 'nnz' in df.columns:
-            top_matrices = df.sort_values('nnz', ascending=False)['matrix'].unique()[:3]
+    # --- Plot: GFLOPS vs Block Density (Single Operator) ---
+    # Calculate GFLOPS: 2 * NNZ * N_COLS / (Time_ms * 1e-3) / 1e9
+    # Assuming N_COLS is 32 (default) unless specified otherwise.
+    
+    if 'time_operation_ms' in df.columns and 'nnz' in df.columns and 'block_density' in df.columns:
+        # Add GFLOPS column
+        # Use n_cols from CSV if available, else default to 32
+        if 'n_cols' in df.columns:
+            n_cols = df['n_cols']
         else:
-            top_matrices = df['matrix'].unique()[:3]
+            n_cols = 32
             
-        subset = df[df['matrix'].isin(top_matrices)]
+        df['gflops'] = (2 * df['nnz'] * n_cols) / (df['time_operation_ms'] * 1e-3) / 1e9
         
-        if not subset.empty:
-            # Ensure 'None' (no reorder) is included and sorted first if possible
-            # Convert perm to string to handle potential NaN/None types
-            subset['perm'] = subset['perm'].astype(str)
+        # Filter for BSR/SMAT algorithms
+        block_algos = df[df['algo'].str.contains('BSR|SMAT', case=False, regex=True, na=False)]
+        
+        if not block_algos.empty:
+            # Get unique algorithms to plot separately
+            unique_algos = block_algos['algo'].unique()
             
-            # Custom sort order: None first, then alphabetical
-            perms = sorted(subset['perm'].unique())
-            if 'None' in perms:
-                perms.remove('None')
-                perms.insert(0, 'None')
+            for algo in unique_algos:
+                algo_data = block_algos[block_algos['algo'] == algo]
                 
-            g = sns.catplot(
-                data=subset, 
-                kind="bar",
-                x="perm", 
-                y="time_operation_ms", 
-                hue="algo",
-                col="matrix",
-                col_wrap=1,
-                height=4, 
-                aspect=2,
-                sharey=False, # Allow different scales for different matrices
-                order=perms # Enforce order
-            )
-            g.set_axis_labels("Permutation", "Time (ms)")
-            g.set_titles("{col_name}")
-            g.fig.suptitle("Impact of Permutation on Time (Top 3 Matrices)", y=1.02)
-            plt.savefig(out_dir / "permutation_impact_subset.png", bbox_inches='tight')
-            plt.close()
-            print("Generated permutation_impact_subset.png")
+                # 1. Original Matrices Only (perm == 'None')
+                original_data = algo_data[algo_data['perm'].astype(str) == 'None']
+                
+                if not original_data.empty:
+                    plt.figure(figsize=(10, 6))
+                    sns.scatterplot(
+                        data=original_data,
+                        x='block_density',
+                        y='gflops',
+                        alpha=0.7
+                    )
+                    plt.title(f"GFLOPS vs Block Density ({algo}) - Original Matrices")
+                    plt.xlabel("Block Density")
+                    plt.ylabel("GFLOPS")
+                    plt.xscale('log')
+                    plt.tight_layout()
+                    safe_algo_name = algo.replace('/', '_').replace(' ', '_')
+                    plt.savefig(out_dir / f"gflops_vs_density_{safe_algo_name}_original.png")
+                    plt.close()
+                    print(f"Generated gflops_vs_density_{safe_algo_name}_original.png")
+                
+                # 2. All Matrices (Original + Reordered)
+                if not algo_data.empty:
+                    plt.figure(figsize=(10, 6))
+                    sns.scatterplot(
+                        data=algo_data,
+                        x='block_density',
+                        y='gflops',
+                        alpha=0.5 # Lower alpha since there are more points
+                    )
+                    plt.title(f"GFLOPS vs Block Density ({algo}) - All Matrices")
+                    plt.xlabel("Block Density")
+                    plt.ylabel("GFLOPS")
+                    plt.xscale('log')
+                    plt.tight_layout()
+                    safe_algo_name = algo.replace('/', '_').replace(' ', '_')
+                    plt.savefig(out_dir / f"gflops_vs_density_{safe_algo_name}_all.png")
+                    plt.close()
+                    print(f"Generated gflops_vs_density_{safe_algo_name}_all.png")
+
+    print(f"All plots saved to {out_dir}")
 
     print(f"All plots saved to {out_dir}")
 
