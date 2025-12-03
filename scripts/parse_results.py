@@ -46,7 +46,7 @@ def parse_timers(stdout):
 def main():
     print("Fetching jobs...", file=sys.stderr)
     
-    # Fetch ALL completed jobs to avoid potential wildcard issues in sbatchman query
+    # Fetch ALL completed jobs
     try:
         all_jobs = jobs_list(from_archived=True, status=["COMPLETED"])
     except Exception as e:
@@ -56,18 +56,11 @@ def main():
     print(f"Total completed jobs found: {len(all_jobs)}", file=sys.stderr)
     
     if len(all_jobs) == 0:
-        print("No completed jobs found. Have you run the experiments yet?", file=sys.stderr)
+        print("No completed jobs found.", file=sys.stderr)
         sys.exit(0)
 
-    # Debug: print unique tags found
-    unique_tags = set(j.tag for j in all_jobs)
-    print(f"Found tags: {sorted(list(unique_tags))}", file=sys.stderr)
-    
-    # 1. Collect Analysis Results
-    # Key: (matrix_name, perm_name, perm_type) -> data dict
-    analysis_cache = {}
-    
-    # Filter for analysis jobs (tags starting with ANALYSIS_)
+    # --- 1. Process Analysis Jobs ---
+    analysis_results = []
     analysis_jobs = [j for j in all_jobs if j.tag and j.tag.startswith("ANALYSIS_")]
     print(f"Found {len(analysis_jobs)} analysis jobs.", file=sys.stderr)
     
@@ -78,27 +71,16 @@ def main():
             matrix_name = get_matrix_name(mtx_path)
             perm = safe_get_var(job, 'perm', 'None')
             
-            # Determine perm_type from tag or command
-            # The tag is usually ANALYSIS_ROW, ANALYSIS_SYMMETRIC, etc.
+            # Determine perm_type
             tag = job.tag
-            if 'ROW' in tag:
-                perm_type = 'ROW'
-            elif 'SYMMETRIC' in tag:
-                perm_type = 'SYMMETRIC'
-            elif 'ASYMMETRIC' in tag:
-                perm_type = 'ASYMMETRIC'
-            elif 'NO_REORDER' in tag:
-                perm_type = 'ROW' # Default to ROW for no reorder
-            else:
-                perm_type = 'UNKNOWN'
+            if 'ROW' in tag: perm_type = 'ROW'
+            elif 'SYMMETRIC' in tag: perm_type = 'SYMMETRIC'
+            elif 'ASYMMETRIC' in tag: perm_type = 'ASYMMETRIC'
+            elif 'NO_REORDER' in tag: perm_type = 'ROW'
+            else: perm_type = 'UNKNOWN'
             
             # Parse JSON output
             stdout = job.get_stdout()
-            # Find the JSON part - it might be surrounded by other logs if not using --pretty
-            # But our script prints JSON to stdout.
-            # If there are warnings (like cupy warning), they might be in stdout if not redirected?
-            # Usually warnings go to stderr.
-            # Let's try to find the first { and last }
             start = stdout.find('{')
             end = stdout.rfind('}')
             
@@ -106,24 +88,56 @@ def main():
                 json_str = stdout[start:end+1]
                 data = json.loads(json_str)
                 
-                # Store in cache
-                key = (matrix_name, perm, perm_type)
-                analysis_cache[key] = data
+                # Base row
+                row = {
+                    'matrix': matrix_name,
+                    'perm': perm,
+                    'perm_type': perm_type,
+                    'rows': data.get('rows'),
+                    'cols': data.get('cols'),
+                    'nnz': data.get('nnz'),
+                    'density': data.get('density'),
+                }
+                
+                # Flatten Bandwidth
+                bw = data.get('bandwidth', {})
+                for k, v in bw.items():
+                    row[k] = v
+                    
+                # Flatten Locality
+                loc = data.get('locality', {})
+                for k, v in loc.items():
+                    row[f"locality_{k}"] = v
+                    
+                # Flatten Block Analysis
+                # Create columns like block_density_4, block_density_8, etc.
+                block_analysis = data.get('block_analysis', [])
+                for b in block_analysis:
+                    bs = b.get('block_size')
+                    if bs:
+                        row[f'block_density_{bs}'] = b.get('block_density')
+                        row[f'nonzero_blocks_{bs}'] = b.get('nonzero_blocks')
+                        row[f'total_blocks_{bs}'] = b.get('total_blocks')
+                
+                analysis_results.append(row)
             else:
-                # Try to get job ID safely for logging
                 job_id = getattr(job, 'id', getattr(job, 'job_id', 'unknown'))
-                print(f"Warning: Could not find JSON in output for job {job_id} ({tag})", file=sys.stderr)
+                print(f"Warning: No JSON in output for analysis job {job_id}", file=sys.stderr)
                 
         except Exception as e:
             job_id = getattr(job, 'id', getattr(job, 'job_id', 'unknown'))
             print(f"Error parsing analysis job {job_id}: {e}", file=sys.stderr)
 
-    print(f"Cached analysis results for {len(analysis_cache)} configurations.", file=sys.stderr)
+    # Export Analysis CSV
+    if analysis_results:
+        df_analysis = pd.DataFrame(analysis_results)
+        df_analysis.to_csv("results_analysis.csv", index=False)
+        print(f"Exported {len(df_analysis)} analysis rows to results_analysis.csv")
+    else:
+        print("No analysis results found.")
 
-    # 2. Collect Multiplication Results
-    results = []
-    
-    # Filter for SpMM jobs (tags containing SPMM)
+    # --- 2. Process SpMM Jobs ---
+    spmm_results = []
     spmm_jobs = [j for j in all_jobs if j.tag and "SPMM" in j.tag]
     print(f"Found {len(spmm_jobs)} SpMM jobs.", file=sys.stderr)
     
@@ -133,38 +147,23 @@ def main():
             mtx_path = safe_get_var(job, 'mtx', '')
             matrix_name = get_matrix_name(mtx_path)
             perm = safe_get_var(job, 'perm', 'None')
-            
-            # Determine perm_type and algo from tag
             tag = job.tag
             
-            if 'ROW' in tag:
-                perm_type = 'ROW'
-            elif 'SYMMETRIC' in tag:
-                perm_type = 'SYMMETRIC'
-            elif 'ASYMMETRIC' in tag:
-                perm_type = 'ASYMMETRIC'
-            elif 'NO_REORDER' in tag:
-                perm_type = 'ROW' # Default to ROW for no reorder
-            else:
-                perm_type = 'UNKNOWN'
-                
-            # Algorithm
-            # Use the tag directly as the algorithm identifier
-            # This makes it future-proof for new algorithms
-            algo = tag
+            if 'ROW' in tag: perm_type = 'ROW'
+            elif 'SYMMETRIC' in tag: perm_type = 'SYMMETRIC'
+            elif 'ASYMMETRIC' in tag: perm_type = 'ASYMMETRIC'
+            elif 'NO_REORDER' in tag: perm_type = 'ROW'
+            else: perm_type = 'UNKNOWN'
             
-            # Extract variables safely
+            algo = tag
             block_size = safe_get_var(job, 'block_size', DEFAULT_BLOCK_SIZE, int)
             n_cols = safe_get_var(job, 'n_cols', DEFAULT_N_COLS, int)
 
             # Parse Timers
             timers = parse_timers(job.get_stdout())
             if not timers:
-                # Skip failed jobs or those without output
                 continue
                 
-            # Build Row
-            # Note: sbatchman Job object might use job_id instead of id
             job_id = getattr(job, 'id', getattr(job, 'job_id', 'unknown'))
             
             row = {
@@ -178,57 +177,19 @@ def main():
                 'n_cols': n_cols,
                 **timers
             }
-            
-            # 3. Merge with Analysis Data
-            analysis_key = (matrix_name, perm, perm_type)
-            if analysis_key in analysis_cache:
-                adata = analysis_cache[analysis_key]
-                
-                # General Metrics
-                row['rows'] = adata.get('rows')
-                row['cols'] = adata.get('cols')
-                row['nnz'] = adata.get('nnz')
-                row['density'] = adata.get('density')
-                
-                # Bandwidth
-                bw = adata.get('bandwidth', {})
-                row['bandwidth_max'] = bw.get('bandwidth_max')
-                row['bandwidth_avg'] = bw.get('bandwidth_avg')
-                
-                # Locality
-                loc = adata.get('locality', {})
-                row['locality_profile'] = loc.get('profile')
-                row['locality_avg_row_spread'] = loc.get('avg_row_spread')
-                
-                # Block Analysis (Specific to this job's block_size)
-                if block_size > 0:
-                    block_stats = next((b for b in adata.get('block_analysis', []) if b['block_size'] == block_size), None)
-                    if block_stats:
-                        row['block_density'] = block_stats.get('block_density')
-                        row['nonzero_blocks'] = block_stats.get('nonzero_blocks')
-                        row['total_blocks'] = block_stats.get('total_blocks')
-            
-            results.append(row)
+            spmm_results.append(row)
             
         except Exception as e:
             job_id = getattr(job, 'id', getattr(job, 'job_id', 'unknown'))
             print(f"Error parsing SpMM job {job_id}: {e}", file=sys.stderr)
 
-    # 4. Export to CSV
-    if results:
-        df = pd.DataFrame(results)
-        output_file = "results_combined.csv"
-        df.to_csv(output_file, index=False)
-        print(f"Successfully exported {len(df)} rows to {output_file}")
-        
-        # Print a preview
-        print("\nPreview:")
-        preview_cols = ['matrix', 'algo', 'perm', 'time_operation_ms', 'block_density']
-        available_cols = [c for c in preview_cols if c in df.columns]
-        print(df[available_cols].head())
+    # Export SpMM CSV
+    if spmm_results:
+        df_spmm = pd.DataFrame(spmm_results)
+        df_spmm.to_csv("results_spmm.csv", index=False)
+        print(f"Exported {len(df_spmm)} SpMM rows to results_spmm.csv")
     else:
-        print("No results found to export.")
+        print("No SpMM results found.")
 
 if __name__ == "__main__":
     main()
-
