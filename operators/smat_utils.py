@@ -111,18 +111,19 @@ def run_smat_spmm(matrix_path, perm_path=None, perm_type='ROW',
         A_cpu.sort_indices()
         
         # SMaT uses FP16 for tensor cores, so convert to float16 before writing
-        # This prevents overflow/underflow issues when smat reads the matrix
-        A_fp16 = A_cpu.astype(np.float16)
+        # Check for overflow BEFORE conversion to avoid scipy warnings
+        max_val = np.abs(A_cpu.data).max()
+        FP16_MAX = 65504.0  # Maximum representable value in float16
         
-        # Check for inf/nan values that could result from float16 overflow
-        if np.any(np.isinf(A_fp16.data)) or np.any(np.isnan(A_fp16.data)):
-            # Some values overflow in FP16, try normalizing
-            max_val = np.abs(A_cpu.data).max()
-            if max_val > 65504:  # FP16 max is ~65504
-                # Normalize to prevent overflow
-                scale_factor = 65000 / max_val
-                A_fp16 = (A_cpu * scale_factor).astype(np.float16)
-                print(f"WARNING: Matrix values scaled by {scale_factor:.6f} to fit in FP16 range")
+        if max_val > FP16_MAX:
+            # Scale matrix to fit in FP16 range
+            scale_factor = (FP16_MAX * 0.99) / max_val  # Use 0.99 for safety margin
+            A_scaled = A_cpu * scale_factor
+            A_fp16 = A_scaled.astype(np.float16)
+            print(f"WARNING: Matrix values scaled by {scale_factor:.6e} to fit in FP16 range (max: {max_val:.6e})")
+        else:
+            # Safe to convert directly
+            A_fp16 = A_cpu.astype(np.float16)
         
         # Write to MTX file
         t0 = time.perf_counter()

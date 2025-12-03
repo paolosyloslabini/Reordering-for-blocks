@@ -1,0 +1,15 @@
+variables:
+  mtx: 'datasets/matrices_list_mtx.txt'
+  perm: 
+    - random2D
+
+preprocess: |
+  source ~/.venv/bin/activate
+  mtx_name=$(basename {mtx} .mtx)
+  module load CUDA/
+
+jobs:
+  - config: "gpu"
+    config_jobs:
+      - tag: "ANALYSIS_ASYMMETRIC"
+        command: "python3 MtxPerm/ANALYSIS/analyze.py {mtx} --perm perms/{perm}/$mtx_name.perm --perm-type ASYMMETRIC --block-sizes 4 8 16 32 64 128"
