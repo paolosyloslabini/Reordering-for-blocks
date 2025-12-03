@@ -12,10 +12,9 @@ variables:
 preprocess: |
   source ~/.venv/bin/activate
   mtx_name=$(basename {mtx} .mtx)
-  module load CUDA/
 
 jobs:
-  - config: "gpu"
+  - config: "perm"
     config_jobs:
       - tag: "ANALYSIS_SYMMETRIC"
-        command: "python3 MtxPerm/ANALYSIS/analyze.py {mtx} --perm perms/{perm}/$mtx_name.perm --perm-type SYMMETRIC --block-sizes 4 8 16 32 64 128 --pretty"
+        command: "python3 MtxPerm/ANALYSIS/analyze.py {mtx} --perm perms/{perm}/$mtx_name.perm --perm-type SYMMETRIC --block-sizes 4 8 16 32 64 128"
