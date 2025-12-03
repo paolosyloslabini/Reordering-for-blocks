@@ -29,13 +29,29 @@ def parse_timers(stdout):
 def main():
     print("Fetching jobs...", file=sys.stderr)
     
+    # Fetch ALL completed jobs to avoid potential wildcard issues in sbatchman query
+    try:
+        all_jobs = jobs_list(from_archived=True, status=["COMPLETED"])
+    except Exception as e:
+        print(f"Error fetching jobs: {e}", file=sys.stderr)
+        sys.exit(1)
+        
+    print(f"Total completed jobs found: {len(all_jobs)}", file=sys.stderr)
+    
+    if len(all_jobs) == 0:
+        print("No completed jobs found. Have you run the experiments yet?", file=sys.stderr)
+        sys.exit(0)
+
+    # Debug: print unique tags found
+    unique_tags = set(j.tag for j in all_jobs)
+    print(f"Found tags: {sorted(list(unique_tags))}", file=sys.stderr)
+    
     # 1. Collect Analysis Results
     # Key: (matrix_name, perm_name, perm_type) -> data dict
     analysis_cache = {}
     
-    # Fetch all analysis jobs
-    # We look for tags starting with ANALYSIS_
-    analysis_jobs = jobs_list(from_archived=True, tag="ANALYSIS_*", status=["COMPLETED"])
+    # Filter for analysis jobs (tags starting with ANALYSIS_)
+    analysis_jobs = [j for j in all_jobs if j.tag and j.tag.startswith("ANALYSIS_")]
     print(f"Found {len(analysis_jobs)} analysis jobs.", file=sys.stderr)
     
     for job in analysis_jobs:
@@ -87,8 +103,8 @@ def main():
     # 2. Collect Multiplication Results
     results = []
     
-    # Fetch all SpMM jobs
-    spmm_jobs = jobs_list(from_archived=True, tag="*SPMM*", status=["COMPLETED"])
+    # Filter for SpMM jobs (tags containing SPMM)
+    spmm_jobs = [j for j in all_jobs if j.tag and "SPMM" in j.tag]
     print(f"Found {len(spmm_jobs)} SpMM jobs.", file=sys.stderr)
     
     for job in spmm_jobs:
