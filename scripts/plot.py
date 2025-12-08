@@ -11,6 +11,8 @@ def main():
     parser.add_argument("--operations", default="results/results_operations.csv", help="Path to results_operations.csv")
     parser.add_argument("--analysis", default="results/results_analysis.csv", help="Path to results_analysis.csv")
     parser.add_argument("--out", default="plots", help="Directory for output plot files")
+    parser.add_argument("--one-per-family", action="store_true", help="Only include one matrix per family/group")
+    parser.add_argument("--matrices-list", default="datasets/matrices_list_mtx.txt", help="Path to matrices list file for family mapping")
     args = parser.parse_args()
 
     # Create output directory
@@ -43,6 +45,78 @@ def main():
     # Merge
     df = pd.merge(df_op, df_analysis, on=['matrix', 'perm', 'perm_type'], how='left')
     print(f"Merged DataFrame has {len(df)} rows.")
+
+    # Filter: One per family
+    if args.one_per_family:
+        print("Filtering: One matrix per family...")
+        try:
+            # Load matrix list to map matrix -> family
+            # Format: .../Group/Matrix/Matrix.mtx
+            matrix_to_family = {}
+            if Path(args.matrices_list).exists():
+                with open(args.matrices_list, 'r') as f:
+                    for line in f:
+                        path = line.strip()
+                        if not path: continue
+                        # Handle both / and \ separators just in case
+                        path = path.replace('\\', '/')
+                        parts = path.split('/')
+                        # Assuming .../Group/Matrix/Matrix.mtx
+                        # Matrix.mtx is parts[-1]
+                        # Matrix folder is parts[-2]
+                        # Group is parts[-3]
+                        if len(parts) >= 3:
+                            matrix_name = parts[-1]
+                            family = parts[-3]
+                            matrix_to_family[matrix_name] = family
+            else:
+                print(f"Warning: Matrices list file {args.matrices_list} not found.")
+
+            if not matrix_to_family:
+                print("Warning: No matrix mapping found or file empty. Skipping family filtering.")
+            else:
+                # Add family column
+                df['family'] = df['matrix'].map(matrix_to_family)
+                
+                # Identify families for each matrix
+                # We want to keep one matrix per family.
+                # Let's pick the first one that appears in the dataframe (or sorted)
+                
+                # Get unique matrices and their families
+                unique_matrices = df[['matrix', 'family']].drop_duplicates()
+                
+                # Group by family and pick first matrix
+                # We sort by matrix name to be deterministic
+                unique_matrices = unique_matrices.sort_values('matrix')
+                
+                # Filter out rows where family is NaN (unmapped) - treat them as separate families?
+                # Let's treat unmapped as their own family (family=matrix_name)
+                unique_matrices['family'] = unique_matrices['family'].fillna(unique_matrices['matrix'])
+                
+                selected_matrices = unique_matrices.groupby('family').first()['matrix'].tolist()
+                
+                print(f"Selected {len(selected_matrices)} matrices representing {len(selected_matrices)} families.")
+                print(f"Selected matrices: {selected_matrices}")
+                
+                df = df[df['matrix'].isin(selected_matrices)]
+                print(f"DataFrame has {len(df)} rows after family filtering.")
+                
+        except Exception as e:
+            print(f"Error during family filtering: {e}")
+
+    # Filter out matrices with original bandwidth < 5 (e.g. diagonal matrices)
+    if 'bandwidth_max' in df_analysis.columns:
+        # Find matrices where perm='None' and bandwidth_max < 5
+        # Note: df_analysis['perm'] was normalized to 'None' above
+        trivial_matrices = df_analysis[
+            (df_analysis['perm'] == 'None') & 
+            (df_analysis['bandwidth_max'] < 5)
+        ]['matrix'].unique()
+        
+        if len(trivial_matrices) > 0:
+            print(f"Filtering out {len(trivial_matrices)} trivial matrices (original bandwidth < 5): {trivial_matrices}")
+            df = df[~df['matrix'].isin(trivial_matrices)]
+            print(f"DataFrame has {len(df)} rows after filtering.")
     
     # Debug: Check for merge issues
     if df.empty:
