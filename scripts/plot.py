@@ -144,6 +144,169 @@ def main():
                 plt.close()
                 print(f"Generated gflops_vs_density{bs}_{safe_op_name}_all.png")
 
+    # --- Plot: GFLOPS Distribution (Violin & Paired Plots) ---
+    # Compare Original vs Different Permutation Strategies
+    
+    # Define strategy column
+    # If perm is 'None', it's 'Original'. Otherwise, use the perm name (e.g. 'SB_amd', 'random1D')
+    df['strategy'] = df['perm'].apply(lambda x: 'Original' if x == 'None' else str(x))
+    
+    # Sort order: Original first, then others alphabetically
+    strategies = sorted([s for s in df['strategy'].unique() if s != 'Original'])
+    if 'Original' in df['strategy'].unique():
+        order = ['Original'] + strategies
+    else:
+        order = strategies
+        
+    # Convert to categorical to ensure correct plotting order
+    df['strategy'] = pd.Categorical(df['strategy'], categories=order, ordered=True)
+
+    for op in unique_ops:
+        op_data = df[df['op_id'] == op]
+        if op_data.empty: continue
+        
+        safe_op_name = op.replace('/', '_').replace(' ', '_')
+
+        # 1. Violin Plot
+        plt.figure(figsize=(12, 8))
+        sns.violinplot(
+            data=op_data, 
+            x='strategy', 
+            y='gflops', 
+            order=order,
+            palette="Set2",
+            inner="quartile",
+            cut=0
+        )
+        # Add strip plot for individual points
+        sns.stripplot(
+            data=op_data, 
+            x='strategy', 
+            y='gflops', 
+            order=order,
+            color='black', 
+            alpha=0.3, 
+            jitter=True,
+            size=3
+        )
+        
+        plt.title(f"GFLOPS Distribution by Strategy ({op})", fontsize=14)
+        plt.ylabel("GFLOPS", fontsize=12)
+        plt.xlabel("Reordering Strategy", fontsize=12)
+        plt.xticks(rotation=45, ha='right')
+        plt.grid(True, axis='y', linestyle='--', alpha=0.7)
+        plt.tight_layout()
+        plt.savefig(out_dir / f"gflops_violin_{safe_op_name}.png", dpi=300)
+        plt.close()
+        print(f"Generated gflops_violin_{safe_op_name}.png")
+
+        # 2. Paired Comparison Plot (Slope Chart)
+        # This visualizes how EACH matrix changes across strategies
+        plt.figure(figsize=(12, 8))
+        
+        # Draw lines connecting the same matrix
+        # We use a simple grey line for each matrix
+        sns.lineplot(
+            data=op_data,
+            x='strategy',
+            y='gflops',
+            hue='matrix',
+            units='matrix',
+            estimator=None,
+            legend=False,
+            alpha=0.2,
+            linewidth=1,
+            palette=['gray'] * len(op_data['matrix'].unique()) # Force all lines to be gray
+        )
+        
+        # Overlay points colored by strategy
+        sns.scatterplot(
+            data=op_data,
+            x='strategy',
+            y='gflops',
+            hue='strategy',
+            legend=False,
+            s=40,
+            zorder=10,
+            palette="Set2"
+        )
+        
+        plt.title(f"GFLOPS Comparison per Matrix ({op})", fontsize=14)
+        plt.ylabel("GFLOPS (Log Scale)", fontsize=12)
+        plt.xlabel("Reordering Strategy", fontsize=12)
+        plt.yscale('log') # Log scale is better for comparing matrices of vastly different sizes
+        plt.xticks(rotation=45, ha='right')
+        plt.grid(True, which="both", ls="--", alpha=0.5)
+        plt.tight_layout()
+        plt.savefig(out_dir / f"gflops_paired_{safe_op_name}.png", dpi=300)
+        plt.close()
+        print(f"Generated gflops_paired_{safe_op_name}.png")
+
+    # --- Plot: Speedup Distribution ---
+    # Calculate speedup relative to Original for each matrix
+    
+    # 1. Get Original GFLOPS per matrix and operation
+    # We drop duplicates just in case, though there should be only one original per matrix/op
+    original_gflops = df[df['strategy'] == 'Original'][['matrix', 'op_id', 'gflops']].drop_duplicates().rename(columns={'gflops': 'gflops_original'})
+    
+    # 2. Merge back
+    df_speedup = pd.merge(df, original_gflops, on=['matrix', 'op_id'], how='left')
+    
+    # 3. Calculate Speedup
+    df_speedup['speedup'] = df_speedup['gflops'] / df_speedup['gflops_original']
+    
+    # 4. Filter for Reordered rows only (exclude Original)
+    reordered_data = df_speedup[df_speedup['strategy'] != 'Original']
+    
+    if not reordered_data.empty:
+        for op in unique_ops:
+            op_data = reordered_data[reordered_data['op_id'] == op]
+            if op_data.empty: continue
+            
+            # Check if we have valid speedup data
+            if op_data['speedup'].notna().sum() == 0:
+                continue
+
+            plt.figure(figsize=(12, 8))
+            
+            # Use strategy for x-axis
+            # Filter order to only include present strategies
+            op_strategies = [s for s in order if s in op_data['strategy'].unique()]
+            
+            sns.boxplot(
+                data=op_data, 
+                x='strategy', 
+                y='speedup', 
+                order=op_strategies,
+                showfliers=False,
+                palette="Set2"
+            )
+            sns.stripplot(
+                data=op_data, 
+                x='strategy', 
+                y='speedup', 
+                order=op_strategies,
+                color='black', 
+                alpha=0.3, 
+                jitter=True,
+                size=4
+            )
+            
+            plt.axhline(1.0, color='r', linestyle='--', linewidth=2, label='Baseline (Original)')
+            
+            plt.title(f"Speedup Distribution by Strategy ({op})", fontsize=14)
+            plt.ylabel("Speedup (vs Original)", fontsize=12)
+            plt.xlabel("Reordering Strategy", fontsize=12)
+            plt.xticks(rotation=45, ha='right')
+            plt.grid(True, axis='y', linestyle='--', alpha=0.7)
+            plt.legend()
+            plt.tight_layout()
+            
+            safe_op_name = op.replace('/', '_').replace(' ', '_')
+            plt.savefig(out_dir / f"speedup_boxplot_{safe_op_name}.png", dpi=300)
+            plt.close()
+            print(f"Generated speedup_boxplot_{safe_op_name}.png")
+
     print(f"All plots saved to {out_dir}")
 
 if __name__ == "__main__":

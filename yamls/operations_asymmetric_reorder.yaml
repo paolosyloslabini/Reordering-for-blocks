@@ -11,6 +11,7 @@ preprocess: |
   source ~/.venv/bin/activate
   mtx_name=$(basename {mtx} .mtx)
   module load CUDA/
+  module load GCC/13.3.0
 
 jobs:
   - config: "gpu"
