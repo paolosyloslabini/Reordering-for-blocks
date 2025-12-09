@@ -154,17 +154,8 @@ def plot_gflops_vs_density(df, out_dir):
     for kernel in unique_kernels:
         kernel_data = df[df['kernel_id'] == kernel]
         
-        # Filter density columns based on operation block size
-        current_density_cols = []
-        bs_match = re.search(r"_bs(\d+)", kernel)
-        if bs_match:
-            bs_val = bs_match.group(1)
-            target_col = f"block_density_{bs_val}"
-            if target_col in density_cols:
-                current_density_cols = [target_col]
-        
-        if not current_density_cols:
-            current_density_cols = density_cols
+        # Use all available density columns to provide comprehensive views
+        current_density_cols = density_cols
 
         for dens_col in current_density_cols:
             if dens_col == 'density':
@@ -228,7 +219,7 @@ def plot_gflops_vs_density(df, out_dir):
                 print(f"Generated gflops_vs_density{bs}_{safe_kernel_name}_all.png")
 
 def plot_gflops_distribution(df, out_dir):
-    """Generates Violin plots for GFLOPS distribution."""
+    """Generates Violin plots for GFLOPS distribution, separated by perm_type."""
     df['strategy'] = df['perm'].apply(lambda x: 'Original' if x == 'None' else str(x))
     strategies = sorted([s for s in df['strategy'].unique() if s != 'Original'])
     if 'Original' in df['strategy'].unique():
@@ -240,44 +231,77 @@ def plot_gflops_distribution(df, out_dir):
     unique_kernels = df['kernel_id'].unique()
 
     for kernel in unique_kernels:
-        kernel_data = df[df['kernel_id'] == kernel]
-        if kernel_data.empty: continue
+        kernel_data_full = df[df['kernel_id'] == kernel]
+        if kernel_data_full.empty: continue
         
         safe_kernel_name = kernel.replace('/', '_').replace(' ', '_')
 
-        plt.figure(figsize=(12, 8))
-        sns.violinplot(
-            data=kernel_data, 
-            x='strategy', 
-            y='gflops', 
-            order=order,
-            palette="Set2",
-            inner="quartile",
-            cut=0
-        )
-        sns.stripplot(
-            data=kernel_data, 
-            x='strategy', 
-            y='gflops', 
-            order=order,
-            color='black', 
-            alpha=0.3, 
-            jitter=True,
-            size=3
-        )
+        # Identify reordering types present (excluding Original/None)
+        reordered_slice = kernel_data_full[kernel_data_full['perm'] != 'None']
         
-        plt.title(f"GFLOPS Distribution by Strategy ({kernel})", fontsize=14)
-        plt.ylabel("GFLOPS", fontsize=12)
-        plt.xlabel("Reordering Strategy", fontsize=12)
-        plt.xticks(rotation=45, ha='right')
-        plt.grid(True, axis='y', linestyle='--', alpha=0.7)
-        plt.tight_layout()
-        plt.savefig(out_dir / f"gflops_violin_{safe_kernel_name}.png", dpi=300)
-        plt.close()
-        print(f"Generated gflops_violin_{safe_kernel_name}.png")
+        # If no reordered data, maybe just plot Original? 
+        # Or if we want to be strict about separating types, we can treat 'Original' as a type if it's the only one.
+        # But usually we want to see ROW, SYMMETRIC, etc.
+        if reordered_slice.empty:
+            perm_types = [] # Skip if no reordering to show distribution for? Or just show Original?
+            # Let's show Original if it exists
+            if not kernel_data_full.empty:
+                perm_types = ['Original']
+        else:
+            perm_types = reordered_slice['perm_type'].unique()
+
+        for p_type in perm_types:
+            if p_type == 'Original':
+                plot_data = kernel_data_full[kernel_data_full['perm'] == 'None']
+                suffix = "_original"
+                current_order = ['Original']
+            else:
+                # Data for this perm_type + Original data
+                # We filter by (perm_type == p_type) OR (perm == 'None')
+                plot_data = kernel_data_full[
+                    (kernel_data_full['perm_type'] == p_type) | 
+                    (kernel_data_full['perm'] == 'None')
+                ]
+                suffix = f"_{p_type}"
+                # Filter order to only include relevant strategies
+                current_strategies = plot_data['strategy'].unique()
+                current_order = [s for s in order if s in current_strategies]
+
+            if plot_data.empty: continue
+
+            plt.figure(figsize=(12, 8))
+            sns.violinplot(
+                data=plot_data, 
+                x='strategy', 
+                y='gflops', 
+                order=current_order,
+                palette="Set2",
+                inner="quartile",
+                cut=0
+            )
+            sns.stripplot(
+                data=plot_data, 
+                x='strategy', 
+                y='gflops', 
+                order=current_order,
+                color='black', 
+                alpha=0.3, 
+                jitter=True,
+                size=3
+            )
+            
+            plt.title(f"GFLOPS Distribution by Strategy ({kernel}) - {p_type}", fontsize=14)
+            plt.ylabel("GFLOPS", fontsize=12)
+            plt.xlabel("Reordering Strategy", fontsize=12)
+            plt.xticks(rotation=45, ha='right')
+            plt.grid(True, axis='y', linestyle='--', alpha=0.7)
+            plt.tight_layout()
+            plt.savefig(out_dir / f"gflops_violin_{safe_kernel_name}{suffix}.png", dpi=300)
+            plt.close()
+            print(f"Generated gflops_violin_{safe_kernel_name}{suffix}.png")
 
 def plot_speedup_distribution(df, out_dir):
-    """Generates Speedup boxplots."""
+    """Generates Speedup plots (Boxplot, CDF, KDE), separated by perm_type."""
     df['strategy'] = df['perm'].apply(lambda x: 'Original' if x == 'None' else str(x))
     strategies = sorted([s for s in df['strategy'].unique() if s != 'Original'])
     if 'Original' in df['strategy'].unique():
@@ -286,13 +310,6 @@ def plot_speedup_distribution(df, out_dir):
         order = strategies
 
     # Calculate baseline GFLOPS per matrix and kernel
-    # We need to be careful here: 'Original' strategy might appear multiple times if we have multiple runs
-    # But typically for a given kernel and matrix, there is one original run.
-    # However, since we merged kernels (e.g. NO_REORDER and ROW), we might have duplicates if both experiments ran the original matrix?
-    # Usually NO_REORDER runs original, ROW runs reordered.
-    # But sometimes ROW experiment might include original matrix as baseline?
-    # Let's take the mean if there are duplicates for 'Original'
-    
     original_gflops = df[df['strategy'] == 'Original'].groupby(['matrix', 'kernel_id'])['gflops'].mean().reset_index()
     original_gflops = original_gflops.rename(columns={'gflops': 'gflops_original'})
     
@@ -304,43 +321,263 @@ def plot_speedup_distribution(df, out_dir):
     
     if not reordered_data.empty:
         for kernel in unique_kernels:
-            kernel_data = reordered_data[reordered_data['kernel_id'] == kernel]
-            if kernel_data.empty: continue
-            if kernel_data['speedup'].notna().sum() == 0: continue
-
-            plt.figure(figsize=(12, 8))
-            op_strategies = [s for s in order if s in kernel_data['strategy'].unique()]
+            kernel_reordered = reordered_data[reordered_data['kernel_id'] == kernel]
+            if kernel_reordered.empty: 
+                print(f"Skipping {kernel}: No reordered data found.")
+                continue
             
-            sns.boxplot(
-                data=kernel_data, 
-                x='strategy', 
-                y='speedup', 
-                order=op_strategies,
-                showfliers=False,
+            # Iterate over perm_types (ROW, SYMMETRIC, ASYMMETRIC)
+            unique_perm_types = kernel_reordered['perm_type'].unique()
+            
+            for p_type in unique_perm_types:
+                kernel_data = kernel_reordered[kernel_reordered['perm_type'] == p_type]
+                
+                valid_speedups = kernel_data['speedup'].notna().sum()
+                if valid_speedups == 0: 
+                    print(f"Skipping {kernel} ({p_type}): No valid speedup data.")
+                    continue
+                
+                print(f"Plotting speedup for {kernel} - {p_type} ({valid_speedups} data points)...")
+
+                op_strategies = [s for s in order if s in kernel_data['strategy'].unique()]
+                safe_kernel_name = kernel.replace('/', '_').replace(' ', '_')
+                suffix = f"_{p_type}"
+
+                # 1. Boxplot
+                plt.figure(figsize=(12, 8))
+                sns.boxplot(
+                    data=kernel_data, 
+                    x='strategy', 
+                    y='speedup', 
+                    order=op_strategies,
+                    showfliers=False,
+                    palette="Set2"
+                )
+                sns.stripplot(
+                    data=kernel_data, 
+                    x='strategy', 
+                    y='speedup', 
+                    order=op_strategies,
+                    color='black', 
+                    alpha=0.3, 
+                    jitter=True,
+                    size=4
+                )
+                plt.axhline(1.0, color='r', linestyle='--', linewidth=2, label='Baseline (Original)')
+                plt.title(f"Speedup Distribution by Strategy ({kernel}) - {p_type}", fontsize=14)
+                plt.ylabel("Speedup (vs Original)", fontsize=12)
+                plt.xlabel("Reordering Strategy", fontsize=12)
+                plt.xticks(rotation=45, ha='right')
+                plt.grid(True, axis='y', linestyle='--', alpha=0.7)
+                plt.legend()
+                plt.tight_layout()
+                plt.savefig(out_dir / f"speedup_boxplot_{safe_kernel_name}{suffix}.png", dpi=300)
+                plt.close()
+                print(f"Generated speedup_boxplot_{safe_kernel_name}{suffix}.png")
+
+                # 2. CDF Plot
+                plt.figure(figsize=(10, 6))
+                for strategy in op_strategies:
+                    subset = kernel_data[kernel_data['strategy'] == strategy]
+                    speedups = subset['speedup'].dropna().sort_values()
+                    if len(speedups) == 0: continue
+                    y = np.arange(1, len(speedups) + 1) / len(speedups)
+                    plt.step(speedups, y, label=strategy, where='post', linewidth=2)
+                
+                plt.axvline(1.0, color='k', linestyle='--', alpha=0.5, label='Baseline')
+                plt.xlabel('Speedup (vs Original)', fontsize=12)
+                plt.ylabel('CDF (Fraction of Matrices)', fontsize=12)
+                plt.title(f'Speedup CDF ({kernel}) - {p_type}', fontsize=14)
+                plt.legend(title='Strategy')
+                plt.grid(True, alpha=0.3)
+                plt.xscale('log')
+                plt.tight_layout()
+                plt.savefig(out_dir / f"speedup_cdf_{safe_kernel_name}{suffix}.png", dpi=300)
+                plt.close()
+                print(f"Generated speedup_cdf_{safe_kernel_name}{suffix}.png")
+
+                # 3. Histogram Plot
+                plt.figure(figsize=(10, 6))
+                try:
+                    sns.histplot(
+                        data=kernel_data, 
+                        x='speedup', 
+                        hue='strategy', 
+                        hue_order=op_strategies,
+                        common_norm=False, 
+                        stat="percent",
+                        element="step",
+                        fill=True, 
+                        alpha=0.2,
+                        palette="Set2"
+                    )
+                    plt.axvline(1.0, color='k', linestyle='--', alpha=0.5, label='Baseline')
+                    plt.xlabel('Speedup (vs Original)', fontsize=12)
+                    plt.ylabel('Percentage of Matrices (%)', fontsize=12)
+                    plt.title(f'Speedup Distribution ({kernel}) - {p_type}', fontsize=14)
+                    plt.grid(True, alpha=0.3)
+                    plt.tight_layout()
+                    plt.savefig(out_dir / f"speedup_hist_{safe_kernel_name}{suffix}.png", dpi=300)
+                    plt.close()
+                    print(f"Generated speedup_hist_{safe_kernel_name}{suffix}.png")
+                except Exception as e:
+                    print(f"Could not generate Histogram plot for {kernel} ({p_type}): {e}")
+
+def plot_reordering_efficiency(df, out_dir):
+    """Generates plots for Bandwidth Reduction and Block Density Improvement."""
+    print("Generating Reordering Efficiency plots...")
+    
+    # 1. Prepare Data
+    # We only need analysis columns. Drop duplicates to get unique matrix+perm combinations.
+    analysis_cols = [c for c in df.columns if c.startswith('bandwidth') or c.startswith('block_density')]
+    if not analysis_cols:
+        print("No analysis columns found.")
+        return
+
+    # Unique matrix+perm configurations
+    df_unique = df[['matrix', 'perm', 'perm_type'] + analysis_cols].drop_duplicates()
+    
+    # Define Strategy
+    df_unique['strategy'] = df_unique['perm'].apply(lambda x: 'Original' if x == 'None' else str(x))
+    
+    # 2. Calculate Baselines (Original)
+    # Handle duplicates in Original if any (take mean)
+    original_df = df_unique[df_unique['strategy'] == 'Original'].groupby('matrix')[analysis_cols].mean()
+    
+    if original_df.empty:
+        print("No Original matrix data found for baseline.")
+        return
+
+    # 3. Calculate Improvements
+    results = []
+    
+    for idx, row in df_unique.iterrows():
+        if row['strategy'] == 'Original': continue
+        
+        matrix = row['matrix']
+        if matrix not in original_df.index: continue
+        
+        orig = original_df.loc[matrix]
+        
+        res = {
+            'matrix': matrix,
+            'strategy': row['strategy'],
+            'perm_type': row['perm_type']
+        }
+        
+        # Bandwidth Improvement (Reduction) = Orig / Reordered
+        if 'bandwidth_max' in row and 'bandwidth_max' in orig:
+            if row['bandwidth_max'] > 0:
+                res['bandwidth_improvement'] = orig['bandwidth_max'] / row['bandwidth_max']
+            else:
+                res['bandwidth_improvement'] = np.nan
+
+        # Block Density Improvement = Reordered / Orig
+        for col in analysis_cols:
+            if col.startswith('block_density_'):
+                bs = col.split('_')[-1]
+                if orig[col] > 0:
+                    res[f'density_improvement_{bs}'] = row[col] / orig[col]
+                else:
+                    res[f'density_improvement_{bs}'] = np.nan
+        
+        results.append(res)
+        
+    if not results:
+        print("No reordered data to analyze.")
+        return
+        
+    df_res = pd.DataFrame(results)
+    
+    # 4. Plotting
+    strategies = sorted(df_res['strategy'].unique())
+    
+    def plot_dist(data, x, y, title, filename_suffix):
+        # 1. Boxplot
+        plt.figure(figsize=(12, 8))
+        sns.boxplot(data=data, x=x, y=y, order=strategies, showfliers=False, palette="Set2")
+        sns.stripplot(data=data, x=x, y=y, order=strategies, color='black', alpha=0.3, jitter=True, size=3)
+        plt.axhline(1.0, color='r', linestyle='--', label='Baseline')
+        plt.title(title, fontsize=14)
+        plt.xticks(rotation=45, ha='right')
+        plt.grid(True, axis='y', linestyle='--', alpha=0.7)
+        plt.tight_layout()
+        plt.savefig(out_dir / f"{filename_suffix}_boxplot.png", dpi=300)
+        plt.close()
+        print(f"Generated {filename_suffix}_boxplot.png")
+
+        # 2. CDF Plot
+        plt.figure(figsize=(10, 6))
+        current_strategies = [s for s in strategies if s in data[x].unique()]
+        for strategy in current_strategies:
+            subset = data[data[x] == strategy]
+            values = subset[y].dropna().sort_values()
+            if len(values) == 0: continue
+            cdf_y = np.arange(1, len(values) + 1) / len(values)
+            plt.step(values, cdf_y, label=strategy, where='post', linewidth=2)
+        
+        plt.axvline(1.0, color='k', linestyle='--', alpha=0.5, label='Baseline')
+        plt.xlabel(f"{title.split(' - ')[0]}", fontsize=12)
+        plt.ylabel('CDF (Fraction of Matrices)', fontsize=12)
+        plt.title(f"CDF: {title}", fontsize=14)
+        plt.legend(title='Strategy')
+        plt.grid(True, alpha=0.3)
+        plt.xscale('log')
+        plt.tight_layout()
+        plt.savefig(out_dir / f"{filename_suffix}_cdf.png", dpi=300)
+        plt.close()
+        print(f"Generated {filename_suffix}_cdf.png")
+
+        # 3. Histogram Plot
+        plt.figure(figsize=(10, 6))
+        try:
+            sns.histplot(
+                data=data, 
+                x=y, 
+                hue=x, 
+                hue_order=current_strategies,
+                common_norm=False, 
+                stat="percent",
+                element="step",
+                fill=True, 
+                alpha=0.2,
                 palette="Set2"
             )
-            sns.stripplot(
-                data=kernel_data, 
-                x='strategy', 
-                y='speedup', 
-                order=op_strategies,
-                color='black', 
-                alpha=0.3, 
-                jitter=True,
-                size=4
-            )
-            
-            plt.axhline(1.0, color='r', linestyle='--', linewidth=2, label='Baseline (Original)')
-            
-            plt.title(f"Speedup Distribution by Strategy ({kernel})", fontsize=14)
-            plt.ylabel("Speedup (vs Original)", fontsize=12)
-            plt.xlabel("Reordering Strategy", fontsize=12)
-            plt.xticks(rotation=45, ha='right')
-            plt.grid(True, axis='y', linestyle='--', alpha=0.7)
-            plt.legend()
+            plt.axvline(1.0, color='k', linestyle='--', alpha=0.5, label='Baseline')
+            plt.xlabel(f"{title.split(' - ')[0]}", fontsize=12)
+            plt.ylabel('Percentage of Matrices (%)', fontsize=12)
+            plt.title(f"Distribution: {title}", fontsize=14)
+            plt.grid(True, alpha=0.3)
             plt.tight_layout()
-            
-            safe_kernel_name = kernel.replace('/', '_').replace(' ', '_')
-            plt.savefig(out_dir / f"speedup_boxplot_{safe_kernel_name}.png", dpi=300)
+            plt.savefig(out_dir / f"{filename_suffix}_hist.png", dpi=300)
             plt.close()
-            print(f"Generated speedup_boxplot_{safe_kernel_name}.png")
+            print(f"Generated {filename_suffix}_hist.png")
+        except Exception as e:
+            print(f"Could not generate Histogram plot for {filename_suffix}: {e}")
+
+    # Plot Bandwidth Improvement
+    if 'bandwidth_improvement' in df_res.columns:
+        for p_type in df_res['perm_type'].unique():
+            subset = df_res[df_res['perm_type'] == p_type]
+            if subset.empty: continue
+            # Filter NaNs
+            subset = subset.dropna(subset=['bandwidth_improvement'])
+            if subset.empty: continue
+            
+            plot_dist(subset, 'strategy', 'bandwidth_improvement', 
+                      f"Bandwidth Reduction (Orig/Reordered) - {p_type}", 
+                      f"bandwidth_reduction_{p_type}")
+
+    # Plot Density Improvement for each block size
+    density_cols = [c for c in df_res.columns if c.startswith('density_improvement_')]
+    for col in density_cols:
+        bs = col.split('_')[-1]
+        for p_type in df_res['perm_type'].unique():
+            subset = df_res[df_res['perm_type'] == p_type]
+            if subset.empty: continue
+            subset = subset.dropna(subset=[col])
+            if subset.empty: continue
+            
+            plot_dist(subset, 'strategy', col, 
+                      f"Block Density Improvement (BS {bs}) - {p_type}", 
+                      f"density_improvement_bs{bs}_{p_type}")
