@@ -15,6 +15,9 @@ jobs:
   - config: "gpu"
     config_jobs:
 
+      - tag: "ASPT_SPMM_NO_REORDER"
+        command: "python3 operators/aspt_spmm.py {mtx} --n-cols {n_cols}"
+
 #      - tag: "CUSPARSE_SPMV_BSR_NO_REORDER"
 #        command: "python3 operators/cusparse_bsr_spmv.py {mtx} --blocksize {block_size}"
 #      - tag: "CUSPARSE_SPMV_CSR_NO_REORDER"

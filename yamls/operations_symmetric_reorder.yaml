@@ -23,6 +23,9 @@ jobs:
   - config: "gpu"
     config_jobs:
 
+      - tag: "ASPT_SPMM_SYMMETRIC"
+        command: "python3 operators/aspt_spmm.py {mtx} --perm perms/{perm}/$mtx_name.perm --perm-type SYMMETRIC --n-cols {n_cols}"
+
 #      - tag: "CUSPARSE_SPMV_BSR_SYMMETRIC"
 #        command: "python3 operators/cusparse_bsr_spmv.py {mtx} --perm perms/{perm}/$mtx_name.perm --blocksize {block_size} --perm-type SYMMETRIC"
 #      - tag: "CUSPARSE_SPMV_CSR_SYMMETRIC"
