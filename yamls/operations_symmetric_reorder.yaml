@@ -6,7 +6,7 @@ variables:
   #  - SB_degree
   #  - SB_metis
   #  - SB_rcm
-  #  - SB_rabbit
+    - SB_rabbit
   #  - SB_patoh
   block_size:
     - 32
