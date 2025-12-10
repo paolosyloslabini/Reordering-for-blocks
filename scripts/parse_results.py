@@ -6,9 +6,19 @@ import sys
 from pathlib import Path
 from sbatchman import jobs_list
 
+try:
+    from tqdm import tqdm
+except ImportError:
+    def tqdm(iterable, **kwargs):
+        return iterable
+
 # Default configuration
 DEFAULT_N_COLS = 32
 DEFAULT_BLOCK_SIZE = 0
+
+# Pre-compile regex patterns for performance
+ANSI_ESCAPE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+TIMER_PATTERN = re.compile(r"<Timer>\[(.*?)\]\s+([0-9.]+)\s+ms")
 
 def safe_get_var(job, key, default, cast_type=str):
     """Safely extract a variable from job.variables with type casting."""
@@ -35,12 +45,10 @@ def parse_timers(stdout):
     timers = {}
     
     # Remove ANSI color codes (robust regex for escape sequences)
-    ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
-    clean_stdout = ansi_escape.sub('', stdout)
+    clean_stdout = ANSI_ESCAPE.sub('', stdout)
     
     # Look for lines like: <Timer>[label] 123.456 ms
-    pattern = r"<Timer>\[(.*?)\]\s+([0-9.]+)\s+ms"
-    for match in re.finditer(pattern, clean_stdout):
+    for match in TIMER_PATTERN.finditer(clean_stdout):
         label = match.group(1)
         value = float(match.group(2))
         timers[f"time_{label}_ms"] = value
@@ -76,7 +84,7 @@ def main():
     analysis_jobs = [j for j in all_jobs if j.tag and j.tag.startswith("ANALYSIS_")]
     print(f"Found {len(analysis_jobs)} analysis jobs.", file=sys.stderr)
     
-    for job in analysis_jobs:
+    for job in tqdm(analysis_jobs, desc="Parsing Analysis Jobs"):
         try:
             # Parse variables
             mtx_path = safe_get_var(job, 'mtx', '')
@@ -157,7 +165,7 @@ def main():
     op_jobs = [j for j in all_jobs if j.tag and "SPMM" in j.tag]
     print(f"Found {len(op_jobs)} operation jobs.", file=sys.stderr)
     
-    for job in op_jobs:
+    for job in tqdm(op_jobs, desc="Parsing Operation Jobs"):
         try:
             # Basic Job Info
             mtx_path = safe_get_var(job, 'mtx', '')
