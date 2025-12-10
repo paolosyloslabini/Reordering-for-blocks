@@ -160,9 +160,9 @@ def main():
     if args.summary:
         return
     
-    # Categorize jobs by type
+    # ========== DETAILED BREAKDOWN BY TAG AND VARIABLES ==========
     print(f"\n{'='*60}")
-    print("BREAKDOWN BY JOB TYPE")
+    print("DETAILED BREAKDOWN BY TAG AND VARIABLES")
     print(f"{'='*60}")
     
     for status in statuses:
@@ -170,90 +170,127 @@ def main():
         if not jobs:
             continue
         
-        by_category = defaultdict(list)
-        for job in jobs:
-            category = categorize_job(job)
-            by_category[category].append(job)
+        print(f"\n{status_colors.get(status, '?')} {status} ({len(jobs)} jobs)")
+        print("-" * 50)
         
-        print(f"\n{status}:")
-        for category, cat_jobs in sorted(by_category.items()):
-            print(f"  {category}: {len(cat_jobs)}")
-    
-    # Failed jobs details
-    failed_jobs = jobs_by_status.get("FAILED", []) + jobs_by_status.get("TIMEOUT", [])
-    
-    if failed_jobs and (args.show_failed or args.verbose):
-        print(f"\n{'='*60}")
-        print(f"FAILED/TIMEOUT JOBS ({len(failed_jobs)})")
-        print(f"{'='*60}")
-        
-        # Group by tag pattern
+        # Group by tag first
         by_tag = defaultdict(list)
-        for job in failed_jobs:
+        for job in jobs:
             tag = job.tag or "no_tag"
             by_tag[tag].append(job)
         
-        for tag, tag_jobs in sorted(by_tag.items()):
-            print(f"\n  Tag: {tag}")
-            print(f"  Count: {len(tag_jobs)}")
+        for tag, tag_jobs in sorted(by_tag.items(), key=lambda x: -len(x[1])):
+            print(f"\n  [{tag}] - {len(tag_jobs)} jobs")
             
-            # Group by matrix
-            by_matrix = defaultdict(list)
+            # Group by perm variable
+            by_perm = defaultdict(list)
             for job in tag_jobs:
-                info = get_job_info(job)
-                by_matrix[info['matrix']].append(job)
+                perm = safe_get_var(job, 'perm', 'None')
+                if not perm or perm == '':
+                    perm = 'None'
+                by_perm[perm].append(job)
             
-            if args.verbose:
-                print(f"  Matrices:")
-                for matrix, matrix_jobs in sorted(by_matrix.items()):
-                    print(f"    - {matrix} ({len(matrix_jobs)} jobs)")
-            else:
-                print(f"  Affects {len(by_matrix)} matrices")
-                matrices = sorted(by_matrix.keys())
-                if len(matrices) <= 5:
-                    print(f"    {', '.join(matrices)}")
-                else:
-                    print(f"    {', '.join(matrices[:5])} ... and {len(matrices)-5} more")
+            for perm, perm_jobs in sorted(by_perm.items(), key=lambda x: -len(x[1])):
+                # Get unique matrices for this perm
+                matrices = set()
+                for job in perm_jobs:
+                    mtx = safe_get_var(job, 'mtx', '')
+                    matrices.add(get_matrix_name(mtx))
+                
+                print(f"    perm={perm}: {len(perm_jobs)} jobs ({len(matrices)} matrices)")
+                
+                if args.verbose:
+                    for m in sorted(matrices)[:10]:
+                        print(f"      - {m}")
+                    if len(matrices) > 10:
+                        print(f"      ... and {len(matrices) - 10} more")
     
-    # Running jobs details
+    # ========== FAILED JOBS DETAILED ==========
+    failed_jobs = jobs_by_status.get("FAILED", []) + jobs_by_status.get("TIMEOUT", [])
+    
+    if failed_jobs:
+        print(f"\n{'='*60}")
+        print(f"FAILED/TIMEOUT BREAKDOWN ({len(failed_jobs)} jobs)")
+        print(f"{'='*60}")
+        
+        # Group by (tag, perm)
+        by_tag_perm = defaultdict(list)
+        for job in failed_jobs:
+            tag = job.tag or "no_tag"
+            perm = safe_get_var(job, 'perm', 'None')
+            if not perm or perm == '':
+                perm = 'None'
+            by_tag_perm[(tag, perm)].append(job)
+        
+        # Sort by count descending
+        for (tag, perm), group_jobs in sorted(by_tag_perm.items(), key=lambda x: -len(x[1])):
+            matrices = set(get_matrix_name(safe_get_var(j, 'mtx', '')) for j in group_jobs)
+            status_type = "TIMEOUT" if any(getattr(j, 'status', '') == 'TIMEOUT' for j in group_jobs) else "FAILED"
+            print(f"\n  {status_type}: {tag}, perm={perm}")
+            print(f"    Jobs: {len(group_jobs)}, Matrices: {len(matrices)}")
+            
+            if args.show_failed or args.verbose:
+                for m in sorted(matrices)[:10]:
+                    print(f"      - {m}")
+                if len(matrices) > 10:
+                    print(f"      ... and {len(matrices) - 10} more")
+    
+    # ========== COMPLETED BREAKDOWN ==========
+    completed_jobs = jobs_by_status.get("COMPLETED", [])
+    
+    if completed_jobs and args.verbose:
+        print(f"\n{'='*60}")
+        print(f"COMPLETED BREAKDOWN ({len(completed_jobs)} jobs)")
+        print(f"{'='*60}")
+        
+        # Group by (tag, perm)
+        by_tag_perm = defaultdict(list)
+        for job in completed_jobs:
+            tag = job.tag or "no_tag"
+            perm = safe_get_var(job, 'perm', 'None')
+            if not perm or perm == '':
+                perm = 'None'
+            by_tag_perm[(tag, perm)].append(job)
+        
+        for (tag, perm), group_jobs in sorted(by_tag_perm.items(), key=lambda x: -len(x[1])):
+            matrices = set(get_matrix_name(safe_get_var(j, 'mtx', '')) for j in group_jobs)
+            print(f"  COMPLETED: {tag}, perm={perm} - {len(group_jobs)} jobs ({len(matrices)} matrices)")
+    
+    # ========== RUNNING/PENDING BREAKDOWN ==========
     running_jobs = jobs_by_status.get("RUNNING", [])
+    pending_jobs = jobs_by_status.get("PENDING", [])
     
     if running_jobs and (args.show_running or args.verbose):
         print(f"\n{'='*60}")
-        print(f"RUNNING JOBS ({len(running_jobs)})")
+        print(f"RUNNING BREAKDOWN ({len(running_jobs)} jobs)")
         print(f"{'='*60}")
         
-        by_tag = defaultdict(list)
+        by_tag_perm = defaultdict(list)
         for job in running_jobs:
             tag = job.tag or "no_tag"
-            by_tag[tag].append(job)
+            perm = safe_get_var(job, 'perm', 'None') or 'None'
+            by_tag_perm[(tag, perm)].append(job)
         
-        for tag, tag_jobs in sorted(by_tag.items()):
-            print(f"\n  Tag: {tag} ({len(tag_jobs)} jobs)")
-            if args.verbose:
-                for job in tag_jobs[:10]:
-                    info = get_job_info(job)
-                    print(f"    - {info['matrix']} (perm={info['perm']})")
-                if len(tag_jobs) > 10:
-                    print(f"    ... and {len(tag_jobs) - 10} more")
-    
-    # Pending jobs details
-    pending_jobs = jobs_by_status.get("PENDING", [])
+        for (tag, perm), group_jobs in sorted(by_tag_perm.items(), key=lambda x: -len(x[1])):
+            matrices = set(get_matrix_name(safe_get_var(j, 'mtx', '')) for j in group_jobs)
+            print(f"  RUNNING: {tag}, perm={perm} - {len(group_jobs)} jobs ({len(matrices)} matrices)")
     
     if pending_jobs and (args.show_pending or args.verbose):
         print(f"\n{'='*60}")
-        print(f"PENDING JOBS ({len(pending_jobs)})")
+        print(f"PENDING BREAKDOWN ({len(pending_jobs)} jobs)")
         print(f"{'='*60}")
         
-        by_tag = defaultdict(list)
+        by_tag_perm = defaultdict(list)
         for job in pending_jobs:
             tag = job.tag or "no_tag"
-            by_tag[tag].append(job)
+            perm = safe_get_var(job, 'perm', 'None') or 'None'
+            by_tag_perm[(tag, perm)].append(job)
         
-        for tag, tag_jobs in sorted(by_tag.items()):
-            print(f"\n  Tag: {tag} ({len(tag_jobs)} jobs)")
+        for (tag, perm), group_jobs in sorted(by_tag_perm.items(), key=lambda x: -len(x[1])):
+            matrices = set(get_matrix_name(safe_get_var(j, 'mtx', '')) for j in group_jobs)
+            print(f"  PENDING: {tag}, perm={perm} - {len(group_jobs)} jobs ({len(matrices)} matrices)")
     
-    # Missing analysis for completed operations
+    # ========== CROSS-CHECK ==========
     print(f"\n{'='*60}")
     print("CROSS-CHECK: OPERATIONS vs ANALYSIS")
     print(f"{'='*60}")
