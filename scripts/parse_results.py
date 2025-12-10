@@ -29,6 +29,9 @@ def get_matrix_name(path):
 
 def parse_timers(stdout):
     """Extract all timers from stdout."""
+    if not stdout:
+        return {}
+
     timers = {}
     
     # Remove ANSI color codes (robust regex for escape sequences)
