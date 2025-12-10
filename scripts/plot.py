@@ -37,11 +37,25 @@ def main():
         ]['matrix'].unique()
     
     if len(trivial_matrices) > 0:
-        print(f"Filtering out {len(trivial_matrices)} trivial matrices: {trivial_matrices}")
+        print(f"Filtering out {len(trivial_matrices)} trivial matrices (bandwidth < 5): {list(trivial_matrices)}")
         df = df[~df['matrix'].isin(trivial_matrices)]
         df_analysis = df_analysis[~df_analysis['matrix'].isin(trivial_matrices)]
 
-    # 4. Calculate Metrics (GFLOPS, op_id)
+    # 4. Filter: Sparse matrices (nnz < 3*N)
+    # Identify matrices where nnz < 3 * rows (too sparse to benefit from reordering)
+    sparse_matrices = []
+    if 'nnz' in df_analysis.columns and 'rows' in df_analysis.columns:
+        sparse_matrices = df_analysis[
+            (df_analysis['perm'] == 'None') & 
+            (df_analysis['nnz'] < 3 * df_analysis['rows'])
+        ]['matrix'].unique()
+    
+    if len(sparse_matrices) > 0:
+        print(f"Filtering out {len(sparse_matrices)} very sparse matrices (nnz < 3N): {list(sparse_matrices)}")
+        df = df[~df['matrix'].isin(sparse_matrices)]
+        df_analysis = df_analysis[~df_analysis['matrix'].isin(sparse_matrices)]
+
+    # 5. Calculate Metrics (GFLOPS, op_id)
     df = plot_utils.calculate_metrics(df)
     
     # Set style

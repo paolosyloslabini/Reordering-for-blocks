@@ -51,8 +51,8 @@ def filter_one_per_family(df, matrices_list_path):
                     path = path.replace('\\', '/')
                     parts = path.split('/')
                     if len(parts) >= 3:
-                        matrix_name = parts[-1]
-                        family = parts[-3]
+                        matrix_name = parts[-1]  # e.g., bcspwr10.mtx
+                        family = parts[-3]       # e.g., HB (the SuiteSparse group)
                         matrix_to_family[matrix_name] = family
         else:
             print(f"Warning: Matrices list file {matrices_list_path} not found.")
@@ -63,13 +63,23 @@ def filter_one_per_family(df, matrices_list_path):
 
         df['family'] = df['matrix'].map(matrix_to_family)
         
+        # Count how many matrices have a family mapping
+        mapped_count = df['family'].notna().sum()
+        unmapped_matrices = df[df['family'].isna()]['matrix'].unique()
+        print(f"Mapped {mapped_count} rows to families. {len(unmapped_matrices)} unique matrices without family mapping.")
+        
+        # For matrices without a family, use the matrix name itself as the family
+        # This means they won't be filtered out, but also won't be grouped
+        df['family'] = df['family'].fillna(df['matrix'])
+        
+        # Get unique families and select one matrix per family
+        unique_families = df['family'].nunique()
         unique_matrices = df[['matrix', 'family']].drop_duplicates()
         unique_matrices = unique_matrices.sort_values('matrix')
-        unique_matrices['family'] = unique_matrices['family'].fillna(unique_matrices['matrix'])
         
         selected_matrices = unique_matrices.groupby('family').first()['matrix'].tolist()
         
-        print(f"Selected {len(selected_matrices)} matrices representing {len(selected_matrices)} families.")
+        print(f"Selected {len(selected_matrices)} matrices representing {unique_families} families.")
         df = df[df['matrix'].isin(selected_matrices)]
         print(f"DataFrame has {len(df)} rows after family filtering.")
         return df
@@ -343,28 +353,40 @@ def plot_speedup_distribution(df, out_dir):
                 safe_kernel_name = kernel.replace('/', '_').replace(' ', '_')
                 suffix = f"_{p_type}"
 
-                # 1. Boxplot
+                # Calculate percentile bounds to clip extreme values
+                lower_bound = kernel_data['speedup'].quantile(0.01)
+                upper_bound = kernel_data['speedup'].quantile(0.99)
+                kernel_data_clipped = kernel_data[
+                    (kernel_data['speedup'] >= lower_bound) & 
+                    (kernel_data['speedup'] <= upper_bound)
+                ]
+
+                # 1. Boxplot (clipped)
                 plt.figure(figsize=(12, 8))
-                sns.boxplot(
-                    data=kernel_data, 
-                    x='strategy', 
-                    y='speedup', 
-                    order=op_strategies,
-                    showfliers=False,
-                    palette="Set2"
-                )
+                # Draw stripplot first (below boxes)
                 sns.stripplot(
-                    data=kernel_data, 
+                    data=kernel_data_clipped, 
                     x='strategy', 
                     y='speedup', 
                     order=op_strategies,
                     color='black', 
-                    alpha=0.3, 
-                    jitter=True,
+                    alpha=0.4, 
+                    jitter=0.35,
                     size=4
                 )
+                # Draw boxplot on top with transparent fill and red median
+                box = sns.boxplot(
+                    data=kernel_data_clipped, 
+                    x='strategy', 
+                    y='speedup', 
+                    order=op_strategies,
+                    showfliers=False,
+                    palette="Set2",
+                    boxprops={'alpha': 0.4},
+                    medianprops={'color': 'red', 'linewidth': 2.5, 'zorder': 10}
+                )
                 plt.axhline(1.0, color='r', linestyle='--', linewidth=2, label='Baseline (Original)')
-                plt.title(f"Speedup Distribution by Strategy ({kernel}) - {p_type}", fontsize=14)
+                plt.title(f"Speedup Distribution by Strategy ({kernel}) - {p_type}\n(1st-99th percentile)", fontsize=14)
                 plt.ylabel("Speedup (vs Original)", fontsize=12)
                 plt.xlabel("Reordering Strategy", fontsize=12)
                 plt.xticks(rotation=45, ha='right')
@@ -396,11 +418,11 @@ def plot_speedup_distribution(df, out_dir):
                 plt.close()
                 print(f"Generated speedup_cdf_{safe_kernel_name}{suffix}.png")
 
-                # 3. Histogram Plot
+                # 3. Histogram Plot (clipped)
                 plt.figure(figsize=(10, 6))
                 try:
                     sns.histplot(
-                        data=kernel_data, 
+                        data=kernel_data_clipped, 
                         x='speedup', 
                         hue='strategy', 
                         hue_order=op_strategies,
@@ -414,7 +436,7 @@ def plot_speedup_distribution(df, out_dir):
                     plt.axvline(1.0, color='k', linestyle='--', alpha=0.5, label='Baseline')
                     plt.xlabel('Speedup (vs Original)', fontsize=12)
                     plt.ylabel('Percentage of Matrices (%)', fontsize=12)
-                    plt.title(f'Speedup Distribution ({kernel}) - {p_type}', fontsize=14)
+                    plt.title(f'Speedup Distribution ({kernel}) - {p_type}\n(1st-99th percentile)', fontsize=14)
                     plt.grid(True, alpha=0.3)
                     plt.tight_layout()
                     plt.savefig(out_dir / f"speedup_hist_{safe_kernel_name}{suffix}.png", dpi=300)
@@ -422,6 +444,28 @@ def plot_speedup_distribution(df, out_dir):
                     print(f"Generated speedup_hist_{safe_kernel_name}{suffix}.png")
                 except Exception as e:
                     print(f"Could not generate Histogram plot for {kernel} ({p_type}): {e}")
+
+                # 4. KDE (Density Curve) Plot
+                plt.figure(figsize=(10, 6))
+                try:
+                    for strategy in op_strategies:
+                        subset = kernel_data_clipped[kernel_data_clipped['strategy'] == strategy]
+                        speedups = subset['speedup'].dropna()
+                        if len(speedups) < 2: continue
+                        sns.kdeplot(data=speedups, label=strategy, linewidth=2, fill=True, alpha=0.2)
+                    
+                    plt.axvline(1.0, color='k', linestyle='--', alpha=0.5, label='Baseline')
+                    plt.xlabel('Speedup (vs Original)', fontsize=12)
+                    plt.ylabel('Density', fontsize=12)
+                    plt.title(f'Speedup Density Curve ({kernel}) - {p_type}\n(1st-99th percentile)', fontsize=14)
+                    plt.legend(title='Strategy')
+                    plt.grid(True, alpha=0.3)
+                    plt.tight_layout()
+                    plt.savefig(out_dir / f"speedup_kde_{safe_kernel_name}{suffix}.png", dpi=300)
+                    plt.close()
+                    print(f"Generated speedup_kde_{safe_kernel_name}{suffix}.png")
+                except Exception as e:
+                    print(f"Could not generate KDE plot for {kernel} ({p_type}): {e}")
 
 def plot_reordering_efficiency(df, out_dir):
     """Generates plots for Bandwidth Reduction and Block Density Improvement."""
@@ -493,12 +537,26 @@ def plot_reordering_efficiency(df, out_dir):
     strategies = sorted(df_res['strategy'].unique())
     
     def plot_dist(data, x, y, title, filename_suffix):
-        # 1. Boxplot
+        # Calculate percentile bounds to clip extreme values
+        lower_bound = data[y].quantile(0.01)
+        upper_bound = data[y].quantile(0.99)
+        data_clipped = data[
+            (data[y] >= lower_bound) & 
+            (data[y] <= upper_bound)
+        ]
+
+        # 1. Boxplot (clipped)
         plt.figure(figsize=(12, 8))
-        sns.boxplot(data=data, x=x, y=y, order=strategies, showfliers=False, palette="Set2")
-        sns.stripplot(data=data, x=x, y=y, order=strategies, color='black', alpha=0.3, jitter=True, size=3)
+        # Draw stripplot first (below boxes)
+        sns.stripplot(data=data_clipped, x=x, y=y, order=strategies, color='black', alpha=0.4, jitter=0.35, size=3)
+        # Draw boxplot on top with transparent fill and red median
+        sns.boxplot(
+            data=data_clipped, x=x, y=y, order=strategies, showfliers=False, palette="Set2",
+            boxprops={'alpha': 0.4},
+            medianprops={'color': 'red', 'linewidth': 2.5, 'zorder': 10}
+        )
         plt.axhline(1.0, color='r', linestyle='--', label='Baseline')
-        plt.title(title, fontsize=14)
+        plt.title(f"{title}\n(1st-99th percentile)", fontsize=14)
         plt.xticks(rotation=45, ha='right')
         plt.grid(True, axis='y', linestyle='--', alpha=0.7)
         plt.tight_layout()
@@ -528,11 +586,11 @@ def plot_reordering_efficiency(df, out_dir):
         plt.close()
         print(f"Generated {filename_suffix}_cdf.png")
 
-        # 3. Histogram Plot
+        # 3. Histogram Plot (clipped)
         plt.figure(figsize=(10, 6))
         try:
             sns.histplot(
-                data=data, 
+                data=data_clipped, 
                 x=y, 
                 hue=x, 
                 hue_order=current_strategies,
@@ -546,7 +604,7 @@ def plot_reordering_efficiency(df, out_dir):
             plt.axvline(1.0, color='k', linestyle='--', alpha=0.5, label='Baseline')
             plt.xlabel(f"{title.split(' - ')[0]}", fontsize=12)
             plt.ylabel('Percentage of Matrices (%)', fontsize=12)
-            plt.title(f"Distribution: {title}", fontsize=14)
+            plt.title(f"Distribution: {title}\n(1st-99th percentile)", fontsize=14)
             plt.grid(True, alpha=0.3)
             plt.tight_layout()
             plt.savefig(out_dir / f"{filename_suffix}_hist.png", dpi=300)
@@ -554,6 +612,28 @@ def plot_reordering_efficiency(df, out_dir):
             print(f"Generated {filename_suffix}_hist.png")
         except Exception as e:
             print(f"Could not generate Histogram plot for {filename_suffix}: {e}")
+
+        # 4. KDE (Density Curve) Plot
+        plt.figure(figsize=(10, 6))
+        try:
+            for strategy in current_strategies:
+                subset = data_clipped[data_clipped[x] == strategy]
+                values = subset[y].dropna()
+                if len(values) < 2: continue
+                sns.kdeplot(data=values, label=strategy, linewidth=2, fill=True, alpha=0.2)
+            
+            plt.axvline(1.0, color='k', linestyle='--', alpha=0.5, label='Baseline')
+            plt.xlabel(f"{title.split(' - ')[0]}", fontsize=12)
+            plt.ylabel('Density', fontsize=12)
+            plt.title(f"Density Curve: {title}\n(1st-99th percentile)", fontsize=14)
+            plt.legend(title='Strategy')
+            plt.grid(True, alpha=0.3)
+            plt.tight_layout()
+            plt.savefig(out_dir / f"{filename_suffix}_kde.png", dpi=300)
+            plt.close()
+            print(f"Generated {filename_suffix}_kde.png")
+        except Exception as e:
+            print(f"Could not generate KDE plot for {filename_suffix}: {e}")
 
     # Plot Bandwidth Improvement
     if 'bandwidth_improvement' in df_res.columns:
