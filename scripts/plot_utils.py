@@ -38,9 +38,63 @@ def load_and_merge_data(ops_path, analysis_path):
         
     return df, df_analysis
 
-def filter_one_per_family(df, matrices_list_path):
-    """Filters the DataFrame to keep only one matrix per family."""
+# Families to keep fully (not reduce to one representative)
+# These contain diverse matrices from different sources/applications that shouldn't be grouped together
+KEEP_FULL_FAMILIES = [
+    # Large collections (>40 matrices) - diverse problem sources
+    'Meszaros',        # LP problems from various sources (118 matrices)
+    'Sandia',          # National lab - diverse applications (77 matrices)
+    'HB',              # Harwell-Boeing collection - classic diverse problems (74 matrices)
+    'VDOL',            # Various authors (68 matrices)
+    'DIMACS10',        # Graph partitioning challenge - diverse graph types (65 matrices)
+    'JGD_Homology',    # Homology computation - different topological problems (60 matrices)
+    'Gset',            # Graph set - different graph optimization problems (53 matrices)
+    'Hollinger',       # Various problems (49 matrices)
+    'Schenk_IBMNA',    # IBM - different circuit simulations (49 matrices)
+    'LPnetlib',        # Linear programming - diverse LP problems (49 matrices)
+    'GHS_indef',       # Indefinite systems - various sources (48 matrices)
+    'SNAP'            # Social networks, web graphs - very diverse (40 matrices)
+]
+
+"""  
+    # Medium collections (20-40 matrices) - still diverse
+    'FIDAP',           # Fluid dynamics - different simulations (32 matrices)
+    'ML_Graph',        # Machine learning graphs - different datasets (26 matrices)
+    'Bai',             # Control theory - different systems (25 matrices)
+    'Pajek',           # Network analysis - different real networks (25 matrices)
+    'Oberwolfach',     # Model reduction - different models (23 matrices)
+    'DRIVCAV',         # Driven cavity - different discretizations (22 matrices)
+    'Rajat',           # Circuit simulation - different circuits (21 matrices)
+    'Boeing',          # Aircraft structures - different components (21 matrices)
+    'AG-Monien',       # Graph partitioning benchmarks (21 matrices)
+    'Nemeth',          # Various applications (20 matrices)
+    'Rommes',          # Model reduction (20 matrices)
+    
+    # Smaller but still diverse collections
+    'Mittelmann',      # LP benchmarks - diverse problems (18 matrices)
+    'GHS_psdef',       # Positive definite systems (16 matrices)
+    'Mallya',          # Various problems (16 matrices)
+    'Grund',           # Circuit simulation (15 matrices)
+    'Pothen',          # Various sparse matrix problems (13 matrices)
+    'Newman',          # Network science graphs (8 matrices)
+"""
+
+
+def filter_one_per_family(df, matrices_list_path, keep_full_families=None):
+    """Filters the DataFrame to keep only one matrix per family.
+    
+    Args:
+        df: DataFrame to filter
+        matrices_list_path: Path to file with matrix paths
+        keep_full_families: List of family names to keep fully (not filter).
+                           If None, uses KEEP_FULL_FAMILIES default.
+    """
+    if keep_full_families is None:
+        keep_full_families = KEEP_FULL_FAMILIES
+    
     print("Filtering: One matrix per family...")
+    print(f"Families to keep fully: {keep_full_families}")
+    
     try:
         matrix_to_family = {}
         if Path(matrices_list_path).exists():
@@ -69,18 +123,30 @@ def filter_one_per_family(df, matrices_list_path):
         print(f"Mapped {mapped_count} rows to families. {len(unmapped_matrices)} unique matrices without family mapping.")
         
         # For matrices without a family, use the matrix name itself as the family
-        # This means they won't be filtered out, but also won't be grouped
         df['family'] = df['family'].fillna(df['matrix'])
         
-        # Get unique families and select one matrix per family
-        unique_families = df['family'].nunique()
-        unique_matrices = df[['matrix', 'family']].drop_duplicates()
-        unique_matrices = unique_matrices.sort_values('matrix')
+        # Separate matrices in "keep full" families from those to filter
+        keep_full_mask = df['family'].isin(keep_full_families)
+        df_keep_full = df[keep_full_mask]
+        df_to_filter = df[~keep_full_mask]
         
+        # Get unique families and select one matrix per family (for filtered families only)
+        unique_matrices = df_to_filter[['matrix', 'family']].drop_duplicates()
+        unique_matrices = unique_matrices.sort_values('matrix')
         selected_matrices = unique_matrices.groupby('family').first()['matrix'].tolist()
         
-        print(f"Selected {len(selected_matrices)} matrices representing {unique_families} families.")
-        df = df[df['matrix'].isin(selected_matrices)]
+        # Add all matrices from "keep full" families
+        keep_full_matrices = df_keep_full['matrix'].unique().tolist()
+        all_selected = list(set(selected_matrices + keep_full_matrices))
+        
+        # Stats
+        filtered_families = df_to_filter['family'].nunique()
+        kept_full_count = len(keep_full_matrices)
+        print(f"Selected {len(selected_matrices)} matrices from {filtered_families} filtered families.")
+        print(f"Keeping {kept_full_count} matrices from {len(keep_full_families)} full families.")
+        print(f"Total: {len(all_selected)} unique matrices.")
+        
+        df = df[df['matrix'].isin(all_selected)]
         print(f"DataFrame has {len(df)} rows after family filtering.")
         return df
             
@@ -467,9 +533,452 @@ def plot_speedup_distribution(df, out_dir):
                 except Exception as e:
                     print(f"Could not generate KDE plot for {kernel} ({p_type}): {e}")
 
+
+def plot_speedup_vs_density(df, out_dir):
+    """Generates scatter plots showing speedup vs density improvement for each kernel and reordering."""
+    print("Generating Speedup vs Density Improvement scatter plots...")
+    
+    # Calculate baseline GFLOPS per matrix and kernel (Original)
+    df['strategy'] = df['perm'].apply(lambda x: 'Original' if x == 'None' else str(x))
+    
+    original_gflops = df[df['strategy'] == 'Original'].groupby(['matrix', 'kernel_id'])['gflops'].mean().reset_index()
+    original_gflops = original_gflops.rename(columns={'gflops': 'gflops_original'})
+    
+    df_speedup = pd.merge(df, original_gflops, on=['matrix', 'kernel_id'], how='left')
+    df_speedup['speedup'] = df_speedup['gflops'] / df_speedup['gflops_original']
+    
+    # Calculate baseline densities per matrix (Original)
+    density_cols = [c for c in df.columns if c.startswith('block_density_')]
+    if not density_cols:
+        print("No block density columns found. Skipping speedup vs density plots.")
+        return
+    
+    # Get original densities
+    original_densities = df[df['strategy'] == 'Original'][['matrix'] + density_cols].drop_duplicates()
+    original_densities = original_densities.groupby('matrix')[density_cols].mean().reset_index()
+    original_densities = original_densities.rename(columns={c: f'{c}_original' for c in density_cols})
+    
+    df_speedup = pd.merge(df_speedup, original_densities, on='matrix', how='left')
+    
+    # Calculate density improvement for each block size
+    for col in density_cols:
+        orig_col = f'{col}_original'
+        if orig_col in df_speedup.columns:
+            # Density improvement = Reordered / Original (higher is better)
+            df_speedup[f'{col}_improvement'] = df_speedup[col] / df_speedup[orig_col]
+    
+    # Filter to reordered data only
+    reordered_data = df_speedup[df_speedup['strategy'] != 'Original']
+    
+    if reordered_data.empty:
+        print("No reordered data found. Skipping speedup vs density plots.")
+        return
+    
+    unique_kernels = df_speedup['kernel_id'].unique()
+    strategies = sorted([s for s in reordered_data['strategy'].unique()])
+    
+    # Color palette for strategies
+    palette = sns.color_palette("Set2", len(strategies))
+    color_map = dict(zip(strategies, palette))
+    
+    for kernel in unique_kernels:
+        kernel_data = reordered_data[reordered_data['kernel_id'] == kernel]
+        if kernel_data.empty:
+            continue
+        
+        safe_kernel_name = kernel.replace('/', '_').replace(' ', '_')
+        
+        # Iterate over perm_types
+        unique_perm_types = kernel_data['perm_type'].unique()
+        
+        for p_type in unique_perm_types:
+            ptype_data = kernel_data[kernel_data['perm_type'] == p_type]
+            if ptype_data.empty:
+                continue
+            
+            # Plot for each block size
+            for col in density_cols:
+                improvement_col = f'{col}_improvement'
+                if improvement_col not in ptype_data.columns:
+                    continue
+                
+                bs = col.split('_')[-1]
+                
+                # Filter valid data
+                plot_data = ptype_data[['matrix', 'strategy', 'speedup', improvement_col]].dropna()
+                if plot_data.empty or len(plot_data) < 5:
+                    continue
+                
+                # Clip to 1st-99th percentile
+                speedup_lower = plot_data['speedup'].quantile(0.01)
+                speedup_upper = plot_data['speedup'].quantile(0.99)
+                density_lower = plot_data[improvement_col].quantile(0.01)
+                density_upper = plot_data[improvement_col].quantile(0.99)
+                
+                plot_data = plot_data[
+                    (plot_data['speedup'] >= speedup_lower) & 
+                    (plot_data['speedup'] <= speedup_upper) &
+                    (plot_data[improvement_col] >= density_lower) &
+                    (plot_data[improvement_col] <= density_upper)
+                ]
+                
+                if plot_data.empty or len(plot_data) < 5:
+                    continue
+                
+                # Create scatter plot
+                plt.figure(figsize=(12, 10))
+                
+                for strategy in strategies:
+                    subset = plot_data[plot_data['strategy'] == strategy]
+                    if subset.empty:
+                        continue
+                    plt.scatter(
+                        subset[improvement_col], 
+                        subset['speedup'],
+                        label=strategy,
+                        color=color_map[strategy],
+                        alpha=0.6,
+                        s=50,
+                        edgecolors='white',
+                        linewidths=0.5
+                    )
+                
+                # Reference lines
+                plt.axhline(1.0, color='gray', linestyle='--', linewidth=1.5, alpha=0.7, label='Speedup = 1')
+                plt.axvline(1.0, color='gray', linestyle=':', linewidth=1.5, alpha=0.7, label='Density Imp. = 1')
+                
+                # Diagonal reference (y = x)
+                xlim = plt.xlim()
+                ylim = plt.ylim()
+                min_val = max(min(xlim[0], ylim[0]), 0.1)
+                max_val = min(max(xlim[1], ylim[1]), 10)
+                diag_range = np.linspace(min_val, max_val, 100)
+                plt.plot(diag_range, diag_range, 'r-', alpha=0.3, linewidth=1, label='y = x')
+                
+                plt.xlabel(f'Block Density Improvement (BS {bs}) [Reordered / Original]', fontsize=12)
+                plt.ylabel('Speedup [Reordered / Original]', fontsize=12)
+                plt.title(f'Speedup vs Density Improvement\n{kernel} - {p_type} (Block Size {bs})', fontsize=14)
+                plt.legend(title='Reordering', loc='best', fontsize=9)
+                plt.grid(True, alpha=0.3)
+                
+                # Use log scale if data spans wide range
+                if speedup_upper / speedup_lower > 5:
+                    plt.yscale('log')
+                if density_upper / density_lower > 5:
+                    plt.xscale('log')
+                
+                plt.tight_layout()
+                filename = f"speedup_vs_density_bs{bs}_{safe_kernel_name}_{p_type}.png"
+                plt.savefig(out_dir / filename, dpi=300)
+                plt.close()
+                print(f"Generated {filename}")
+    
+    # Also create a combined plot across all kernels for each block size
+    for col in density_cols:
+        improvement_col = f'{col}_improvement'
+        if improvement_col not in reordered_data.columns:
+            continue
+        
+        bs = col.split('_')[-1]
+        
+        for p_type in reordered_data['perm_type'].unique():
+            ptype_data = reordered_data[reordered_data['perm_type'] == p_type]
+            
+            plot_data = ptype_data[['matrix', 'kernel_id', 'strategy', 'speedup', improvement_col]].dropna()
+            if plot_data.empty or len(plot_data) < 5:
+                continue
+            
+            # Clip to 1st-99th percentile
+            speedup_lower = plot_data['speedup'].quantile(0.01)
+            speedup_upper = plot_data['speedup'].quantile(0.99)
+            density_lower = plot_data[improvement_col].quantile(0.01)
+            density_upper = plot_data[improvement_col].quantile(0.99)
+            
+            plot_data = plot_data[
+                (plot_data['speedup'] >= speedup_lower) & 
+                (plot_data['speedup'] <= speedup_upper) &
+                (plot_data[improvement_col] >= density_lower) &
+                (plot_data[improvement_col] <= density_upper)
+            ]
+            
+            if plot_data.empty or len(plot_data) < 5:
+                continue
+            
+            # Create faceted plot by kernel
+            g = sns.FacetGrid(
+                plot_data, 
+                col='kernel_id', 
+                col_wrap=2,
+                height=5,
+                aspect=1.2,
+                sharex=False,
+                sharey=False
+            )
+            
+            def scatter_with_refs(data, **kwargs):
+                for strategy in strategies:
+                    subset = data[data['strategy'] == strategy]
+                    if subset.empty:
+                        continue
+                    plt.scatter(
+                        subset[improvement_col], 
+                        subset['speedup'],
+                        label=strategy,
+                        color=color_map[strategy],
+                        alpha=0.6,
+                        s=40,
+                        edgecolors='white',
+                        linewidths=0.3
+                    )
+                plt.axhline(1.0, color='gray', linestyle='--', linewidth=1, alpha=0.5)
+                plt.axvline(1.0, color='gray', linestyle=':', linewidth=1, alpha=0.5)
+            
+            g.map_dataframe(scatter_with_refs)
+            g.set_axis_labels(
+                f'Density Improvement (BS {bs})', 
+                'Speedup'
+            )
+            g.add_legend(title='Reordering')
+            g.figure.suptitle(f'Speedup vs Density Improvement - {p_type} (Block Size {bs})', y=1.02, fontsize=14)
+            
+            plt.tight_layout()
+            filename = f"speedup_vs_density_bs{bs}_all_kernels_{p_type}.png"
+            g.savefig(out_dir / filename, dpi=300)
+            plt.close()
+            print(f"Generated {filename}")
+
+
+def plot_speedup_vs_density_improved_only(df, out_dir):
+    """Generates scatter plots showing speedup vs density improvement, filtered to density improvement > 1."""
+    print("Generating Speedup vs Density Improvement plots (density > 1 only)...")
+    
+    # Calculate baseline GFLOPS per matrix and kernel (Original)
+    df['strategy'] = df['perm'].apply(lambda x: 'Original' if x == 'None' else str(x))
+    
+    original_gflops = df[df['strategy'] == 'Original'].groupby(['matrix', 'kernel_id'])['gflops'].mean().reset_index()
+    original_gflops = original_gflops.rename(columns={'gflops': 'gflops_original'})
+    
+    df_speedup = pd.merge(df, original_gflops, on=['matrix', 'kernel_id'], how='left')
+    df_speedup['speedup'] = df_speedup['gflops'] / df_speedup['gflops_original']
+    
+    # Calculate baseline densities per matrix (Original)
+    density_cols = [c for c in df.columns if c.startswith('block_density_')]
+    if not density_cols:
+        print("No block density columns found. Skipping speedup vs density (improved only) plots.")
+        return
+    
+    # Get original densities
+    original_densities = df[df['strategy'] == 'Original'][['matrix'] + density_cols].drop_duplicates()
+    original_densities = original_densities.groupby('matrix')[density_cols].mean().reset_index()
+    original_densities = original_densities.rename(columns={c: f'{c}_original' for c in density_cols})
+    
+    df_speedup = pd.merge(df_speedup, original_densities, on='matrix', how='left')
+    
+    # Calculate density improvement for each block size
+    for col in density_cols:
+        orig_col = f'{col}_original'
+        if orig_col in df_speedup.columns:
+            df_speedup[f'{col}_improvement'] = df_speedup[col] / df_speedup[orig_col]
+    
+    # Filter to reordered data only
+    reordered_data = df_speedup[df_speedup['strategy'] != 'Original']
+    
+    if reordered_data.empty:
+        print("No reordered data found. Skipping speedup vs density (improved only) plots.")
+        return
+    
+    unique_kernels = df_speedup['kernel_id'].unique()
+    strategies = sorted([s for s in reordered_data['strategy'].unique()])
+    
+    # Color palette for strategies
+    palette = sns.color_palette("Set2", len(strategies))
+    color_map = dict(zip(strategies, palette))
+    
+    for kernel in unique_kernels:
+        kernel_data = reordered_data[reordered_data['kernel_id'] == kernel]
+        if kernel_data.empty:
+            continue
+        
+        safe_kernel_name = kernel.replace('/', '_').replace(' ', '_')
+        
+        # Iterate over perm_types
+        unique_perm_types = kernel_data['perm_type'].unique()
+        
+        for p_type in unique_perm_types:
+            ptype_data = kernel_data[kernel_data['perm_type'] == p_type]
+            if ptype_data.empty:
+                continue
+            
+            # Plot for each block size
+            for col in density_cols:
+                improvement_col = f'{col}_improvement'
+                if improvement_col not in ptype_data.columns:
+                    continue
+                
+                bs = col.split('_')[-1]
+                
+                # Filter valid data AND density improvement > 1
+                plot_data = ptype_data[['matrix', 'strategy', 'speedup', improvement_col]].dropna()
+                plot_data = plot_data[plot_data[improvement_col] > 1.0]  # Only density improvement > 1
+                
+                if plot_data.empty or len(plot_data) < 5:
+                    continue
+                
+                # Clip to 1st-99th percentile
+                speedup_lower = plot_data['speedup'].quantile(0.01)
+                speedup_upper = plot_data['speedup'].quantile(0.99)
+                density_upper = plot_data[improvement_col].quantile(0.99)
+                
+                plot_data = plot_data[
+                    (plot_data['speedup'] >= speedup_lower) & 
+                    (plot_data['speedup'] <= speedup_upper) &
+                    (plot_data[improvement_col] <= density_upper)
+                ]
+                
+                if plot_data.empty or len(plot_data) < 5:
+                    continue
+                
+                # Create scatter plot
+                plt.figure(figsize=(12, 10))
+                
+                for strategy in strategies:
+                    subset = plot_data[plot_data['strategy'] == strategy]
+                    if subset.empty:
+                        continue
+                    plt.scatter(
+                        subset[improvement_col], 
+                        subset['speedup'],
+                        label=strategy,
+                        color=color_map[strategy],
+                        alpha=0.6,
+                        s=50,
+                        edgecolors='white',
+                        linewidths=0.5
+                    )
+                
+                # Reference lines
+                plt.axhline(1.0, color='gray', linestyle='--', linewidth=1.5, alpha=0.7, label='Speedup = 1')
+                
+                # Diagonal reference (y = x)
+                xlim = plt.xlim()
+                ylim = plt.ylim()
+                min_val = max(min(xlim[0], ylim[0]), 1.0)
+                max_val = min(max(xlim[1], ylim[1]), 10)
+                diag_range = np.linspace(min_val, max_val, 100)
+                plt.plot(diag_range, diag_range, 'r-', alpha=0.3, linewidth=1, label='y = x')
+                
+                # Count stats
+                n_improved = len(plot_data[plot_data['speedup'] > 1.0])
+                n_total = len(plot_data)
+                pct_improved = 100 * n_improved / n_total if n_total > 0 else 0
+                
+                plt.xlabel(f'Block Density Improvement (BS {bs}) [Reordered / Original]', fontsize=12)
+                plt.ylabel('Speedup [Reordered / Original]', fontsize=12)
+                plt.title(f'Speedup vs Density Improvement (Density > 1 only)\n{kernel} - {p_type} (BS {bs})\n{n_improved}/{n_total} ({pct_improved:.1f}%) also have speedup > 1', fontsize=12)
+                plt.legend(title='Reordering', loc='best', fontsize=9)
+                plt.grid(True, alpha=0.3)
+                
+                # Use log scale if data spans wide range
+                if speedup_upper / speedup_lower > 5:
+                    plt.yscale('log')
+                if density_upper > 5:
+                    plt.xscale('log')
+                
+                plt.tight_layout()
+                filename = f"speedup_vs_density_improved_bs{bs}_{safe_kernel_name}_{p_type}.png"
+                plt.savefig(out_dir / filename, dpi=300)
+                plt.close()
+                print(f"Generated {filename}")
+    
+    # Also create a combined plot across all kernels for each block size
+    for col in density_cols:
+        improvement_col = f'{col}_improvement'
+        if improvement_col not in reordered_data.columns:
+            continue
+        
+        bs = col.split('_')[-1]
+        
+        for p_type in reordered_data['perm_type'].unique():
+            ptype_data = reordered_data[reordered_data['perm_type'] == p_type]
+            
+            plot_data = ptype_data[['matrix', 'kernel_id', 'strategy', 'speedup', improvement_col]].dropna()
+            plot_data = plot_data[plot_data[improvement_col] > 1.0]  # Only density improvement > 1
+            
+            if plot_data.empty or len(plot_data) < 5:
+                continue
+            
+            # Clip to 1st-99th percentile
+            speedup_lower = plot_data['speedup'].quantile(0.01)
+            speedup_upper = plot_data['speedup'].quantile(0.99)
+            density_upper = plot_data[improvement_col].quantile(0.99)
+            
+            plot_data = plot_data[
+                (plot_data['speedup'] >= speedup_lower) & 
+                (plot_data['speedup'] <= speedup_upper) &
+                (plot_data[improvement_col] <= density_upper)
+            ]
+            
+            if plot_data.empty or len(plot_data) < 5:
+                continue
+            
+            # Create faceted plot by kernel
+            g = sns.FacetGrid(
+                plot_data, 
+                col='kernel_id', 
+                col_wrap=2,
+                height=5,
+                aspect=1.2,
+                sharex=False,
+                sharey=False
+            )
+            
+            def scatter_with_refs(data, **kwargs):
+                for strategy in strategies:
+                    subset = data[data['strategy'] == strategy]
+                    if subset.empty:
+                        continue
+                    plt.scatter(
+                        subset[improvement_col], 
+                        subset['speedup'],
+                        label=strategy,
+                        color=color_map[strategy],
+                        alpha=0.6,
+                        s=40,
+                        edgecolors='white',
+                        linewidths=0.3
+                    )
+                plt.axhline(1.0, color='gray', linestyle='--', linewidth=1, alpha=0.5)
+            
+            g.map_dataframe(scatter_with_refs)
+            g.set_axis_labels(
+                f'Density Improvement (BS {bs})', 
+                'Speedup'
+            )
+            g.add_legend(title='Reordering')
+            
+            # Calculate overall stats
+            n_improved = len(plot_data[plot_data['speedup'] > 1.0])
+            n_total = len(plot_data)
+            pct_improved = 100 * n_improved / n_total if n_total > 0 else 0
+            
+            g.figure.suptitle(f'Speedup vs Density Improvement (Density > 1 only) - {p_type} (BS {bs})\n{n_improved}/{n_total} ({pct_improved:.1f}%) also have speedup > 1', y=1.04, fontsize=12)
+            
+            plt.tight_layout()
+            filename = f"speedup_vs_density_improved_bs{bs}_all_kernels_{p_type}.png"
+            g.savefig(out_dir / filename, dpi=300)
+            plt.close()
+            print(f"Generated {filename}")
+
+
 def plot_reordering_efficiency(df, out_dir):
     """Generates plots for Bandwidth Reduction and Block Density Improvement."""
     print("Generating Reordering Efficiency plots...")
+    
+    # Create subdirectories for bandwidth and density
+    bandwidth_dir = out_dir / "bandwidth"
+    density_dir = out_dir / "density"
+    bandwidth_dir.mkdir(parents=True, exist_ok=True)
+    density_dir.mkdir(parents=True, exist_ok=True)
     
     # 1. Prepare Data
     # We only need analysis columns. Drop duplicates to get unique matrix+perm combinations.
@@ -536,7 +1045,7 @@ def plot_reordering_efficiency(df, out_dir):
     # 4. Plotting
     strategies = sorted(df_res['strategy'].unique())
     
-    def plot_dist(data, x, y, title, filename_suffix):
+    def plot_dist(data, x, y, title, target_dir, filename_suffix):
         # Calculate percentile bounds to clip extreme values
         lower_bound = data[y].quantile(0.01)
         upper_bound = data[y].quantile(0.99)
@@ -560,7 +1069,7 @@ def plot_reordering_efficiency(df, out_dir):
         plt.xticks(rotation=45, ha='right')
         plt.grid(True, axis='y', linestyle='--', alpha=0.7)
         plt.tight_layout()
-        plt.savefig(out_dir / f"{filename_suffix}_boxplot.png", dpi=300)
+        plt.savefig(target_dir / f"{filename_suffix}_boxplot.png", dpi=300)
         plt.close()
         print(f"Generated {filename_suffix}_boxplot.png")
 
@@ -582,7 +1091,7 @@ def plot_reordering_efficiency(df, out_dir):
         plt.grid(True, alpha=0.3)
         plt.xscale('log')
         plt.tight_layout()
-        plt.savefig(out_dir / f"{filename_suffix}_cdf.png", dpi=300)
+        plt.savefig(target_dir / f"{filename_suffix}_cdf.png", dpi=300)
         plt.close()
         print(f"Generated {filename_suffix}_cdf.png")
 
@@ -607,7 +1116,7 @@ def plot_reordering_efficiency(df, out_dir):
             plt.title(f"Distribution: {title}\n(1st-99th percentile)", fontsize=14)
             plt.grid(True, alpha=0.3)
             plt.tight_layout()
-            plt.savefig(out_dir / f"{filename_suffix}_hist.png", dpi=300)
+            plt.savefig(target_dir / f"{filename_suffix}_hist.png", dpi=300)
             plt.close()
             print(f"Generated {filename_suffix}_hist.png")
         except Exception as e:
@@ -629,7 +1138,7 @@ def plot_reordering_efficiency(df, out_dir):
             plt.legend(title='Strategy')
             plt.grid(True, alpha=0.3)
             plt.tight_layout()
-            plt.savefig(out_dir / f"{filename_suffix}_kde.png", dpi=300)
+            plt.savefig(target_dir / f"{filename_suffix}_kde.png", dpi=300)
             plt.close()
             print(f"Generated {filename_suffix}_kde.png")
         except Exception as e:
@@ -646,6 +1155,7 @@ def plot_reordering_efficiency(df, out_dir):
             
             plot_dist(subset, 'strategy', 'bandwidth_improvement', 
                       f"Bandwidth Reduction (Orig/Reordered) - {p_type}", 
+                      bandwidth_dir,
                       f"bandwidth_reduction_{p_type}")
 
     # Plot Density Improvement for each block size
@@ -660,4 +1170,5 @@ def plot_reordering_efficiency(df, out_dir):
             
             plot_dist(subset, 'strategy', col, 
                       f"Block Density Improvement (BS {bs}) - {p_type}", 
+                      density_dir,
                       f"density_improvement_bs{bs}_{p_type}")

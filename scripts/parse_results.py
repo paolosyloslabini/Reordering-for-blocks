@@ -138,6 +138,8 @@ def main():
                         row[f'block_density_{bs}'] = b.get('block_density')
                         row[f'nonzero_blocks_{bs}'] = b.get('nonzero_blocks')
                         row[f'total_blocks_{bs}'] = b.get('total_blocks')
+                        row[f'max_blocks_per_row_{bs}'] = b.get('max_blocks_per_row')
+                        row[f'avg_blocks_per_row_{bs}'] = b.get('avg_blocks_per_row')
                 
                 analysis_results.append(row)
             else:
