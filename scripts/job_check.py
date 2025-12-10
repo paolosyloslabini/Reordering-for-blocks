@@ -104,27 +104,31 @@ def main():
 
     print("Fetching jobs...", file=sys.stderr)
     
-    # Fetch jobs with different statuses
-    jobs_by_status = {}
+    # Fetch ALL jobs in a single call (much faster than multiple calls)
+    try:
+        all_jobs = jobs_list(
+            from_archived=True, 
+            update_jobs=args.update
+        )
+        if args.tag_filter:
+            all_jobs = [j for j in all_jobs if j.tag and args.tag_filter in j.tag]
+    except Exception as e:
+        print(f"Error fetching jobs: {e}", file=sys.stderr)
+        sys.exit(1)
     
+    # Group jobs by status
+    jobs_by_status = defaultdict(list)
     statuses = ["COMPLETED", "FAILED", "RUNNING", "PENDING", "TIMEOUT", "CANCELLED"]
     
-    for status in statuses:
-        try:
-            jobs = jobs_list(
-                from_archived=True, 
-                status=[status], 
-                update_jobs=args.update
-            )
-            if args.tag_filter:
-                jobs = [j for j in jobs if j.tag and args.tag_filter in j.tag]
-            jobs_by_status[status] = jobs
-        except Exception as e:
-            print(f"Warning: Could not fetch {status} jobs: {e}", file=sys.stderr)
-            jobs_by_status[status] = []
+    for job in all_jobs:
+        status = getattr(job, 'status', 'UNKNOWN')
+        if status in statuses:
+            jobs_by_status[status].append(job)
+        else:
+            jobs_by_status['OTHER'].append(job)
     
     # Count totals
-    total_jobs = sum(len(jobs) for jobs in jobs_by_status.values())
+    total_jobs = len(all_jobs)
     
     print(f"\n{'='*60}")
     print("JOB STATUS OVERVIEW")
