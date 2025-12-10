@@ -64,11 +64,11 @@ def main():
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    print("Fetching jobs...", file=sys.stderr)
+    print("Fetching jobs (this may take a while)...", file=sys.stderr)
     
     # Fetch ALL completed jobs
     try:
-        all_jobs = jobs_list(from_archived=True, status=["COMPLETED"])
+        all_jobs = jobs_list(from_archived=True, status=["COMPLETED"], update_jobs=False)
     except Exception as e:
         print(f"Error fetching jobs: {e}", file=sys.stderr)
         sys.exit(1)
