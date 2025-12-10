@@ -234,6 +234,44 @@ def main():
                     print(f"      - {m}")
                 if len(matrices) > 10:
                     print(f"      ... and {len(matrices) - 10} more")
+            
+            # Show example error from first job in this category
+            example_job = group_jobs[0]
+            stderr = getattr(example_job, 'stderr', None)
+            if stderr is None:
+                try:
+                    stderr = example_job.get_stderr()
+                except:
+                    stderr = None
+            
+            stdout = getattr(example_job, 'stdout', None)
+            if stdout is None:
+                try:
+                    stdout = example_job.get_stdout()
+                except:
+                    stdout = None
+            
+            # Get job ID and matrix for context
+            example_matrix = get_matrix_name(safe_get_var(example_job, 'mtx', ''))
+            example_job_id = getattr(example_job, 'id', getattr(example_job, 'job_id', 'unknown'))
+            
+            print(f"\n    Example error (job {example_job_id}, matrix: {example_matrix}):")
+            
+            # Show last N lines of stderr or stdout
+            error_text = stderr or stdout or "(no output captured)"
+            if error_text and error_text != "(no output captured)":
+                # Get last 10 non-empty lines
+                lines = [l.strip() for l in error_text.split('\n') if l.strip()]
+                last_lines = lines[-10:] if len(lines) > 10 else lines
+                print("    " + "-" * 40)
+                for line in last_lines:
+                    # Truncate very long lines
+                    if len(line) > 100:
+                        line = line[:100] + "..."
+                    print(f"    | {line}")
+                print("    " + "-" * 40)
+            else:
+                print(f"    {error_text}")
     
     # ========== COMPLETED BREAKDOWN ==========
     completed_jobs = jobs_by_status.get("COMPLETED", [])
