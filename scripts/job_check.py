@@ -2,12 +2,15 @@
 """
 Check job status: which jobs are pending, running, completed, or failed.
 Provides detailed breakdown by job type, matrix, and reordering.
+Saves report to reports/ folder with timestamp.
 """
 
 import argparse
 import sys
 from pathlib import Path
 from collections import defaultdict
+from datetime import datetime
+import io
 
 try:
     from sbatchman import jobs_list
@@ -82,6 +85,28 @@ def get_job_info(job):
     }
 
 
+def save_report(content, output_path=None):
+    """Save report to file in reports/ folder with timestamp."""
+    # Create reports directory if it doesn't exist
+    reports_dir = Path("reports")
+    reports_dir.mkdir(exist_ok=True)
+    
+    if output_path:
+        filepath = Path(output_path)
+    else:
+        # Generate filename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filepath = reports_dir / f"job_status_{timestamp}.txt"
+    
+    # Ensure parent directory exists
+    filepath.parent.mkdir(parents=True, exist_ok=True)
+    
+    with open(filepath, 'w', encoding='utf-8') as f:
+        f.write(content)
+    
+    print(f"\nReport saved to: {filepath}", file=sys.stderr)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Check job status: pending, running, completed, failed."
@@ -100,7 +125,24 @@ def main():
                         help="Show details of pending jobs")
     parser.add_argument("--update", "-u", action="store_true",
                         help="Update job status from cluster (slower)")
+    parser.add_argument("--no-save", action="store_true",
+                        help="Don't save report to file, only print to stdout")
+    parser.add_argument("--output", "-o", type=str, default=None,
+                        help="Custom output file path (default: reports/job_status_YYYYMMDD_HHMMSS.txt)")
     args = parser.parse_args()
+
+    # Set up output - capture to string buffer so we can save to file
+    output_buffer = io.StringIO()
+    
+    def report_print(*print_args, **kwargs):
+        """Print to both stdout and buffer."""
+        print(*print_args, **kwargs)
+        # Also write to buffer (without file= argument)
+        kwargs.pop('file', None)
+        print(*print_args, **kwargs, file=output_buffer)
+    
+    # Use report_print for all report output (not stderr messages)
+    rprint = report_print
 
     print("Fetching jobs...", file=sys.stderr)
     
@@ -130,15 +172,15 @@ def main():
     # Count totals
     total_jobs = len(all_jobs)
     
-    print(f"\n{'='*60}")
-    print("JOB STATUS OVERVIEW")
-    print(f"{'='*60}")
+    rprint(f"\n{'='*60}")
+    rprint("JOB STATUS OVERVIEW")
+    rprint(f"{'='*60}")
     
     if args.tag_filter:
-        print(f"Filter: tag contains '{args.tag_filter}'")
+        rprint(f"Filter: tag contains '{args.tag_filter}'")
     
-    print(f"\nTotal jobs: {total_jobs}")
-    print()
+    rprint(f"\nTotal jobs: {total_jobs}")
+    rprint()
     
     # Status summary
     status_colors = {
@@ -155,23 +197,26 @@ def main():
         if count > 0:
             icon = status_colors.get(status, "?")
             pct = 100 * count / total_jobs if total_jobs > 0 else 0
-            print(f"  {icon} {status:12} {count:6} ({pct:5.1f}%)")
+            rprint(f"  {icon} {status:12} {count:6} ({pct:5.1f}%)")
     
     if args.summary:
+        # Save report before returning if summary only
+        if not args.no_save:
+            save_report(output_buffer.getvalue(), args.output)
         return
     
     # ========== DETAILED BREAKDOWN BY TAG AND VARIABLES ==========
-    print(f"\n{'='*60}")
-    print("DETAILED BREAKDOWN BY TAG AND VARIABLES")
-    print(f"{'='*60}")
+    rprint(f"\n{'='*60}")
+    rprint("DETAILED BREAKDOWN BY TAG AND VARIABLES")
+    rprint(f"{'='*60}")
     
     for status in statuses:
         jobs = jobs_by_status[status]
         if not jobs:
             continue
         
-        print(f"\n{status_colors.get(status, '?')} {status} ({len(jobs)} jobs)")
-        print("-" * 50)
+        rprint(f"\n{status_colors.get(status, '?')} {status} ({len(jobs)} jobs)")
+        rprint("-" * 50)
         
         # Group by tag first
         by_tag = defaultdict(list)
@@ -180,7 +225,7 @@ def main():
             by_tag[tag].append(job)
         
         for tag, tag_jobs in sorted(by_tag.items(), key=lambda x: -len(x[1])):
-            print(f"\n  [{tag}] - {len(tag_jobs)} jobs")
+            rprint(f"\n  [{tag}] - {len(tag_jobs)} jobs")
             
             # Group by perm variable
             by_perm = defaultdict(list)
@@ -197,21 +242,21 @@ def main():
                     mtx = safe_get_var(job, 'mtx', '')
                     matrices.add(get_matrix_name(mtx))
                 
-                print(f"    perm={perm}: {len(perm_jobs)} jobs ({len(matrices)} matrices)")
+                rprint(f"    perm={perm}: {len(perm_jobs)} jobs ({len(matrices)} matrices)")
                 
                 if args.verbose:
                     for m in sorted(matrices)[:10]:
-                        print(f"      - {m}")
+                        rprint(f"      - {m}")
                     if len(matrices) > 10:
-                        print(f"      ... and {len(matrices) - 10} more")
+                        rprint(f"      ... and {len(matrices) - 10} more")
     
     # ========== FAILED JOBS DETAILED ==========
     failed_jobs = jobs_by_status.get("FAILED", []) + jobs_by_status.get("TIMEOUT", [])
     
     if failed_jobs:
-        print(f"\n{'='*60}")
-        print(f"FAILED/TIMEOUT BREAKDOWN ({len(failed_jobs)} jobs)")
-        print(f"{'='*60}")
+        rprint(f"\n{'='*60}")
+        rprint(f"FAILED/TIMEOUT BREAKDOWN ({len(failed_jobs)} jobs)")
+        rprint(f"{'='*60}")
         
         # Group by (tag, perm)
         by_tag_perm = defaultdict(list)
@@ -226,14 +271,14 @@ def main():
         for (tag, perm), group_jobs in sorted(by_tag_perm.items(), key=lambda x: -len(x[1])):
             matrices = set(get_matrix_name(safe_get_var(j, 'mtx', '')) for j in group_jobs)
             status_type = "TIMEOUT" if any(getattr(j, 'status', '') == 'TIMEOUT' for j in group_jobs) else "FAILED"
-            print(f"\n  {status_type}: {tag}, perm={perm}")
-            print(f"    Jobs: {len(group_jobs)}, Matrices: {len(matrices)}")
+            rprint(f"\n  {status_type}: {tag}, perm={perm}")
+            rprint(f"    Jobs: {len(group_jobs)}, Matrices: {len(matrices)}")
             
             if args.show_failed or args.verbose:
                 for m in sorted(matrices)[:10]:
-                    print(f"      - {m}")
+                    rprint(f"      - {m}")
                 if len(matrices) > 10:
-                    print(f"      ... and {len(matrices) - 10} more")
+                    rprint(f"      ... and {len(matrices) - 10} more")
             
             # Show example error from first job in this category
             example_job = group_jobs[0]
@@ -255,7 +300,7 @@ def main():
             example_matrix = get_matrix_name(safe_get_var(example_job, 'mtx', ''))
             example_job_id = getattr(example_job, 'id', getattr(example_job, 'job_id', 'unknown'))
             
-            print(f"\n    Example error (job {example_job_id}, matrix: {example_matrix}):")
+            rprint(f"\n    Example error (job {example_job_id}, matrix: {example_matrix}):")
             
             # Show last N lines of stderr or stdout
             error_text = stderr or stdout or "(no output captured)"
@@ -263,23 +308,23 @@ def main():
                 # Get last 10 non-empty lines
                 lines = [l.strip() for l in error_text.split('\n') if l.strip()]
                 last_lines = lines[-10:] if len(lines) > 10 else lines
-                print("    " + "-" * 40)
+                rprint("    " + "-" * 40)
                 for line in last_lines:
                     # Truncate very long lines
                     if len(line) > 100:
                         line = line[:100] + "..."
-                    print(f"    | {line}")
-                print("    " + "-" * 40)
+                    rprint(f"    | {line}")
+                rprint("    " + "-" * 40)
             else:
-                print(f"    {error_text}")
+                rprint(f"    {error_text}")
     
     # ========== COMPLETED BREAKDOWN ==========
     completed_jobs = jobs_by_status.get("COMPLETED", [])
     
     if completed_jobs and args.verbose:
-        print(f"\n{'='*60}")
-        print(f"COMPLETED BREAKDOWN ({len(completed_jobs)} jobs)")
-        print(f"{'='*60}")
+        rprint(f"\n{'='*60}")
+        rprint(f"COMPLETED BREAKDOWN ({len(completed_jobs)} jobs)")
+        rprint(f"{'='*60}")
         
         # Group by (tag, perm)
         by_tag_perm = defaultdict(list)
@@ -292,16 +337,16 @@ def main():
         
         for (tag, perm), group_jobs in sorted(by_tag_perm.items(), key=lambda x: -len(x[1])):
             matrices = set(get_matrix_name(safe_get_var(j, 'mtx', '')) for j in group_jobs)
-            print(f"  COMPLETED: {tag}, perm={perm} - {len(group_jobs)} jobs ({len(matrices)} matrices)")
+            rprint(f"  COMPLETED: {tag}, perm={perm} - {len(group_jobs)} jobs ({len(matrices)} matrices)")
     
     # ========== RUNNING/PENDING BREAKDOWN ==========
     running_jobs = jobs_by_status.get("RUNNING", [])
     pending_jobs = jobs_by_status.get("PENDING", [])
     
     if running_jobs and (args.show_running or args.verbose):
-        print(f"\n{'='*60}")
-        print(f"RUNNING BREAKDOWN ({len(running_jobs)} jobs)")
-        print(f"{'='*60}")
+        rprint(f"\n{'='*60}")
+        rprint(f"RUNNING BREAKDOWN ({len(running_jobs)} jobs)")
+        rprint(f"{'='*60}")
         
         by_tag_perm = defaultdict(list)
         for job in running_jobs:
@@ -311,12 +356,12 @@ def main():
         
         for (tag, perm), group_jobs in sorted(by_tag_perm.items(), key=lambda x: -len(x[1])):
             matrices = set(get_matrix_name(safe_get_var(j, 'mtx', '')) for j in group_jobs)
-            print(f"  RUNNING: {tag}, perm={perm} - {len(group_jobs)} jobs ({len(matrices)} matrices)")
+            rprint(f"  RUNNING: {tag}, perm={perm} - {len(group_jobs)} jobs ({len(matrices)} matrices)")
     
     if pending_jobs and (args.show_pending or args.verbose):
-        print(f"\n{'='*60}")
-        print(f"PENDING BREAKDOWN ({len(pending_jobs)} jobs)")
-        print(f"{'='*60}")
+        rprint(f"\n{'='*60}")
+        rprint(f"PENDING BREAKDOWN ({len(pending_jobs)} jobs)")
+        rprint(f"{'='*60}")
         
         by_tag_perm = defaultdict(list)
         for job in pending_jobs:
@@ -326,12 +371,12 @@ def main():
         
         for (tag, perm), group_jobs in sorted(by_tag_perm.items(), key=lambda x: -len(x[1])):
             matrices = set(get_matrix_name(safe_get_var(j, 'mtx', '')) for j in group_jobs)
-            print(f"  PENDING: {tag}, perm={perm} - {len(group_jobs)} jobs ({len(matrices)} matrices)")
+            rprint(f"  PENDING: {tag}, perm={perm} - {len(group_jobs)} jobs ({len(matrices)} matrices)")
     
     # ========== CROSS-CHECK ==========
-    print(f"\n{'='*60}")
-    print("CROSS-CHECK: OPERATIONS vs ANALYSIS")
-    print(f"{'='*60}")
+    rprint(f"\n{'='*60}")
+    rprint("CROSS-CHECK: OPERATIONS vs ANALYSIS")
+    rprint(f"{'='*60}")
     
     completed_jobs = jobs_by_status.get("COMPLETED", [])
     
@@ -339,8 +384,8 @@ def main():
     completed_ops = [j for j in completed_jobs if categorize_job(j) == "operation"]
     completed_analysis = [j for j in completed_jobs if categorize_job(j) == "analysis"]
     
-    print(f"\nCompleted operations: {len(completed_ops)}")
-    print(f"Completed analysis: {len(completed_analysis)}")
+    rprint(f"\nCompleted operations: {len(completed_ops)}")
+    rprint(f"Completed analysis: {len(completed_analysis)}")
     
     # Get unique (matrix, perm, perm_type) from operations
     op_keys = set()
@@ -358,7 +403,7 @@ def main():
     ops_without_analysis = op_keys - analysis_keys
     
     if ops_without_analysis:
-        print(f"\n[WARNING] {len(ops_without_analysis)} operation configs lack completed analysis:")
+        rprint(f"\n[WARNING] {len(ops_without_analysis)} operation configs lack completed analysis:")
         
         # Group by (perm, perm_type)
         by_reorder = defaultdict(list)
@@ -366,21 +411,21 @@ def main():
             by_reorder[(perm, perm_type)].append(matrix)
         
         for (perm, perm_type), matrices in sorted(by_reorder.items()):
-            print(f"\n  perm={perm}, type={perm_type}: {len(matrices)} matrices")
+            rprint(f"\n  perm={perm}, type={perm_type}: {len(matrices)} matrices")
             if args.verbose:
                 for m in sorted(matrices):
-                    print(f"    - {m}")
+                    rprint(f"    - {m}")
             elif len(matrices) <= 5:
-                print(f"    {', '.join(sorted(matrices))}")
+                rprint(f"    {', '.join(sorted(matrices))}")
             else:
-                print(f"    {', '.join(sorted(matrices)[:5])} ... and {len(matrices)-5} more")
+                rprint(f"    {', '.join(sorted(matrices)[:5])} ... and {len(matrices)-5} more")
     else:
-        print("\n[OK] All completed operations have corresponding analysis.")
+        rprint("\n[OK] All completed operations have corresponding analysis.")
     
     # Summary
-    print(f"\n{'='*60}")
-    print("SUMMARY")
-    print(f"{'='*60}")
+    rprint(f"\n{'='*60}")
+    rprint("SUMMARY")
+    rprint(f"{'='*60}")
     
     completed = len(jobs_by_status.get("COMPLETED", []))
     failed = len(jobs_by_status.get("FAILED", [])) + len(jobs_by_status.get("TIMEOUT", []))
@@ -388,17 +433,21 @@ def main():
     pending = len(jobs_by_status.get("PENDING", []))
     
     if total_jobs > 0:
-        print(f"\nCompletion rate: {100*completed/total_jobs:.1f}%")
+        rprint(f"\nCompletion rate: {100*completed/total_jobs:.1f}%")
         
         if failed > 0:
-            print(f"Failure rate: {100*failed/total_jobs:.1f}%")
+            rprint(f"Failure rate: {100*failed/total_jobs:.1f}%")
         
         if running > 0 or pending > 0:
-            print(f"In progress: {running} running, {pending} pending")
+            rprint(f"In progress: {running} running, {pending} pending")
     
     if failed > 0:
-        print(f"\n[ACTION] {failed} jobs need attention (failed/timeout)")
-        print("  Run with --show-failed for details")
+        rprint(f"\n[ACTION] {failed} jobs need attention (failed/timeout)")
+        rprint("  Run with --show-failed for details")
+    
+    # Save report to file
+    if not args.no_save:
+        save_report(output_buffer.getvalue(), args.output)
 
 
 if __name__ == "__main__":
