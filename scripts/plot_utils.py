@@ -43,7 +43,7 @@ def load_and_merge_data(ops_path, analysis_path):
 KEEP_FULL_FAMILIES = [
     # Large collections (>40 matrices) - diverse problem sources
     'Meszaros',        # LP problems from various sources (118 matrices)
-    'Sandia',          # National lab - diverse applications (77 matrices)
+    # 'Sandia' removed - contains 56+ adder_dcop_* matrices with identical structure
     'HB',              # Harwell-Boeing collection - classic diverse problems (74 matrices)
     'VDOL',            # Various authors (68 matrices)
     'DIMACS10',        # Graph partitioning challenge - diverse graph types (65 matrices)
