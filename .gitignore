@@ -3,3 +3,4 @@ operators/ASpT/
 # Generated plots
 plots/
 /plots
+*.pyc
