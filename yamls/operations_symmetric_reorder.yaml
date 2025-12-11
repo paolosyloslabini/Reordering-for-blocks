@@ -9,9 +9,11 @@ variables:
     - SB_rabbit
   #  - SB_patoh
   block_size:
-    - "32"
+    - 32
   n_cols:
-    - "32"
+    - 32
+    - 256
+    - 1024
 
 preprocess: |
   source ~/.venv/bin/activate

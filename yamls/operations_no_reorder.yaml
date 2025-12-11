@@ -4,6 +4,8 @@ variables:
     - 32
   n_cols:
     - 32
+    - 256
+    - 1024
 
 preprocess: |
   source ~/.venv/bin/activate
