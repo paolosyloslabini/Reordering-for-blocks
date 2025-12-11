@@ -40,3 +40,6 @@ jobs:
 
       - tag: "SMAT_SPMM_SYMMETRIC"
         command: "python3 operators/smat_spmm.py {mtx} --perm perms/{perm}/$mtx_name.perm --blocksize {block_size} --perm-type SYMMETRIC --n-cols {n_cols}"
+
+#      - tag: "DTC_SPMM_SYMMETRIC"
+#        command: "python3 operators/dtc_spmm.py {mtx} --perm perms/{perm}/$mtx_name.perm --perm-type SYMMETRIC --n-cols {n_cols}"
