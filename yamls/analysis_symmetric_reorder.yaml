@@ -8,6 +8,7 @@ variables:
   #  - SB_rcm
   #  - SB_rabbit
   #  - SB_patoh
+    - SB_slashburn
 
 preprocess: |
   source ~/.venv/bin/activate
