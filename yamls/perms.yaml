@@ -69,3 +69,10 @@ jobs:
           mkdir -p perms/SB_patoh
           perm_path=perms/SB_patoh/$mtx_name.perm
         command: "./MtxPerm/SPARSEBASE/build/patoh_perm {mtx} $perm_path"
+
+      - tag: "SB_slashburn"
+        preprocess: |
+          mtx_name=$(basename {mtx} .mtx)
+          mkdir -p perms/SB_slashburn
+          perm_path=perms/SB_slashburn/$mtx_name.perm
+        command: "./MtxPerm/SPARSEBASE/build/slashburn_perm {mtx} $perm_path --k 1"
