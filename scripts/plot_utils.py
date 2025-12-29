@@ -647,26 +647,13 @@ def plot_speedup_vs_density(df, out_dir):
                 plt.axhline(1.0, color='gray', linestyle='--', linewidth=1.5, alpha=0.7, label='Speedup = 1')
                 plt.axvline(1.0, color='gray', linestyle=':', linewidth=1.5, alpha=0.7, label='Density Imp. = 1')
                 
-                # Diagonal reference (y = x)
-                xlim = plt.xlim()
-                ylim = plt.ylim()
-                min_val = max(min(xlim[0], ylim[0]), 0.1)
-                max_val = min(max(xlim[1], ylim[1]), 10)
-                diag_range = np.linspace(min_val, max_val, 100)
-                plt.plot(diag_range, diag_range, 'r-', alpha=0.3, linewidth=1, label='y = x')
-                
                 plt.xlabel(f'Block Density Improvement (BS {bs}) [Reordered / Original]', fontsize=12)
                 plt.ylabel('Speedup [Reordered / Original]', fontsize=12)
                 plt.title(f'Speedup vs Density Improvement\n{kernel} - {p_type} (Block Size {bs})', fontsize=14)
                 plt.legend(title='Reordering', loc='best', fontsize=9)
                 plt.grid(True, alpha=0.3)
                 
-                # Use log scale if data spans wide range
-                if speedup_upper / speedup_lower > 5:
-                    plt.yscale('log')
-                if density_upper / density_lower > 5:
-                    plt.xscale('log')
-                
+
                 plt.tight_layout()
                 filename = f"speedup_vs_density_bs{bs}_{safe_kernel_name}_{p_type}.png"
                 plt.savefig(out_dir / filename, dpi=300)
@@ -859,14 +846,7 @@ def plot_speedup_vs_density_improved_only(df, out_dir):
                 # Reference lines
                 plt.axhline(1.0, color='gray', linestyle='--', linewidth=1.5, alpha=0.7, label='Speedup = 1')
                 
-                # Diagonal reference (y = x)
-                xlim = plt.xlim()
-                ylim = plt.ylim()
-                min_val = max(min(xlim[0], ylim[0]), 1.0)
-                max_val = min(max(xlim[1], ylim[1]), 10)
-                diag_range = np.linspace(min_val, max_val, 100)
-                plt.plot(diag_range, diag_range, 'r-', alpha=0.3, linewidth=1, label='y = x')
-                
+
                 # Count stats
                 n_improved = len(plot_data[plot_data['speedup'] > 1.0])
                 n_total = len(plot_data)
@@ -878,12 +858,7 @@ def plot_speedup_vs_density_improved_only(df, out_dir):
                 plt.legend(title='Reordering', loc='best', fontsize=9)
                 plt.grid(True, alpha=0.3)
                 
-                # Use log scale if data spans wide range
-                if speedup_upper / speedup_lower > 5:
-                    plt.yscale('log')
-                if density_upper > 5:
-                    plt.xscale('log')
-                
+
                 plt.tight_layout()
                 filename = f"speedup_vs_density_improved_bs{bs}_{safe_kernel_name}_{p_type}.png"
                 plt.savefig(out_dir / filename, dpi=300)
