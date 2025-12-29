@@ -16,6 +16,7 @@ def main():
     parser.add_argument("--only-kernels", action="store_true", help="Only generate kernel plots (skip reorder analysis)")
     parser.add_argument("--n-cols", type=int, default=None, help="Only process specific n_cols value (e.g., 32, 256, 1024)")
     parser.add_argument("--kernel", type=str, default=None, help="Only process specific kernel (e.g., CUSPARSE_SPMM_CSR)")
+    parser.add_argument("--include-rectangular", action="store_true", help="Include rectangular matrices (default: False, only square matrices are used)")
     
     args = parser.parse_args()
 
@@ -67,13 +68,30 @@ def main():
         df = df[~df['matrix'].isin(sparse_matrices)]
         df_analysis = df_analysis[~df_analysis['matrix'].isin(sparse_matrices)]
 
-    # 5. Calculate Metrics (GFLOPS, op_id)
+    # 5. Filter: Square matrices (default)
+    if not args.include_rectangular:
+        print("Filtering: Keeping only square matrices...")
+        if 'rows' in df_analysis.columns and 'cols' in df_analysis.columns:
+            df_analysis = df_analysis[df_analysis['rows'] == df_analysis['cols']]
+            
+            # df is merged with df_analysis, so it should have rows/cols
+            if 'rows' in df.columns and 'cols' in df.columns:
+                df = df[df['rows'] == df['cols']]
+            else:
+                # Fallback
+                df = df[df['matrix'].isin(df_analysis['matrix'].unique())]
+            
+            print(f"Rows after square filter - Operations: {len(df)}, Analysis: {len(df_analysis)}")
+        else:
+            print("Warning: 'rows' or 'cols' columns missing. Cannot filter for square matrices.")
+
+    # 6. Calculate Metrics (GFLOPS, op_id)
     df = plot_utils.calculate_metrics(df)
     
     # Set style
     sns.set_theme(style="whitegrid")
     
-    # 6. Generate Kernel Plots (unless --only-reorder-analysis)
+    # 7. Generate Kernel Plots (unless --only-reorder-analysis)
     if not args.only_reorder_analysis:
         unique_n_cols = sorted(df['n_cols'].unique())
         
@@ -131,7 +149,7 @@ def main():
                 df_routine = df_ncols[df_ncols['kernel_id'] == routine].copy()
                 
                 if df_routine.empty:
-                    continue
+                   continue
 
                 print("Generating GFLOPS vs Density plots...")
                 plot_utils.plot_gflops_vs_density(df_routine, gflops_density_dir)
@@ -148,7 +166,7 @@ def main():
                 print("Generating Speedup vs Density Improvement plots (density > 1 only)...")
                 plot_utils.plot_speedup_vs_density_improved_only(df_routine, speedup_vs_density_dir)
 
-    # 7. Generate Reordering Analysis Plots (unless --only-kernels)
+    # 8. Generate Reordering Analysis Plots (unless --only-kernels)
     if not args.only_kernels:
         # These plots analyze the reordering quality itself (bandwidth, density) independent of SpMM performance.
         # We use df_analysis directly to include results (like SYMMETRIC) that might be missing from operations.

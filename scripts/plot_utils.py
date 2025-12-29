@@ -42,17 +42,17 @@ def load_and_merge_data(ops_path, analysis_path):
 # These contain diverse matrices from different sources/applications that shouldn't be grouped together
 KEEP_FULL_FAMILIES = [
     # Large collections (>40 matrices) - diverse problem sources
-    'Meszaros',        # LP problems from various sources (118 matrices)
-    # 'Sandia' removed - contains 56+ adder_dcop_* matrices with identical structure
-    'HB',              # Harwell-Boeing collection - classic diverse problems (74 matrices)
-    'VDOL',            # Various authors (68 matrices)
+    #'Meszaros',        # LP problems from various sources (118 matrices)
+    # 'Sandia'          # contains 56+ adder_dcop_* matrices with identical structure
+    #'HB',              # Harwell-Boeing collection - classic diverse problems (74 matrices)
+    #'VDOL',            # Various authors (68 matrices)
     'DIMACS10',        # Graph partitioning challenge - diverse graph types (65 matrices)
-    'JGD_Homology',    # Homology computation - different topological problems (60 matrices)
-    'Gset',            # Graph set - different graph optimization problems (53 matrices)
-    'Hollinger',       # Various problems (49 matrices)
-    'Schenk_IBMNA',    # IBM - different circuit simulations (49 matrices)
-    'LPnetlib',        # Linear programming - diverse LP problems (49 matrices)
-    'GHS_indef',       # Indefinite systems - various sources (48 matrices)
+    #'JGD_Homology',    # Homology computation - different topological problems (60 matrices)
+    #'Gset',            # Graph set - different graph optimization problems (53 matrices)
+    #'Hollinger',       # Various problems (49 matrices)
+    #'Schenk_IBMNA',    # IBM - different circuit simulations (49 matrices)
+    #'LPnetlib',        # Linear programming - diverse LP problems (49 matrices)
+    #'GHS_indef',       # Indefinite systems - various sources (48 matrices)
     'SNAP'            # Social networks, web graphs - very diverse (40 matrices)
 ]
 
@@ -218,6 +218,99 @@ def add_ref_line(ax, x_data, y_data):
         ax.plot(x_range, y_range, 'r--', alpha=0.5, label='Proportional (y ~ x)')
         ax.legend()
 
+def _save_plot(output_path):
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300)
+    plt.close()
+    print(f"Generated {output_path.name}")
+
+def plot_boxplot(data, x, y, title, output_path, order=None, hue=None, baseline=1.0):
+    """Generates a boxplot with stripplot overlay."""
+    plt.figure(figsize=(12, 8))
+    
+    # Draw stripplot first (below boxes)
+    sns.stripplot(
+        data=data, x=x, y=y, order=order, hue=hue,
+        color='black', alpha=0.4, jitter=0.35, size=3, dodge=True
+    )
+    
+    # Draw boxplot on top
+    sns.boxplot(
+        data=data, x=x, y=y, order=order, hue=hue,
+        showfliers=False, palette="Set2",
+        boxprops={'alpha': 0.4},
+        medianprops={'color': 'red', 'linewidth': 2.5, 'zorder': 10},
+        dodge=True
+    )
+    
+    if baseline is not None:
+        plt.axhline(baseline, color='r', linestyle='--', label='Baseline')
+        
+    plt.title(title, fontsize=14)
+    plt.xticks(rotation=45, ha='right')
+    plt.grid(True, axis='y', linestyle='--', alpha=0.7)
+    
+    # Handle legend if hue is used, otherwise just tight_layout
+    if hue:
+        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        
+    _save_plot(output_path)
+
+def plot_cdf(data, x, y, title, output_path, strategies=None, baseline=1.0):
+    """Generates a CDF plot."""
+    plt.figure(figsize=(10, 6))
+    
+    if strategies is None:
+        strategies = sorted(data[x].unique())
+        
+    for strategy in strategies:
+        subset = data[data[x] == strategy]
+        values = subset[y].dropna().sort_values()
+        if len(values) == 0: continue
+        cdf_y = np.arange(1, len(values) + 1) / len(values)
+        plt.step(values, cdf_y, label=strategy, where='post', linewidth=2)
+    
+    if baseline is not None:
+        plt.axvline(baseline, color='k', linestyle='--', alpha=0.5, label='Baseline')
+        
+    plt.xlabel(title.split(' - ')[0] if ' - ' in title else title, fontsize=12)
+    plt.ylabel('CDF (Fraction of Matrices)', fontsize=12)
+    plt.title(f"CDF: {title}", fontsize=14)
+    plt.legend(title='Strategy')
+    plt.grid(True, alpha=0.3)
+    plt.xscale('log')
+    
+    _save_plot(output_path)
+
+def plot_histogram(data, x, y, title, output_path, hue_order=None, baseline=1.0):
+    """Generates a histogram plot."""
+    plt.figure(figsize=(10, 6))
+    try:
+        sns.histplot(
+            data=data, 
+            x=y, 
+            hue=x, 
+            hue_order=hue_order,
+            common_norm=False, 
+            stat="percent",
+            element="step",
+            fill=True, 
+            alpha=0.2,
+            palette="Set2"
+        )
+        if baseline is not None:
+            plt.axvline(baseline, color='k', linestyle='--', alpha=0.5, label='Baseline')
+            
+        plt.xlabel(title.split(' - ')[0] if ' - ' in title else title, fontsize=12)
+        plt.ylabel('Percentage of Matrices (%)', fontsize=12)
+        plt.title(f"Distribution: {title}", fontsize=14)
+        plt.grid(True, alpha=0.3)
+        
+        _save_plot(output_path)
+    except Exception as e:
+        print(f"Could not generate Histogram plot for {output_path.name}: {e}")
+        plt.close()
+
 def plot_gflops_vs_density(df, out_dir):
     """Generates GFLOPS vs Density scatter plots."""
     density_cols = get_density_columns(df)
@@ -377,7 +470,7 @@ def plot_gflops_distribution(df, out_dir):
             print(f"Generated gflops_violin_{safe_kernel_name}{suffix}.png")
 
 def plot_speedup_distribution(df, out_dir):
-    """Generates Speedup plots (Boxplot, CDF, KDE), separated by perm_type."""
+    """Generates Speedup plots (Boxplot, CDF), separated by perm_type."""
     df['strategy'] = df['perm'].apply(lambda x: 'Original' if x == 'None' else str(x))
     strategies = sorted([s for s in df['strategy'].unique() if s != 'Original'])
     if 'Original' in df['strategy'].unique():
@@ -428,110 +521,28 @@ def plot_speedup_distribution(df, out_dir):
                 ]
 
                 # 1. Boxplot (clipped)
-                plt.figure(figsize=(12, 8))
-                # Draw stripplot first (below boxes)
-                sns.stripplot(
-                    data=kernel_data_clipped, 
-                    x='strategy', 
-                    y='speedup', 
-                    order=op_strategies,
-                    color='black', 
-                    alpha=0.4, 
-                    jitter=0.35,
-                    size=4
+                plot_boxplot(
+                    kernel_data_clipped, 'strategy', 'speedup', 
+                    f"Speedup Distribution by Strategy ({kernel}) - {p_type}\n(1st-99th percentile)",
+                    out_dir / f"speedup_boxplot_{safe_kernel_name}{suffix}.png",
+                    order=op_strategies
                 )
-                # Draw boxplot on top with transparent fill and red median
-                box = sns.boxplot(
-                    data=kernel_data_clipped, 
-                    x='strategy', 
-                    y='speedup', 
-                    order=op_strategies,
-                    showfliers=False,
-                    palette="Set2",
-                    boxprops={'alpha': 0.4},
-                    medianprops={'color': 'red', 'linewidth': 2.5, 'zorder': 10}
-                )
-                plt.axhline(1.0, color='r', linestyle='--', linewidth=2, label='Baseline (Original)')
-                plt.title(f"Speedup Distribution by Strategy ({kernel}) - {p_type}\n(1st-99th percentile)", fontsize=14)
-                plt.ylabel("Speedup (vs Original)", fontsize=12)
-                plt.xlabel("Reordering Strategy", fontsize=12)
-                plt.xticks(rotation=45, ha='right')
-                plt.grid(True, axis='y', linestyle='--', alpha=0.7)
-                plt.legend()
-                plt.tight_layout()
-                plt.savefig(out_dir / f"speedup_boxplot_{safe_kernel_name}{suffix}.png", dpi=300)
-                plt.close()
-                print(f"Generated speedup_boxplot_{safe_kernel_name}{suffix}.png")
 
                 # 2. CDF Plot
-                plt.figure(figsize=(10, 6))
-                for strategy in op_strategies:
-                    subset = kernel_data[kernel_data['strategy'] == strategy]
-                    speedups = subset['speedup'].dropna().sort_values()
-                    if len(speedups) == 0: continue
-                    y = np.arange(1, len(speedups) + 1) / len(speedups)
-                    plt.step(speedups, y, label=strategy, where='post', linewidth=2)
-                
-                plt.axvline(1.0, color='k', linestyle='--', alpha=0.5, label='Baseline')
-                plt.xlabel('Speedup (vs Original)', fontsize=12)
-                plt.ylabel('CDF (Fraction of Matrices)', fontsize=12)
-                plt.title(f'Speedup CDF ({kernel}) - {p_type}', fontsize=14)
-                plt.legend(title='Strategy')
-                plt.grid(True, alpha=0.3)
-                plt.xscale('log')
-                plt.tight_layout()
-                plt.savefig(out_dir / f"speedup_cdf_{safe_kernel_name}{suffix}.png", dpi=300)
-                plt.close()
-                print(f"Generated speedup_cdf_{safe_kernel_name}{suffix}.png")
+                plot_cdf(
+                    kernel_data, 'strategy', 'speedup',
+                    f'Speedup ({kernel}) - {p_type}',
+                    out_dir / f"speedup_cdf_{safe_kernel_name}{suffix}.png",
+                    strategies=op_strategies
+                )
 
                 # 3. Histogram Plot (clipped)
-                plt.figure(figsize=(10, 6))
-                try:
-                    sns.histplot(
-                        data=kernel_data_clipped, 
-                        x='speedup', 
-                        hue='strategy', 
-                        hue_order=op_strategies,
-                        common_norm=False, 
-                        stat="percent",
-                        element="step",
-                        fill=True, 
-                        alpha=0.2,
-                        palette="Set2"
-                    )
-                    plt.axvline(1.0, color='k', linestyle='--', alpha=0.5, label='Baseline')
-                    plt.xlabel('Speedup (vs Original)', fontsize=12)
-                    plt.ylabel('Percentage of Matrices (%)', fontsize=12)
-                    plt.title(f'Speedup Distribution ({kernel}) - {p_type}\n(1st-99th percentile)', fontsize=14)
-                    plt.grid(True, alpha=0.3)
-                    plt.tight_layout()
-                    plt.savefig(out_dir / f"speedup_hist_{safe_kernel_name}{suffix}.png", dpi=300)
-                    plt.close()
-                    print(f"Generated speedup_hist_{safe_kernel_name}{suffix}.png")
-                except Exception as e:
-                    print(f"Could not generate Histogram plot for {kernel} ({p_type}): {e}")
-
-                # 4. KDE (Density Curve) Plot
-                plt.figure(figsize=(10, 6))
-                try:
-                    for strategy in op_strategies:
-                        subset = kernel_data_clipped[kernel_data_clipped['strategy'] == strategy]
-                        speedups = subset['speedup'].dropna()
-                        if len(speedups) < 2: continue
-                        sns.kdeplot(data=speedups, label=strategy, linewidth=2, fill=True, alpha=0.2)
-                    
-                    plt.axvline(1.0, color='k', linestyle='--', alpha=0.5, label='Baseline')
-                    plt.xlabel('Speedup (vs Original)', fontsize=12)
-                    plt.ylabel('Density', fontsize=12)
-                    plt.title(f'Speedup Density Curve ({kernel}) - {p_type}\n(1st-99th percentile)', fontsize=14)
-                    plt.legend(title='Strategy')
-                    plt.grid(True, alpha=0.3)
-                    plt.tight_layout()
-                    plt.savefig(out_dir / f"speedup_kde_{safe_kernel_name}{suffix}.png", dpi=300)
-                    plt.close()
-                    print(f"Generated speedup_kde_{safe_kernel_name}{suffix}.png")
-                except Exception as e:
-                    print(f"Could not generate KDE plot for {kernel} ({p_type}): {e}")
+                plot_histogram(
+                    kernel_data_clipped, 'strategy', 'speedup',
+                    f'Speedup ({kernel}) - {p_type}\n(1st-99th percentile)',
+                    out_dir / f"speedup_hist_{safe_kernel_name}{suffix}.png",
+                    hue_order=op_strategies
+                )
 
 
 def plot_speedup_vs_density(df, out_dir):
@@ -1030,94 +1041,29 @@ def plot_reordering_efficiency(df, out_dir):
         ]
 
         # 1. Boxplot (clipped)
-        plt.figure(figsize=(12, 8))
-        # Draw stripplot first (below boxes)
-        sns.stripplot(data=data_clipped, x=x, y=y, order=strategies, color='black', alpha=0.4, jitter=0.35, size=3)
-        # Draw boxplot on top with transparent fill and red median
-        sns.boxplot(
-            data=data_clipped, x=x, y=y, order=strategies, showfliers=False, palette="Set2",
-            boxprops={'alpha': 0.4},
-            medianprops={'color': 'red', 'linewidth': 2.5, 'zorder': 10}
+        plot_boxplot(
+            data_clipped, x, y, 
+            f"{title}\n(1st-99th percentile)",
+            target_dir / f"{filename_suffix}_boxplot.png",
+            order=strategies
         )
-        plt.axhline(1.0, color='r', linestyle='--', label='Baseline')
-        plt.title(f"{title}\n(1st-99th percentile)", fontsize=14)
-        plt.xticks(rotation=45, ha='right')
-        plt.grid(True, axis='y', linestyle='--', alpha=0.7)
-        plt.tight_layout()
-        plt.savefig(target_dir / f"{filename_suffix}_boxplot.png", dpi=300)
-        plt.close()
-        print(f"Generated {filename_suffix}_boxplot.png")
 
         # 2. CDF Plot
-        plt.figure(figsize=(10, 6))
         current_strategies = [s for s in strategies if s in data[x].unique()]
-        for strategy in current_strategies:
-            subset = data[data[x] == strategy]
-            values = subset[y].dropna().sort_values()
-            if len(values) == 0: continue
-            cdf_y = np.arange(1, len(values) + 1) / len(values)
-            plt.step(values, cdf_y, label=strategy, where='post', linewidth=2)
-        
-        plt.axvline(1.0, color='k', linestyle='--', alpha=0.5, label='Baseline')
-        plt.xlabel(f"{title.split(' - ')[0]}", fontsize=12)
-        plt.ylabel('CDF (Fraction of Matrices)', fontsize=12)
-        plt.title(f"CDF: {title}", fontsize=14)
-        plt.legend(title='Strategy')
-        plt.grid(True, alpha=0.3)
-        plt.xscale('log')
-        plt.tight_layout()
-        plt.savefig(target_dir / f"{filename_suffix}_cdf.png", dpi=300)
-        plt.close()
-        print(f"Generated {filename_suffix}_cdf.png")
+        plot_cdf(
+            data, x, y,
+            title,
+            target_dir / f"{filename_suffix}_cdf.png",
+            strategies=current_strategies
+        )
 
         # 3. Histogram Plot (clipped)
-        plt.figure(figsize=(10, 6))
-        try:
-            sns.histplot(
-                data=data_clipped, 
-                x=y, 
-                hue=x, 
-                hue_order=current_strategies,
-                common_norm=False, 
-                stat="percent",
-                element="step",
-                fill=True, 
-                alpha=0.2,
-                palette="Set2"
-            )
-            plt.axvline(1.0, color='k', linestyle='--', alpha=0.5, label='Baseline')
-            plt.xlabel(f"{title.split(' - ')[0]}", fontsize=12)
-            plt.ylabel('Percentage of Matrices (%)', fontsize=12)
-            plt.title(f"Distribution: {title}\n(1st-99th percentile)", fontsize=14)
-            plt.grid(True, alpha=0.3)
-            plt.tight_layout()
-            plt.savefig(target_dir / f"{filename_suffix}_hist.png", dpi=300)
-            plt.close()
-            print(f"Generated {filename_suffix}_hist.png")
-        except Exception as e:
-            print(f"Could not generate Histogram plot for {filename_suffix}: {e}")
-
-        # 4. KDE (Density Curve) Plot
-        plt.figure(figsize=(10, 6))
-        try:
-            for strategy in current_strategies:
-                subset = data_clipped[data_clipped[x] == strategy]
-                values = subset[y].dropna()
-                if len(values) < 2: continue
-                sns.kdeplot(data=values, label=strategy, linewidth=2, fill=True, alpha=0.2)
-            
-            plt.axvline(1.0, color='k', linestyle='--', alpha=0.5, label='Baseline')
-            plt.xlabel(f"{title.split(' - ')[0]}", fontsize=12)
-            plt.ylabel('Density', fontsize=12)
-            plt.title(f"Density Curve: {title}\n(1st-99th percentile)", fontsize=14)
-            plt.legend(title='Strategy')
-            plt.grid(True, alpha=0.3)
-            plt.tight_layout()
-            plt.savefig(target_dir / f"{filename_suffix}_kde.png", dpi=300)
-            plt.close()
-            print(f"Generated {filename_suffix}_kde.png")
-        except Exception as e:
-            print(f"Could not generate KDE plot for {filename_suffix}: {e}")
+        plot_histogram(
+            data_clipped, x, y,
+            f"{title}\n(1st-99th percentile)",
+            target_dir / f"{filename_suffix}_hist.png",
+            hue_order=current_strategies
+        )
 
     # Plot Bandwidth Improvement
     if 'bandwidth_improvement' in df_res.columns:
