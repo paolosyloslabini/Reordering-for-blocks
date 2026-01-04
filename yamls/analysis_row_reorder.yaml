@@ -5,6 +5,7 @@ variables:
     - SB_degree
     - SB_gray
     - SB_slashburn
+    - SPARTA_reorder
 
 preprocess: |
   source ~/.venv/bin/activate
