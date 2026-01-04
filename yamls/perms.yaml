@@ -54,7 +54,7 @@ jobs:
           mtx_name=$(basename {mtx} .mtx)
           mkdir -p perms/SPARTA_reorder
           perm_path=perms/SPARTA_reorder/$mtx_name.perm
-        command: "python3 MtxPerm/SPARTA/reorder.py {mtx} $perm_path --block-size 32 --tau 0.5"
+        command: "python3 MtxPerm/SPARTA/reorder.py {mtx} $perm_path --block-size 32 --tau 0.1"
 
       - tag: "SB_amd"
         preprocess: |
