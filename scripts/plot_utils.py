@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 import sys
 import re
+from scipy import stats
 
 def load_and_merge_data(ops_path, analysis_path):
     """Loads operations and analysis CSVs and merges them."""
@@ -42,17 +43,17 @@ def load_and_merge_data(ops_path, analysis_path):
 # These contain diverse matrices from different sources/applications that shouldn't be grouped together
 KEEP_FULL_FAMILIES = [
     # Large collections (>40 matrices) - diverse problem sources
-    'Meszaros',        # LP problems from various sources (118 matrices)
-    # 'Sandia' removed - contains 56+ adder_dcop_* matrices with identical structure
-    'HB',              # Harwell-Boeing collection - classic diverse problems (74 matrices)
-    'VDOL',            # Various authors (68 matrices)
+    #'Meszaros',        # LP problems from various sources (118 matrices)
+    # 'Sandia'          # contains 56+ adder_dcop_* matrices with identical structure
+    #'HB',              # Harwell-Boeing collection - classic diverse problems (74 matrices)
+    #'VDOL',            # Various authors (68 matrices)
     'DIMACS10',        # Graph partitioning challenge - diverse graph types (65 matrices)
-    'JGD_Homology',    # Homology computation - different topological problems (60 matrices)
-    'Gset',            # Graph set - different graph optimization problems (53 matrices)
-    'Hollinger',       # Various problems (49 matrices)
-    'Schenk_IBMNA',    # IBM - different circuit simulations (49 matrices)
-    'LPnetlib',        # Linear programming - diverse LP problems (49 matrices)
-    'GHS_indef',       # Indefinite systems - various sources (48 matrices)
+    #'JGD_Homology',    # Homology computation - different topological problems (60 matrices)
+    #'Gset',            # Graph set - different graph optimization problems (53 matrices)
+    #'Hollinger',       # Various problems (49 matrices)
+    #'Schenk_IBMNA',    # IBM - different circuit simulations (49 matrices)
+    #'LPnetlib',        # Linear programming - diverse LP problems (49 matrices)
+    #'GHS_indef',       # Indefinite systems - various sources (48 matrices)
     'SNAP'            # Social networks, web graphs - very diverse (40 matrices)
 ]
 
@@ -205,18 +206,98 @@ def get_density_columns(df):
         density_cols.append('density')
     return density_cols
 
-def add_ref_line(ax, x_data, y_data):
-    """Adds a proportional reference line (y ~ x) to the plot."""
-    if len(x_data) > 0:
-        x_mid = np.median(x_data)
-        y_mid = np.median(y_data)
-        k = y_mid / x_mid
+def _save_plot(output_path):
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=300)
+    plt.close()
+    print(f"Generated {output_path.name}")
+
+def plot_boxplot(data, x, y, title, output_path, order=None, hue=None, baseline=1.0):
+    """Generates a boxplot with stripplot overlay."""
+    plt.figure(figsize=(12, 8))
+    
+    # Draw stripplot first (below boxes)
+    sns.stripplot(
+        data=data, x=x, y=y, order=order, hue=hue,
+        color='black', alpha=0.4, jitter=0.35, size=3, dodge=True
+    )
+    
+    # Draw boxplot on top
+    sns.boxplot(
+        data=data, x=x, y=y, order=order, hue=hue,
+        showfliers=False, palette="Set2",
+        boxprops={'alpha': 0.4},
+        medianprops={'color': 'red', 'linewidth': 2.5, 'zorder': 10},
+        dodge=True
+    )
+    
+    if baseline is not None:
+        plt.axhline(baseline, color='r', linestyle='--', label='Baseline')
         
-        x_range = np.logspace(np.log10(x_data.min()), np.log10(x_data.max()), 100)
-        y_range = k * x_range
+    plt.title(title, fontsize=14)
+    plt.xticks(rotation=45, ha='right')
+    plt.grid(True, axis='y', linestyle='--', alpha=0.7)
+    
+    # Handle legend if hue is used, otherwise just tight_layout
+    if hue:
+        plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
         
-        ax.plot(x_range, y_range, 'r--', alpha=0.5, label='Proportional (y ~ x)')
-        ax.legend()
+    _save_plot(output_path)
+
+def plot_cdf(data, x, y, title, output_path, strategies=None, baseline=1.0):
+    """Generates a CDF plot."""
+    plt.figure(figsize=(10, 6))
+    
+    if strategies is None:
+        strategies = sorted(data[x].unique())
+        
+    for strategy in strategies:
+        subset = data[data[x] == strategy]
+        values = subset[y].dropna().sort_values()
+        if len(values) == 0: continue
+        cdf_y = np.arange(1, len(values) + 1) / len(values)
+        plt.step(values, cdf_y, label=strategy, where='post', linewidth=2)
+    
+    if baseline is not None:
+        plt.axvline(baseline, color='k', linestyle='--', alpha=0.5, label='Baseline')
+        
+    plt.xlabel(title.split(' - ')[0] if ' - ' in title else title, fontsize=12)
+    plt.ylabel('CDF (Fraction of Matrices)', fontsize=12)
+    plt.title(f"CDF: {title}", fontsize=14)
+    plt.legend(title='Strategy')
+    plt.grid(True, alpha=0.3)
+    plt.xscale('log')
+    
+    _save_plot(output_path)
+
+def plot_histogram(data, x, y, title, output_path, hue_order=None, baseline=1.0):
+    """Generates a histogram plot."""
+    plt.figure(figsize=(10, 6))
+    try:
+        sns.histplot(
+            data=data, 
+            x=y, 
+            hue=x, 
+            hue_order=hue_order,
+            common_norm=False, 
+            stat="percent",
+            element="step",
+            fill=True, 
+            alpha=0.2,
+            palette="Set2"
+        )
+        if baseline is not None:
+            plt.axvline(baseline, color='k', linestyle='--', alpha=0.5, label='Baseline')
+            
+        plt.xlabel(title.split(' - ')[0] if ' - ' in title else title, fontsize=12)
+        plt.ylabel('Percentage of Matrices (%)', fontsize=12)
+        plt.title(f"Distribution: {title}", fontsize=14)
+        plt.grid(True, alpha=0.3)
+        
+        _save_plot(output_path)
+    except Exception as e:
+        print(f"Could not generate Histogram plot for {output_path.name}: {e}")
+        plt.close()
 
 def plot_gflops_vs_density(df, out_dir):
     """Generates GFLOPS vs Density scatter plots."""
@@ -246,8 +327,11 @@ def plot_gflops_vs_density(df, out_dir):
 
             # 1. Original Matrices Only
             # Filter for perm='None' (Original)
-            original_data = kernel_data[kernel_data['perm'] == 'None']
-            if not original_data.empty:
+            original_data = kernel_data[kernel_data['perm'] == 'None'].dropna(subset=[dens_col, 'gflops'])
+            if not original_data.empty and len(original_data) > 1:
+                # Calculate Kendall's Tau
+                tau, p_value = stats.kendalltau(original_data[dens_col], original_data['gflops'])
+
                 plt.figure(figsize=(8, 8)) 
                 ax = sns.scatterplot(
                     data=original_data,
@@ -255,9 +339,8 @@ def plot_gflops_vs_density(df, out_dir):
                     y='gflops',
                     alpha=0.7
                 )
-                add_ref_line(ax, original_data[dens_col], original_data['gflops'])
                 
-                plt.title(f"GFLOPS vs Density {bs} ({kernel}) - Original Matrices")
+                plt.title(f"GFLOPS vs Density {bs} ({kernel}) - Original Matrices\nKendall's Tau: {tau:.3f} (p={p_value:.3e})")
                 plt.xlabel(f"Density (Block Size {bs})")
                 plt.ylabel("GFLOPS")
                 plt.xscale('log')
@@ -270,19 +353,22 @@ def plot_gflops_vs_density(df, out_dir):
                 print(f"Generated gflops_vs_density{bs}_{safe_kernel_name}_original.png")
 
             # 2. All Matrices
-            if not kernel_data.empty:
+            kernel_data_clean = kernel_data.dropna(subset=[dens_col, 'gflops'])
+            if not kernel_data_clean.empty and len(kernel_data_clean) > 1:
+                # Calculate Kendall's Tau
+                tau, p_value = stats.kendalltau(kernel_data_clean[dens_col], kernel_data_clean['gflops'])
+
                 plt.figure(figsize=(8, 8))
                 ax = sns.scatterplot(
-                    data=kernel_data,
+                    data=kernel_data_clean,
                     x=dens_col,
                     y='gflops',
                     hue='perm_type',
                     style='perm_type',
                     alpha=0.7
                 )
-                add_ref_line(ax, kernel_data[dens_col], kernel_data['gflops'])
                 
-                plt.title(f"GFLOPS vs Density {bs} ({kernel}) - All Matrices")
+                plt.title(f"GFLOPS vs Density {bs} ({kernel}) - All Matrices\nKendall's Tau: {tau:.3f} (p={p_value:.3e})")
                 plt.xlabel(f"Density (Block Size {bs})")
                 plt.ylabel("GFLOPS")
                 plt.xscale('log')
@@ -293,6 +379,115 @@ def plot_gflops_vs_density(df, out_dir):
                 plt.savefig(out_dir / f"gflops_vs_density{bs}_{safe_kernel_name}_all.png")
                 plt.close()
                 print(f"Generated gflops_vs_density{bs}_{safe_kernel_name}_all.png")
+
+def plot_gflops_vs_bandwidth(df, out_dir):
+    """Generates GFLOPS vs Relative Bandwidth scatter plots."""
+    if 'bandwidth_max' not in df.columns or 'rows' not in df.columns:
+        print("No bandwidth or rows columns found.")
+        return
+
+    # Calculate Relative Bandwidth
+    df = df.copy()
+    df['rel_bandwidth'] = df['bandwidth_max'] / df['rows']
+
+    unique_kernels = df['kernel_id'].unique()
+    
+    for kernel in unique_kernels:
+        kernel_data = df[df['kernel_id'] == kernel]
+        safe_kernel_name = kernel.replace('/', '_').replace(' ', '_')
+
+        # 1. Original Matrices Only
+        original_data = kernel_data[kernel_data['perm'] == 'None'].dropna(subset=['rel_bandwidth', 'gflops'])
+        if not original_data.empty and len(original_data) > 1:
+            tau, p_value = stats.kendalltau(original_data['rel_bandwidth'], original_data['gflops'])
+            plt.figure(figsize=(8, 8)) 
+            ax = sns.scatterplot(data=original_data, x='rel_bandwidth', y='gflops', alpha=0.7)
+            plt.title(f"GFLOPS vs Rel. Bandwidth ({kernel}) - Original\nKendall's Tau: {tau:.3f} (p={p_value:.3e})")
+            plt.xlabel("Relative Bandwidth (Bandwidth / Rows)")
+            plt.ylabel("GFLOPS")
+            plt.xscale('log')
+            plt.yscale('log')
+            plt.grid(True, which="both", ls="-", alpha=0.2)
+            plt.tight_layout()
+            plt.savefig(out_dir / f"gflops_vs_rel_bandwidth_{safe_kernel_name}_original.png")
+            plt.close()
+            print(f"Generated gflops_vs_rel_bandwidth_{safe_kernel_name}_original.png")
+
+        # 2. All Matrices
+        kernel_data_clean = kernel_data.dropna(subset=['rel_bandwidth', 'gflops'])
+        if not kernel_data_clean.empty and len(kernel_data_clean) > 1:
+            tau, p_value = stats.kendalltau(kernel_data_clean['rel_bandwidth'], kernel_data_clean['gflops'])
+            plt.figure(figsize=(8, 8))
+            ax = sns.scatterplot(data=kernel_data_clean, x='rel_bandwidth', y='gflops', hue='perm_type', style='perm_type', alpha=0.7)
+            plt.title(f"GFLOPS vs Rel. Bandwidth ({kernel}) - All\nKendall's Tau: {tau:.3f} (p={p_value:.3e})")
+            plt.xlabel("Relative Bandwidth (Bandwidth / Rows)")
+            plt.ylabel("GFLOPS")
+            plt.xscale('log')
+            plt.yscale('log')
+            plt.grid(True, which="both", ls="-", alpha=0.2)
+            plt.tight_layout()
+            plt.savefig(out_dir / f"gflops_vs_rel_bandwidth_{safe_kernel_name}_all.png")
+            plt.close()
+            print(f"Generated gflops_vs_rel_bandwidth_{safe_kernel_name}_all.png")
+
+def plot_gflops_vs_locality(df, out_dir):
+    """Generates GFLOPS vs Locality scatter plots."""
+    # Normalize row spread by number of columns
+    df = df.copy()
+    if 'locality_avg_row_spread' in df.columns and 'cols' in df.columns:
+        df['rel_row_spread'] = df['locality_avg_row_spread'] / df['cols']
+    
+    locality_metrics = ['rel_row_spread', 'locality_vertical_adjacency_ratio']
+    available_metrics = [m for m in locality_metrics if m in df.columns]
+    
+    if not available_metrics:
+        print("No locality columns found.")
+        return
+
+    unique_kernels = df['kernel_id'].unique()
+    
+    for kernel in unique_kernels:
+        kernel_data = df[df['kernel_id'] == kernel]
+        safe_kernel_name = kernel.replace('/', '_').replace(' ', '_')
+
+        for metric in available_metrics:
+            # 1. Original Matrices Only
+            original_data = kernel_data[kernel_data['perm'] == 'None'].dropna(subset=[metric, 'gflops'])
+            if not original_data.empty and len(original_data) > 1:
+                tau, p_value = stats.kendalltau(original_data[metric], original_data['gflops'])
+                plt.figure(figsize=(8, 8)) 
+                ax = sns.scatterplot(data=original_data, x=metric, y='gflops', alpha=0.7)
+                
+                title_metric = "Rel. Row Spread" if metric == 'rel_row_spread' else "Vert. Adjacency"
+                plt.title(f"GFLOPS vs {title_metric} ({kernel}) - Original\nKendall's Tau: {tau:.3f} (p={p_value:.3e})")
+                plt.xlabel(metric)
+                plt.ylabel("GFLOPS")
+                plt.xscale('log') if 'spread' in metric else None
+                plt.yscale('log')
+                plt.grid(True, which="both", ls="-", alpha=0.2)
+                plt.tight_layout()
+                plt.savefig(out_dir / f"gflops_vs_{metric}_{safe_kernel_name}_original.png")
+                plt.close()
+                print(f"Generated gflops_vs_{metric}_{safe_kernel_name}_original.png")
+
+            # 2. All Matrices
+            kernel_data_clean = kernel_data.dropna(subset=[metric, 'gflops'])
+            if not kernel_data_clean.empty and len(kernel_data_clean) > 1:
+                tau, p_value = stats.kendalltau(kernel_data_clean[metric], kernel_data_clean['gflops'])
+                plt.figure(figsize=(8, 8))
+                ax = sns.scatterplot(data=kernel_data_clean, x=metric, y='gflops', hue='perm_type', style='perm_type', alpha=0.7)
+                
+                title_metric = "Rel. Row Spread" if metric == 'rel_row_spread' else "Vert. Adjacency"
+                plt.title(f"GFLOPS vs {title_metric} ({kernel}) - All\nKendall's Tau: {tau:.3f} (p={p_value:.3e})")
+                plt.xlabel(metric)
+                plt.ylabel("GFLOPS")
+                plt.xscale('log') if 'spread' in metric else None
+                plt.yscale('log')
+                plt.grid(True, which="both", ls="-", alpha=0.2)
+                plt.tight_layout()
+                plt.savefig(out_dir / f"gflops_vs_{metric}_{safe_kernel_name}_all.png")
+                plt.close()
+                print(f"Generated gflops_vs_{metric}_{safe_kernel_name}_all.png")
 
 def plot_gflops_distribution(df, out_dir):
     """Generates Violin plots for GFLOPS distribution, separated by perm_type."""
@@ -377,7 +572,7 @@ def plot_gflops_distribution(df, out_dir):
             print(f"Generated gflops_violin_{safe_kernel_name}{suffix}.png")
 
 def plot_speedup_distribution(df, out_dir):
-    """Generates Speedup plots (Boxplot, CDF, KDE), separated by perm_type."""
+    """Generates Speedup plots (Boxplot, CDF), separated by perm_type."""
     df['strategy'] = df['perm'].apply(lambda x: 'Original' if x == 'None' else str(x))
     strategies = sorted([s for s in df['strategy'].unique() if s != 'Original'])
     if 'Original' in df['strategy'].unique():
@@ -428,110 +623,28 @@ def plot_speedup_distribution(df, out_dir):
                 ]
 
                 # 1. Boxplot (clipped)
-                plt.figure(figsize=(12, 8))
-                # Draw stripplot first (below boxes)
-                sns.stripplot(
-                    data=kernel_data_clipped, 
-                    x='strategy', 
-                    y='speedup', 
-                    order=op_strategies,
-                    color='black', 
-                    alpha=0.4, 
-                    jitter=0.35,
-                    size=4
+                plot_boxplot(
+                    kernel_data_clipped, 'strategy', 'speedup', 
+                    f"Speedup Distribution by Strategy ({kernel}) - {p_type}\n(1st-99th percentile)",
+                    out_dir / f"speedup_boxplot_{safe_kernel_name}{suffix}.png",
+                    order=op_strategies
                 )
-                # Draw boxplot on top with transparent fill and red median
-                box = sns.boxplot(
-                    data=kernel_data_clipped, 
-                    x='strategy', 
-                    y='speedup', 
-                    order=op_strategies,
-                    showfliers=False,
-                    palette="Set2",
-                    boxprops={'alpha': 0.4},
-                    medianprops={'color': 'red', 'linewidth': 2.5, 'zorder': 10}
-                )
-                plt.axhline(1.0, color='r', linestyle='--', linewidth=2, label='Baseline (Original)')
-                plt.title(f"Speedup Distribution by Strategy ({kernel}) - {p_type}\n(1st-99th percentile)", fontsize=14)
-                plt.ylabel("Speedup (vs Original)", fontsize=12)
-                plt.xlabel("Reordering Strategy", fontsize=12)
-                plt.xticks(rotation=45, ha='right')
-                plt.grid(True, axis='y', linestyle='--', alpha=0.7)
-                plt.legend()
-                plt.tight_layout()
-                plt.savefig(out_dir / f"speedup_boxplot_{safe_kernel_name}{suffix}.png", dpi=300)
-                plt.close()
-                print(f"Generated speedup_boxplot_{safe_kernel_name}{suffix}.png")
 
                 # 2. CDF Plot
-                plt.figure(figsize=(10, 6))
-                for strategy in op_strategies:
-                    subset = kernel_data[kernel_data['strategy'] == strategy]
-                    speedups = subset['speedup'].dropna().sort_values()
-                    if len(speedups) == 0: continue
-                    y = np.arange(1, len(speedups) + 1) / len(speedups)
-                    plt.step(speedups, y, label=strategy, where='post', linewidth=2)
-                
-                plt.axvline(1.0, color='k', linestyle='--', alpha=0.5, label='Baseline')
-                plt.xlabel('Speedup (vs Original)', fontsize=12)
-                plt.ylabel('CDF (Fraction of Matrices)', fontsize=12)
-                plt.title(f'Speedup CDF ({kernel}) - {p_type}', fontsize=14)
-                plt.legend(title='Strategy')
-                plt.grid(True, alpha=0.3)
-                plt.xscale('log')
-                plt.tight_layout()
-                plt.savefig(out_dir / f"speedup_cdf_{safe_kernel_name}{suffix}.png", dpi=300)
-                plt.close()
-                print(f"Generated speedup_cdf_{safe_kernel_name}{suffix}.png")
+                plot_cdf(
+                    kernel_data, 'strategy', 'speedup',
+                    f'Speedup ({kernel}) - {p_type}',
+                    out_dir / f"speedup_cdf_{safe_kernel_name}{suffix}.png",
+                    strategies=op_strategies
+                )
 
                 # 3. Histogram Plot (clipped)
-                plt.figure(figsize=(10, 6))
-                try:
-                    sns.histplot(
-                        data=kernel_data_clipped, 
-                        x='speedup', 
-                        hue='strategy', 
-                        hue_order=op_strategies,
-                        common_norm=False, 
-                        stat="percent",
-                        element="step",
-                        fill=True, 
-                        alpha=0.2,
-                        palette="Set2"
-                    )
-                    plt.axvline(1.0, color='k', linestyle='--', alpha=0.5, label='Baseline')
-                    plt.xlabel('Speedup (vs Original)', fontsize=12)
-                    plt.ylabel('Percentage of Matrices (%)', fontsize=12)
-                    plt.title(f'Speedup Distribution ({kernel}) - {p_type}\n(1st-99th percentile)', fontsize=14)
-                    plt.grid(True, alpha=0.3)
-                    plt.tight_layout()
-                    plt.savefig(out_dir / f"speedup_hist_{safe_kernel_name}{suffix}.png", dpi=300)
-                    plt.close()
-                    print(f"Generated speedup_hist_{safe_kernel_name}{suffix}.png")
-                except Exception as e:
-                    print(f"Could not generate Histogram plot for {kernel} ({p_type}): {e}")
-
-                # 4. KDE (Density Curve) Plot
-                plt.figure(figsize=(10, 6))
-                try:
-                    for strategy in op_strategies:
-                        subset = kernel_data_clipped[kernel_data_clipped['strategy'] == strategy]
-                        speedups = subset['speedup'].dropna()
-                        if len(speedups) < 2: continue
-                        sns.kdeplot(data=speedups, label=strategy, linewidth=2, fill=True, alpha=0.2)
-                    
-                    plt.axvline(1.0, color='k', linestyle='--', alpha=0.5, label='Baseline')
-                    plt.xlabel('Speedup (vs Original)', fontsize=12)
-                    plt.ylabel('Density', fontsize=12)
-                    plt.title(f'Speedup Density Curve ({kernel}) - {p_type}\n(1st-99th percentile)', fontsize=14)
-                    plt.legend(title='Strategy')
-                    plt.grid(True, alpha=0.3)
-                    plt.tight_layout()
-                    plt.savefig(out_dir / f"speedup_kde_{safe_kernel_name}{suffix}.png", dpi=300)
-                    plt.close()
-                    print(f"Generated speedup_kde_{safe_kernel_name}{suffix}.png")
-                except Exception as e:
-                    print(f"Could not generate KDE plot for {kernel} ({p_type}): {e}")
+                plot_histogram(
+                    kernel_data_clipped, 'strategy', 'speedup',
+                    f'Speedup ({kernel}) - {p_type}\n(1st-99th percentile)',
+                    out_dir / f"speedup_hist_{safe_kernel_name}{suffix}.png",
+                    hue_order=op_strategies
+                )
 
 
 def plot_speedup_vs_density(df, out_dir):
@@ -628,6 +741,9 @@ def plot_speedup_vs_density(df, out_dir):
                 # Create scatter plot
                 plt.figure(figsize=(12, 10))
                 
+                # Calculate Kendall's Tau for the whole p_type
+                tau, p_value = stats.kendalltau(plot_data[improvement_col], plot_data['speedup'])
+
                 for strategy in strategies:
                     subset = plot_data[plot_data['strategy'] == strategy]
                     if subset.empty:
@@ -647,26 +763,13 @@ def plot_speedup_vs_density(df, out_dir):
                 plt.axhline(1.0, color='gray', linestyle='--', linewidth=1.5, alpha=0.7, label='Speedup = 1')
                 plt.axvline(1.0, color='gray', linestyle=':', linewidth=1.5, alpha=0.7, label='Density Imp. = 1')
                 
-                # Diagonal reference (y = x)
-                xlim = plt.xlim()
-                ylim = plt.ylim()
-                min_val = max(min(xlim[0], ylim[0]), 0.1)
-                max_val = min(max(xlim[1], ylim[1]), 10)
-                diag_range = np.linspace(min_val, max_val, 100)
-                plt.plot(diag_range, diag_range, 'r-', alpha=0.3, linewidth=1, label='y = x')
-                
                 plt.xlabel(f'Block Density Improvement (BS {bs}) [Reordered / Original]', fontsize=12)
                 plt.ylabel('Speedup [Reordered / Original]', fontsize=12)
-                plt.title(f'Speedup vs Density Improvement\n{kernel} - {p_type} (Block Size {bs})', fontsize=14)
+                plt.title(f'Speedup vs Density Improvement\n{kernel} - {p_type} (Block Size {bs})\nKendall\'s Tau: {tau:.3f} (p={p_value:.3e})', fontsize=14)
                 plt.legend(title='Reordering', loc='best', fontsize=9)
                 plt.grid(True, alpha=0.3)
                 
-                # Use log scale if data spans wide range
-                if speedup_upper / speedup_lower > 5:
-                    plt.yscale('log')
-                if density_upper / density_lower > 5:
-                    plt.xscale('log')
-                
+
                 plt.tight_layout()
                 filename = f"speedup_vs_density_bs{bs}_{safe_kernel_name}_{p_type}.png"
                 plt.savefig(out_dir / filename, dpi=300)
@@ -747,6 +850,169 @@ def plot_speedup_vs_density(df, out_dir):
             plt.close()
             print(f"Generated {filename}")
 
+
+def plot_binned_speedup_vs_density(df, out_dir):
+    """Generates bar charts showing median speedup for different bins of density improvement."""
+    print("Generating Binned Speedup vs Density Improvement plots...")
+    
+    # Calculate baseline GFLOPS per matrix and kernel (Original)
+    df['strategy'] = df['perm'].apply(lambda x: 'Original' if x == 'None' else str(x))
+    
+    original_gflops = df[df['strategy'] == 'Original'].groupby(['matrix', 'kernel_id'])['gflops'].mean().reset_index()
+    original_gflops = original_gflops.rename(columns={'gflops': 'gflops_original'})
+    
+    df_speedup = pd.merge(df, original_gflops, on=['matrix', 'kernel_id'], how='left')
+    df_speedup['speedup'] = df_speedup['gflops'] / df_speedup['gflops_original']
+    
+    # Calculate baseline densities per matrix (Original)
+    density_cols = [c for c in df.columns if c.startswith('block_density_')]
+    if not density_cols:
+        print("No block density columns found. Skipping binned speedup plots.")
+        return
+    
+    # Get original densities
+    original_densities = df[df['strategy'] == 'Original'][['matrix'] + density_cols].drop_duplicates()
+    original_densities = original_densities.groupby('matrix')[density_cols].mean().reset_index()
+    original_densities = original_densities.rename(columns={c: f'{c}_original' for c in density_cols})
+    
+    df_speedup = pd.merge(df_speedup, original_densities, on='matrix', how='left')
+    
+    # Calculate density improvement for each block size
+    for col in density_cols:
+        orig_col = f'{col}_original'
+        if orig_col in df_speedup.columns:
+            df_speedup[f'{col}_improvement'] = df_speedup[col] / df_speedup[orig_col]
+    
+    # Filter to reordered data only
+    reordered_data = df_speedup[df_speedup['strategy'] != 'Original']
+    
+    if reordered_data.empty:
+        return
+    
+    unique_kernels = df_speedup['kernel_id'].unique()
+    
+    # Define bins for density improvement
+    bins = [0, 0.5, 1.0, 2.0, 5.0, 10.0, 1000.0]
+    labels = ['<0.5x', '0.5-1x', '1-2x', '2-5x', '5-10x', '>10x']
+
+    for kernel in unique_kernels:
+        kernel_data = reordered_data[reordered_data['kernel_id'] == kernel]
+        if kernel_data.empty:
+            continue
+        
+        safe_kernel_name = kernel.replace('/', '_').replace(' ', '_')
+        
+        for col in density_cols:
+            improvement_col = f'{col}_improvement'
+            if improvement_col not in kernel_data.columns:
+                continue
+            
+            bs = col.split('_')[-1]
+            
+            # Filter valid data
+            plot_data = kernel_data[['strategy', 'speedup', improvement_col]].dropna()
+            if plot_data.empty:
+                continue
+                
+            # Bin the density improvement
+            plot_data['bin'] = pd.cut(plot_data[improvement_col], bins=bins, labels=labels)
+            
+            # Calculate median speedup per bin
+            binned_stats = plot_data.groupby('bin', observed=True)['speedup'].agg(['median', 'count']).reset_index()
+            
+            # Filter out bins with very few points
+            binned_stats = binned_stats[binned_stats['count'] >= 5]
+            
+            if binned_stats.empty:
+                continue
+                
+            plt.figure(figsize=(10, 6))
+            ax = sns.barplot(data=binned_stats, x='bin', y='median', palette="viridis")
+            
+            # Add count labels on top of bars
+            for i, p in enumerate(ax.patches):
+                if i < len(binned_stats):
+                    ax.annotate(f"n={int(binned_stats.iloc[i]['count'])}", 
+                                (p.get_x() + p.get_width() / 2., p.get_height()), 
+                                ha = 'center', va = 'center', 
+                                xytext = (0, 9), 
+                                textcoords = 'offset points',
+                                fontsize=9)
+
+            plt.axhline(1.0, color='red', linestyle='--', alpha=0.6)
+            plt.title(f"Median Speedup by Density Improvement Bin\n{kernel} (Block Size {bs})", fontsize=14)
+            plt.xlabel("Density Improvement Bin (Reordered / Original)", fontsize=12)
+            plt.ylabel("Median Speedup", fontsize=12)
+            plt.grid(True, axis='y', alpha=0.3)
+            
+            plt.tight_layout()
+            filename = f"speedup_binned_bs{bs}_{safe_kernel_name}.png"
+            plt.savefig(out_dir / filename, dpi=300)
+            plt.close()
+            print(f"Generated {filename}")
+
+def plot_correlation_by_size(df, out_dir):
+    """Plots Kendall's Tau correlation between Density and GFLOPS across different size classes."""
+    if 'nnz' not in df.columns or 'gflops' not in df.columns:
+        print("Missing nnz or gflops for correlation by size plot.")
+        return
+
+    df = df.copy()
+    # Define size bins based on NNZ
+    bins = [0, 5e4, 2e5, 1e6, np.inf]
+    labels = ['<50K', '50K-200K', '200K-1M', '>1M']
+    df['size_class'] = pd.cut(df['nnz'], bins=bins, labels=labels)
+
+    density_cols = get_density_columns(df)
+    unique_kernels = df['kernel_id'].unique()
+
+    for kernel in unique_kernels:
+        kernel_data = df[df['kernel_id'] == kernel]
+        safe_kernel_name = kernel.replace('/', '_').replace(' ', '_')
+        
+        # We want to see how correlation changes with size for each block size
+        results = []
+        for bs_col in density_cols:
+            # Extract block size from column name
+            if bs_col == 'density':
+                bs = 1
+            else:
+                try:
+                    bs = int(bs_col.split('_')[-1])
+                except:
+                    continue
+            
+            for size_label in labels:
+                subset = kernel_data[kernel_data['size_class'] == size_label].dropna(subset=[bs_col, 'gflops'])
+                if len(subset) > 10: # Need enough points for a meaningful correlation
+                    tau, p = stats.kendalltau(subset[bs_col], subset['gflops'])
+                    results.append({
+                        'Block Size': bs,
+                        'Size Class': size_label,
+                        'Kendall Tau': tau,
+                        'p-value': p
+                    })
+        
+        if not results:
+            continue
+            
+        res_df = pd.DataFrame(results)
+        res_df['Block Size'] = res_df['Block Size'].astype(str)
+        
+        plt.figure(figsize=(10, 6))
+        ax = sns.barplot(data=res_df, x='Size Class', y='Kendall Tau', hue='Block Size', palette="viridis")
+        plt.title(f"Density-Performance Correlation by Matrix Size\nKernel: {kernel}")
+        plt.ylabel("Kendall's Tau (Correlation)")
+        plt.ylim(-0.2, 1.0) # Correlations are usually positive here
+        plt.axhline(0, color='black', linewidth=0.8)
+        plt.grid(True, axis='y', linestyle='--', alpha=0.7)
+        
+        target_dir = out_dir / safe_kernel_name / "gflops_vs_density"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        plt.tight_layout()
+        plt.savefig(target_dir / f"correlation_by_size_{safe_kernel_name}.png", dpi=300)
+        plt.close()
+        print(f"Generated correlation_by_size_{safe_kernel_name}.png")
 
 def plot_speedup_vs_density_improved_only(df, out_dir):
     """Generates scatter plots showing speedup vs density improvement, filtered to density improvement > 1."""
@@ -841,6 +1107,9 @@ def plot_speedup_vs_density_improved_only(df, out_dir):
                 # Create scatter plot
                 plt.figure(figsize=(12, 10))
                 
+                # Calculate Kendall's Tau
+                tau, p_value = stats.kendalltau(plot_data[improvement_col], plot_data['speedup'])
+
                 for strategy in strategies:
                     subset = plot_data[plot_data['strategy'] == strategy]
                     if subset.empty:
@@ -859,14 +1128,7 @@ def plot_speedup_vs_density_improved_only(df, out_dir):
                 # Reference lines
                 plt.axhline(1.0, color='gray', linestyle='--', linewidth=1.5, alpha=0.7, label='Speedup = 1')
                 
-                # Diagonal reference (y = x)
-                xlim = plt.xlim()
-                ylim = plt.ylim()
-                min_val = max(min(xlim[0], ylim[0]), 1.0)
-                max_val = min(max(xlim[1], ylim[1]), 10)
-                diag_range = np.linspace(min_val, max_val, 100)
-                plt.plot(diag_range, diag_range, 'r-', alpha=0.3, linewidth=1, label='y = x')
-                
+
                 # Count stats
                 n_improved = len(plot_data[plot_data['speedup'] > 1.0])
                 n_total = len(plot_data)
@@ -874,16 +1136,11 @@ def plot_speedup_vs_density_improved_only(df, out_dir):
                 
                 plt.xlabel(f'Block Density Improvement (BS {bs}) [Reordered / Original]', fontsize=12)
                 plt.ylabel('Speedup [Reordered / Original]', fontsize=12)
-                plt.title(f'Speedup vs Density Improvement (Density > 1 only)\n{kernel} - {p_type} (BS {bs})\n{n_improved}/{n_total} ({pct_improved:.1f}%) also have speedup > 1', fontsize=12)
+                plt.title(f'Speedup vs Density Improvement (Density > 1 only)\n{kernel} - {p_type} (BS {bs})\nKendall\'s Tau: {tau:.3f} (p={p_value:.3e})\n{n_improved}/{n_total} ({pct_improved:.1f}%) also have speedup > 1', fontsize=12)
                 plt.legend(title='Reordering', loc='best', fontsize=9)
                 plt.grid(True, alpha=0.3)
                 
-                # Use log scale if data spans wide range
-                if speedup_upper / speedup_lower > 5:
-                    plt.yscale('log')
-                if density_upper > 5:
-                    plt.xscale('log')
-                
+
                 plt.tight_layout()
                 filename = f"speedup_vs_density_improved_bs{bs}_{safe_kernel_name}_{p_type}.png"
                 plt.savefig(out_dir / filename, dpi=300)
@@ -1055,94 +1312,29 @@ def plot_reordering_efficiency(df, out_dir):
         ]
 
         # 1. Boxplot (clipped)
-        plt.figure(figsize=(12, 8))
-        # Draw stripplot first (below boxes)
-        sns.stripplot(data=data_clipped, x=x, y=y, order=strategies, color='black', alpha=0.4, jitter=0.35, size=3)
-        # Draw boxplot on top with transparent fill and red median
-        sns.boxplot(
-            data=data_clipped, x=x, y=y, order=strategies, showfliers=False, palette="Set2",
-            boxprops={'alpha': 0.4},
-            medianprops={'color': 'red', 'linewidth': 2.5, 'zorder': 10}
+        plot_boxplot(
+            data_clipped, x, y, 
+            f"{title}\n(1st-99th percentile)",
+            target_dir / f"{filename_suffix}_boxplot.png",
+            order=strategies
         )
-        plt.axhline(1.0, color='r', linestyle='--', label='Baseline')
-        plt.title(f"{title}\n(1st-99th percentile)", fontsize=14)
-        plt.xticks(rotation=45, ha='right')
-        plt.grid(True, axis='y', linestyle='--', alpha=0.7)
-        plt.tight_layout()
-        plt.savefig(target_dir / f"{filename_suffix}_boxplot.png", dpi=300)
-        plt.close()
-        print(f"Generated {filename_suffix}_boxplot.png")
 
         # 2. CDF Plot
-        plt.figure(figsize=(10, 6))
         current_strategies = [s for s in strategies if s in data[x].unique()]
-        for strategy in current_strategies:
-            subset = data[data[x] == strategy]
-            values = subset[y].dropna().sort_values()
-            if len(values) == 0: continue
-            cdf_y = np.arange(1, len(values) + 1) / len(values)
-            plt.step(values, cdf_y, label=strategy, where='post', linewidth=2)
-        
-        plt.axvline(1.0, color='k', linestyle='--', alpha=0.5, label='Baseline')
-        plt.xlabel(f"{title.split(' - ')[0]}", fontsize=12)
-        plt.ylabel('CDF (Fraction of Matrices)', fontsize=12)
-        plt.title(f"CDF: {title}", fontsize=14)
-        plt.legend(title='Strategy')
-        plt.grid(True, alpha=0.3)
-        plt.xscale('log')
-        plt.tight_layout()
-        plt.savefig(target_dir / f"{filename_suffix}_cdf.png", dpi=300)
-        plt.close()
-        print(f"Generated {filename_suffix}_cdf.png")
+        plot_cdf(
+            data, x, y,
+            title,
+            target_dir / f"{filename_suffix}_cdf.png",
+            strategies=current_strategies
+        )
 
         # 3. Histogram Plot (clipped)
-        plt.figure(figsize=(10, 6))
-        try:
-            sns.histplot(
-                data=data_clipped, 
-                x=y, 
-                hue=x, 
-                hue_order=current_strategies,
-                common_norm=False, 
-                stat="percent",
-                element="step",
-                fill=True, 
-                alpha=0.2,
-                palette="Set2"
-            )
-            plt.axvline(1.0, color='k', linestyle='--', alpha=0.5, label='Baseline')
-            plt.xlabel(f"{title.split(' - ')[0]}", fontsize=12)
-            plt.ylabel('Percentage of Matrices (%)', fontsize=12)
-            plt.title(f"Distribution: {title}\n(1st-99th percentile)", fontsize=14)
-            plt.grid(True, alpha=0.3)
-            plt.tight_layout()
-            plt.savefig(target_dir / f"{filename_suffix}_hist.png", dpi=300)
-            plt.close()
-            print(f"Generated {filename_suffix}_hist.png")
-        except Exception as e:
-            print(f"Could not generate Histogram plot for {filename_suffix}: {e}")
-
-        # 4. KDE (Density Curve) Plot
-        plt.figure(figsize=(10, 6))
-        try:
-            for strategy in current_strategies:
-                subset = data_clipped[data_clipped[x] == strategy]
-                values = subset[y].dropna()
-                if len(values) < 2: continue
-                sns.kdeplot(data=values, label=strategy, linewidth=2, fill=True, alpha=0.2)
-            
-            plt.axvline(1.0, color='k', linestyle='--', alpha=0.5, label='Baseline')
-            plt.xlabel(f"{title.split(' - ')[0]}", fontsize=12)
-            plt.ylabel('Density', fontsize=12)
-            plt.title(f"Density Curve: {title}\n(1st-99th percentile)", fontsize=14)
-            plt.legend(title='Strategy')
-            plt.grid(True, alpha=0.3)
-            plt.tight_layout()
-            plt.savefig(target_dir / f"{filename_suffix}_kde.png", dpi=300)
-            plt.close()
-            print(f"Generated {filename_suffix}_kde.png")
-        except Exception as e:
-            print(f"Could not generate KDE plot for {filename_suffix}: {e}")
+        plot_histogram(
+            data_clipped, x, y,
+            f"{title}\n(1st-99th percentile)",
+            target_dir / f"{filename_suffix}_hist.png",
+            hue_order=current_strategies
+        )
 
     # Plot Bandwidth Improvement
     if 'bandwidth_improvement' in df_res.columns:
