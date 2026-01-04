@@ -10,6 +10,7 @@ variables:
   #  - SB_rabbit
   #  - SB_patoh
     - SB_slashburn
+    - SPARTA_reorder
 
 preprocess: |
   source ~/.venv/bin/activate
