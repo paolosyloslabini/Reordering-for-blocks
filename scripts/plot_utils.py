@@ -219,13 +219,14 @@ def plot_boxplot(data, x, y, title, output_path, order=None, hue=None, baseline=
     # Draw stripplot first (below boxes)
     sns.stripplot(
         data=data, x=x, y=y, order=order, hue=hue,
-        color='black', alpha=0.4, jitter=0.35, size=3, dodge=True
+        color='black', alpha=0.4, jitter=0.25, size=3, dodge=True
     )
     
     # Draw boxplot on top
     sns.boxplot(
         data=data, x=x, y=y, order=order, hue=hue,
         showfliers=False, palette="Set2",
+        width=0.6,
         boxprops={'alpha': 0.4},
         medianprops={'color': 'red', 'linewidth': 2.5, 'zorder': 10},
         dodge=True

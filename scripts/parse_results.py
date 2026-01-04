@@ -101,6 +101,11 @@ def main():
             
             # Parse JSON output
             stdout = job.get_stdout()
+            if stdout is None:
+                job_id = getattr(job, 'id', getattr(job, 'job_id', 'unknown'))
+                print(f"Warning: stdout is None for analysis job {job_id}", file=sys.stderr)
+                continue
+
             start = stdout.find('{')
             end = stdout.rfind('}')
             
