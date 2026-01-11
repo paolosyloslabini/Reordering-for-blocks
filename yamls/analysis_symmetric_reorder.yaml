@@ -2,15 +2,14 @@ variables:
   mtx: 'datasets/matrices_list_mtx.txt'
   perm: 
     - SB_gray
-  #  - random1D
-  #  - SB_amd
-  #  - SB_degree
-  #  - SB_metis
-  #  - SB_rcm
-  #  - SB_rabbit
-  #  - SB_patoh
+    - random1D
+    - SB_amd
+    - SB_degree
+    - SB_metis
+    - SB_rcm
+    - SB_rabbit
+    - SB_patoh
     - SB_slashburn
-    - SPARTA_reorder
 
 preprocess: |
   source ~/.venv/bin/activate
