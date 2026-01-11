@@ -100,8 +100,19 @@ if [ -z "$TORCH_CUDA_ARCH_LIST" ]; then
         export TORCH_CUDA_ARCH_LIST="8.0"
     fi
 else
+    export TORCH_CUDA_ARCH_LIST="$TORCH_CUDA_ARCH_LIST"
     echo "✓ Using specified TORCH_CUDA_ARCH_LIST: $TORCH_CUDA_ARCH_LIST"
 fi
+
+# Set CUDA_HOME if not set (critical for setup.py)
+if [ -z "$CUDA_HOME" ]; then
+    NVCC_PATH=$(command -v nvcc)
+    export CUDA_HOME=$(dirname $(dirname $NVCC_PATH))
+    echo "✓ Setting CUDA_HOME to $CUDA_HOME"
+fi
+
+# Limit parallel builds to avoid OOM on login nodes
+export MAX_JOBS=4
 
 # Step 2: Clone repository
 echo ""

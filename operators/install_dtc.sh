@@ -1,18 +1,18 @@
 #!/bin/bash
 #
-# Install script for DTC-SpMM (Dynamic Tensor Core SpMM)
-# Clones the repository and builds the CUDA kernels
+# Install script for DTC-SpMM (ASPLOS'24)
+# Based on: https://github.com/HPMLL/DTC-SpMM_ASPLOS24
 #
 # Requirements:
-#   - CUDA Toolkit >= 11.0
-#   - nvcc compiler in PATH
+#   - CUDA Toolkit >= 11.8 (CUDA 12.1 recommended)
+#   - Python 3.9–3.11 (3.12+ has distutils issues)
 #   - PyTorch with CUDA support
-#   - cmake, make
+#   - cmake
 #
 # Usage:
 #   ./install_dtc.sh                          # Standard install
 #   ./install_dtc.sh --clean                  # Clean and reinstall
-#   TORCH_CUDA_ARCH_LIST="8.6 8.9" ./install_dtc.sh  # Specific arch
+#   TORCH_CUDA_ARCH_LIST="8.9" ./install_dtc.sh  # Specific arch (e.g., RTX 4090)
 #
 
 set -e  # Exit on first error
@@ -26,7 +26,7 @@ fi
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 DTC_DIR="${SCRIPT_DIR}/DTC-SpMM"
-DTC_REPO="https://github.com/Shigangli/DTC-SpMM.git"
+DTC_REPO="https://github.com/HPMLL/DTC-SpMM_ASPLOS24.git"
 
 # Parse arguments
 CLEAN_BUILD=false
@@ -40,193 +40,225 @@ for arg in "$@"; do
 done
 
 echo "=========================================="
-echo "DTC-SpMM Installation Script"
+echo "DTC-SpMM Installation Script (ASPLOS'24)"
 echo "=========================================="
 echo "Target directory: ${DTC_DIR}"
 echo "Repository: ${DTC_REPO}"
 echo ""
 
+# ============================================
 # Step 1: Check prerequisites
-echo "[1/6] Checking prerequisites..."
+# ============================================
+echo "[1/5] Checking prerequisites..."
 
 # Determine the best python executable
-if command -v python3 &> /dev/null && python3 -c "import torch" &> /dev/null; then
-    PYTHON_EXE=$(command -v python3)
-elif command -v python &> /dev/null && python -c "import torch" &> /dev/null; then
-    PYTHON_EXE=$(command -v python)
-else
+PYTHON_EXE=""
+for py in python3 python; do
+    if command -v $py &> /dev/null && $py -c "import torch" &> /dev/null; then
+        PYTHON_EXE=$(command -v $py)
+        break
+    fi
+done
+if [ -z "$PYTHON_EXE" ]; then
     echo "ERROR: PyTorch not found in your Python environment."
-    echo "Please ensure PyTorch is installed and your virtual environment is active."
+    echo "Please install PyTorch (Python 3.9-3.11 recommended):"
+    echo "  pip install torch --index-url https://download.pytorch.org/whl/cu121"
     exit 1
 fi
-echo "✓ Using Python: $PYTHON_EXE"
+PYTHON_VERSION=$($PYTHON_EXE --version)
+echo "✓ Using Python: $PYTHON_EXE ($PYTHON_VERSION)"
 
-# Try to load modules on clusters
+# Check Python version (warn if 3.12+)
+PY_MAJOR=$($PYTHON_EXE -c "import sys; print(sys.version_info.major)")
+PY_MINOR=$($PYTHON_EXE -c "import sys; print(sys.version_info.minor)")
+if [ "$PY_MAJOR" -eq 3 ] && [ "$PY_MINOR" -ge 12 ]; then
+    echo "⚠ WARNING: Python 3.12+ detected. DTC-SpMM may fail due to distutils removal."
+    echo "  Consider using Python 3.9-3.11 for best compatibility."
+fi
+
+# Try to load CUDA module on clusters
 if ! command -v nvcc &> /dev/null; then
     echo "nvcc not found, attempting to load cuda module..."
-    module load cuda 2>/dev/null || module load CUDA 2>/dev/null || echo "Warning: Could not load cuda module"
+    module load cuda 2>/dev/null || module load CUDA 2>/dev/null || module load cuda/12.1 2>/dev/null || true
 fi
 
 if ! command -v nvcc &> /dev/null; then
     echo "ERROR: nvcc (CUDA compiler) not found in PATH"
-    echo "Please install CUDA Toolkit and ensure nvcc is in PATH"
-    echo "On clusters, try: module load cuda"
+    echo "Please load CUDA: module load cuda"
     exit 1
 fi
 CUDA_VERSION=$(nvcc --version | grep "release" | sed 's/.*release //' | sed 's/,.*//')
 echo "✓ CUDA (nvcc) found: $CUDA_VERSION"
 
+# Set CUDA_HOME
+if [ -z "$CUDA_HOME" ]; then
+    NVCC_PATH=$(command -v nvcc)
+    export CUDA_HOME=$(dirname $(dirname $NVCC_PATH))
+fi
+echo "✓ CUDA_HOME: $CUDA_HOME"
+
+# Check cmake
 if ! command -v cmake &> /dev/null; then
-    echo "ERROR: cmake not found in PATH"
+    echo "ERROR: cmake not found. Install with: conda install cmake"
     exit 1
 fi
-echo "✓ cmake found: $(cmake --version | head -1)"
+echo "✓ cmake found"
 
-# Check for PyTorch with CUDA
-if $PYTHON_EXE -c "import torch; assert torch.cuda.is_available()" 2>/dev/null; then
-    TORCH_VERSION=$($PYTHON_EXE -c "import torch; print(torch.__version__)")
-    TORCH_CUDA=$($PYTHON_EXE -c "import torch; print(torch.version.cuda)")
-    echo "✓ PyTorch found: $TORCH_VERSION (CUDA $TORCH_CUDA)"
-else
-    echo "⚠ Warning: PyTorch is installed but torch.cuda.is_available() is False."
-    echo "  This is normal if you are on a login node without a GPU."
-    echo "  The installation will proceed, but you must run benchmarks on a compute node."
-fi
+# Check PyTorch
+TORCH_VERSION=$($PYTHON_EXE -c "import torch; print(torch.__version__)")
+TORCH_CUDA=$($PYTHON_EXE -c "import torch; print(torch.version.cuda)" 2>/dev/null || echo "N/A")
+echo "✓ PyTorch: $TORCH_VERSION (CUDA $TORCH_CUDA)"
 
-# Detect GPU architecture if not specified
+# Detect or set GPU architecture
 if [ -z "$TORCH_CUDA_ARCH_LIST" ]; then
-    echo ""
-    echo "Detecting GPU architecture..."
     GPU_ARCH=$($PYTHON_EXE -c "import torch; cc = torch.cuda.get_device_capability(); print(f'{cc[0]}.{cc[1]}')" 2>/dev/null || echo "")
     if [ -n "$GPU_ARCH" ]; then
-        # DTC-SpMM cmake uses different format (e.g., "89" instead of "8.9")
-        GPU_ARCH_CMAKE=$(echo "$GPU_ARCH" | tr -d '.')
         export TORCH_CUDA_ARCH_LIST="$GPU_ARCH"
-        echo "✓ Detected GPU compute capability: $GPU_ARCH (cmake: $GPU_ARCH_CMAKE)"
+        echo "✓ Detected GPU: sm_$(echo $GPU_ARCH | tr -d '.')"
     else
-        # Default to common architectures
-        echo "Warning: Could not detect GPU (normal on login nodes). Using SM80 (A100) as default."
-        GPU_ARCH_CMAKE="80"
-        export TORCH_CUDA_ARCH_LIST="8.0"
+        # Default to RTX 4090 / A100
+        export TORCH_CUDA_ARCH_LIST="8.0 8.9"
+        echo "⚠ Could not detect GPU. Using defaults: $TORCH_CUDA_ARCH_LIST"
     fi
 else
-    # Convert TORCH_CUDA_ARCH_LIST format to cmake format
-    GPU_ARCH_CMAKE=$(echo "$TORCH_CUDA_ARCH_LIST" | tr ' ' ';' | tr -d '.')
-    echo "✓ Using specified TORCH_CUDA_ARCH_LIST: $TORCH_CUDA_ARCH_LIST"
+    echo "✓ Using TORCH_CUDA_ARCH_LIST: $TORCH_CUDA_ARCH_LIST"
 fi
 
+# Limit parallel jobs (avoid OOM on login nodes)
+export MAX_JOBS=${MAX_JOBS:-4}
+
+# ============================================
 # Step 2: Clone repository
+# ============================================
 echo ""
-echo "[2/6] Cloning DTC-SpMM repository..."
+echo "[2/5] Cloning DTC-SpMM repository..."
+
 if [ "$CLEAN_BUILD" = true ] && [ -d "${DTC_DIR}" ]; then
     echo "Removing existing directory for clean build..."
     rm -rf "${DTC_DIR}"
 fi
 
 if [ -d "${DTC_DIR}" ]; then
-    echo "Directory ${DTC_DIR} already exists. Pulling latest changes..."
+    echo "Directory exists. Updating..."
     cd "${DTC_DIR}"
-    git pull || echo "Warning: git pull failed, continuing with existing code"
-    git submodule update --init --recursive || echo "Warning: submodule update failed"
+    git pull || echo "Warning: git pull failed"
+    git submodule update --init --recursive || true
 else
     git clone --recursive "${DTC_REPO}" "${DTC_DIR}"
-    cd "${DTC_DIR}"
 fi
 
+cd "${DTC_DIR}"
 export DTC_HOME="${DTC_DIR}"
+echo "✓ DTC_HOME=$DTC_HOME"
 
-# Step 3: Build glog (dependency)
+# ============================================
+# Step 3: Build Sputnik (dependency)
+# ============================================
 echo ""
-echo "[3/6] Building glog..."
-cd "${DTC_HOME}/third_party/glog"
+echo "[3/5] Building Sputnik dependency..."
 
-if [ "$CLEAN_BUILD" = true ]; then
-    rm -rf build
+cd "${DTC_HOME}/third_party"
+
+# Build glog first (Sputnik dependency)
+if [ -d "glog" ]; then
+    echo "Building glog..."
+    cd glog
+    if [ "$CLEAN_BUILD" = true ]; then rm -rf build; fi
+    mkdir -p build && cd build
+    cmake -DCMAKE_INSTALL_PREFIX="${DTC_HOME}/third_party/glog/build" \
+          -DBUILD_SHARED_LIBS=ON \
+          -DWITH_GTEST=OFF \
+          ..
+    make -j${MAX_JOBS}
+    make install
+    cd ../..
+    
+    export GLOG_PATH="${DTC_HOME}/third_party/glog/build"
+    export LD_LIBRARY_PATH="${GLOG_PATH}/lib:${GLOG_PATH}/lib64:${LD_LIBRARY_PATH}"
+    export LIBRARY_PATH="${GLOG_PATH}/lib:${GLOG_PATH}/lib64:${LIBRARY_PATH}"
+    export CPLUS_INCLUDE_PATH="${GLOG_PATH}/include:${CPLUS_INCLUDE_PATH}"
+    echo "✓ glog built"
 fi
 
-mkdir -p build && cd build
-cmake -DCMAKE_INSTALL_PREFIX="${DTC_HOME}/third_party/glog/build" ..
-make -j$(nproc)
-make install
-
-export GLOG_PATH="${DTC_HOME}/third_party/glog"
-export LD_LIBRARY_PATH="${GLOG_PATH}/build/lib:${GLOG_PATH}/build/lib64:${LD_LIBRARY_PATH}"
-export CPLUS_INCLUDE_PATH="${GLOG_PATH}/build/include:${CPLUS_INCLUDE_PATH}"
-export LIBRARY_PATH="${GLOG_PATH}/build/lib:${GLOG_PATH}/build/lib64:${LIBRARY_PATH}"
-echo "✓ glog built successfully"
-
-# Step 4: Build Sputnik (dependency)
-echo ""
-echo "[4/6] Building Sputnik..."
-cd "${DTC_HOME}/third_party/sputnik"
-
-if [ "$CLEAN_BUILD" = true ]; then
-    rm -rf build
-fi
-
-# Find the glog library (might be .so or .a, in lib or lib64)
-GLOG_LIB=""
-for lib in "${GLOG_PATH}/build/lib/libglog.so" "${GLOG_PATH}/build/lib64/libglog.so" \
-           "${GLOG_PATH}/build/lib/libglog.a" "${GLOG_PATH}/build/lib64/libglog.a"; do
-    if [ -f "$lib" ]; then
-        GLOG_LIB="$lib"
-        break
+# Build Sputnik
+if [ -d "sputnik" ]; then
+    echo "Building Sputnik..."
+    cd sputnik
+    if [ "$CLEAN_BUILD" = true ]; then rm -rf build; fi
+    mkdir -p build && cd build
+    
+    # Find glog library
+    GLOG_LIB=$(find "${GLOG_PATH}" -name "libglog.so" -o -name "libglog.a" 2>/dev/null | head -1)
+    if [ -z "$GLOG_LIB" ]; then
+        GLOG_LIB="${GLOG_PATH}/lib/libglog.so"
     fi
-done
-if [ -z "$GLOG_LIB" ]; then
-    echo "Warning: Could not find glog library, using default path"
-    GLOG_LIB="${GLOG_PATH}/build/lib/libglog.so"
+    
+    # Convert TORCH_CUDA_ARCH_LIST to cmake format (e.g., "8.0 8.9" -> "80;89")
+    CUDA_ARCHS=$(echo "$TORCH_CUDA_ARCH_LIST" | tr ' ' ';' | tr -d '.')
+    
+    cmake .. \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_TEST=OFF \
+        -DBUILD_BENCHMARK=OFF \
+        -DCUDA_ARCHS="${CUDA_ARCHS}" \
+        -DGLOG_INCLUDE_DIR="${GLOG_PATH}/include" \
+        -DGLOG_LIBRARY="${GLOG_LIB}"
+    make -j${MAX_JOBS}
+    cd ../..
+    
+    export SPUTNIK_PATH="${DTC_HOME}/third_party/sputnik"
+    export LD_LIBRARY_PATH="${SPUTNIK_PATH}/build/sputnik:${LD_LIBRARY_PATH}"
+    export LIBRARY_PATH="${SPUTNIK_PATH}/build/sputnik:${LIBRARY_PATH}"
+    echo "✓ Sputnik built"
 fi
 
-mkdir -p build && cd build
-cmake .. \
-    -DGLOG_INCLUDE_DIR="${GLOG_PATH}/build/include" \
-    -DGLOG_LIBRARY="${GLOG_LIB}" \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DBUILD_TEST=OFF \
-    -DBUILD_BENCHMARK=OFF \
-    -DCUDA_ARCHS="${GPU_ARCH_CMAKE}"
-make -j$(nproc)
-
-export SPUTNIK_PATH="${DTC_HOME}/third_party/sputnik"
-export LD_LIBRARY_PATH="${SPUTNIK_PATH}/build/sputnik:${LD_LIBRARY_PATH}"
-echo "✓ Sputnik built successfully"
-
-# Step 5: Build DTC-SpMM
+# ============================================
+# Step 4: Build DTC-SpMM
+# ============================================
 echo ""
-echo "[5/6] Building DTC-SpMM..."
+echo "[4/5] Building DTC-SpMM..."
+
 cd "${DTC_HOME}/DTC-SpMM"
 
 if [ "$CLEAN_BUILD" = true ]; then
     rm -rf build dist *.egg-info
 fi
 
+# The setup.py expects these environment variables
+export SPUTNIK_PATH="${DTC_HOME}/third_party/sputnik"
+export GLOG_PATH="${DTC_HOME}/third_party/glog/build"
+
+echo "Building with:"
+echo "  TORCH_CUDA_ARCH_LIST=$TORCH_CUDA_ARCH_LIST"
+echo "  SPUTNIK_PATH=$SPUTNIK_PATH"
+echo "  GLOG_PATH=$GLOG_PATH"
+
 $PYTHON_EXE setup.py install
 
-# Step 6: Verify
+# ============================================
+# Step 5: Verify installation
+# ============================================
 echo ""
-echo "[6/6] Verifying installation..."
+echo "[5/5] Verifying installation..."
+
 cd "${SCRIPT_DIR}"  # Go back to avoid import issues
 
 if $PYTHON_EXE -c "import DTCSpMM; print('✓ DTCSpMM module loaded successfully')" 2>/dev/null; then
-    :
+    echo ""
+    echo "=========================================="
+    echo "DTC-SpMM installation complete!"
+    echo "=========================================="
+    echo ""
+    echo "Before running, set library paths:"
+    echo "  export LD_LIBRARY_PATH=\"${GLOG_PATH}/lib:${SPUTNIK_PATH}/build/sputnik:\$LD_LIBRARY_PATH\""
+    echo ""
+    echo "Usage in Python:"
+    echo "  import DTCSpMM"
+    echo "  DTCSpMM.preprocess_gpu(...)"
+    echo "  DTCSpMM.run_DTCSpMM(...)"
+    echo ""
 else
     echo "ERROR: Could not import DTCSpMM module"
-    echo "Build may have failed. Check the output above for errors."
+    echo "Check the build output above for errors."
     exit 1
 fi
-
-echo ""
-echo "=========================================="
-echo "DTC-SpMM installation complete!"
-echo "=========================================="
-echo ""
-echo "IMPORTANT: Before using DTC-SpMM, set these environment variables:"
-echo "  export LD_LIBRARY_PATH=\"${GLOG_PATH}/build/lib:${SPUTNIK_PATH}/build/sputnik:\$LD_LIBRARY_PATH\""
-echo ""
-echo "You can now use DTC-SpMM in your Python scripts:"
-echo "  import DTCSpMM"
-echo ""
-echo "Test with:"
-echo "  python operators/dtc_spmm.py <matrix.mtx> --n-cols 32"
-echo ""
