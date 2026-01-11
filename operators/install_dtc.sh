@@ -166,8 +166,10 @@ if [ -d "glog" ]; then
     if [ "$CLEAN_BUILD" = true ]; then rm -rf build; fi
     mkdir -p build && cd build
     cmake -DCMAKE_INSTALL_PREFIX="${DTC_HOME}/third_party/glog/build" \
-          -DBUILD_SHARED_LIBS=ON \
+          -DBUILD_SHARED_LIBS=OFF \
           -DWITH_GTEST=OFF \
+          -DWITH_GFLAGS=OFF \
+          -DCMAKE_DISABLE_FIND_PACKAGE_gflags=ON \
           ..
     make -j${MAX_JOBS}
     make install
