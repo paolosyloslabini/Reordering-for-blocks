@@ -18,6 +18,13 @@
 
 set -e
 
+# Initialize modules if available (needed for many clusters)
+if [ -f /etc/profile.d/modules.sh ]; then
+    source /etc/profile.d/modules.sh
+elif [ -f /usr/share/Modules/init/bash ]; then
+    source /usr/share/Modules/init/bash
+fi
+
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "${SCRIPT_DIR}"
 
@@ -26,6 +33,15 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
+
+# Determine the best python executable
+if command -v python3 &> /dev/null; then
+    PYTHON_EXE=$(command -v python3)
+elif command -v python &> /dev/null; then
+    PYTHON_EXE=$(command -v python)
+else
+    PYTHON_EXE="python"
+fi
 
 # Parse arguments
 INSTALL_FLASHSPARSE=false
@@ -46,14 +62,14 @@ for arg in "$@"; do
         --check) CHECK_ONLY=true ;;
         --clean) CLEAN="--clean" ;;
         --help|-h)
-            head -20 "$0" | tail -17
+            head -25 "$0" | tail -22
             exit 0
             ;;
     esac
 done
 
 echo "=========================================="
-echo "SpMM Operators Installation"
+echo "SpMM Operators Installation (Login Node Friendly)"
 echo "=========================================="
 echo ""
 
@@ -66,36 +82,33 @@ PREREQ_OK=true
 # Check CUDA
 echo -n "CUDA (nvcc): "
 if ! command -v nvcc &> /dev/null; then
-    # Try loading module
-    module load cuda 2>/dev/null || module load CUDA 2>/dev/null || true
+    # Try loading common module names
+    module load cuda 2>/dev/null || module load CUDA 2>/dev/null || module load nvidia/cuda 2>/dev/null || true
 fi
 if command -v nvcc &> /dev/null; then
     CUDA_VER=$(nvcc --version | grep "release" | sed 's/.*release //' | sed 's/,.*//')
     echo -e "${GREEN}✓ Found ($CUDA_VER)${NC}"
 else
     echo -e "${RED}✗ Not found${NC}"
-    echo "  Install CUDA Toolkit or run: module load cuda"
+    echo "  Compilation requires nvcc. Please: module load cuda"
     PREREQ_OK=false
 fi
 
-# Check Python
-echo -n "Python: "
-if command -v python &> /dev/null; then
-    PYTHON_VER=$(python --version 2>&1)
-    echo -e "${GREEN}✓ Found ($PYTHON_VER)${NC}"
+# Check Python & PyTorch
+echo -n "PyTorch: "
+if $PYTHON_EXE -c "import torch" 2>/dev/null; then
+    TORCH_VER=$($PYTHON_EXE -c "import torch; print(torch.__version__)")
+    echo -e "${GREEN}✓ Found ($TORCH_VER)${NC}"
+    
+    echo -n "GPU Support: "
+    if $PYTHON_EXE -c "import torch; assert torch.cuda.is_available()" 2>/dev/null; then
+        echo -e "${GREEN}✓ Available${NC}"
+    else
+        echo -e "${YELLOW}⚠ Not detected (Normal on login nodes, installation can proceed)${NC}"
+    fi
 else
     echo -e "${RED}✗ Not found${NC}"
-    PREREQ_OK=false
-fi
-
-# Check PyTorch with CUDA
-echo -n "PyTorch (CUDA): "
-if python -c "import torch; assert torch.cuda.is_available()" 2>/dev/null; then
-    TORCH_VER=$(python -c "import torch; print(f'{torch.__version__} CUDA {torch.version.cuda}')")
-    echo -e "${GREEN}✓ Found ($TORCH_VER)${NC}"
-else
-    echo -e "${RED}✗ Not found or no CUDA support${NC}"
-    echo "  Install with: pip install torch --index-url https://download.pytorch.org/whl/cu118"
+    echo "  Please install PyTorch in your active environment first."
     PREREQ_OK=false
 fi
 
@@ -105,38 +118,14 @@ if command -v cmake &> /dev/null; then
     CMAKE_VER=$(cmake --version | head -1)
     echo -e "${GREEN}✓ Found ($CMAKE_VER)${NC}"
 else
-    echo -e "${YELLOW}⚠ Not found (needed for DTC-SpMM)${NC}"
-fi
-
-# Check git
-echo -n "git: "
-if command -v git &> /dev/null; then
-    echo -e "${GREEN}✓ Found${NC}"
-else
-    echo -e "${RED}✗ Not found${NC}"
-    PREREQ_OK=false
-fi
-
-# GPU info
-echo -n "GPU: "
-if python -c "import torch; print(torch.cuda.get_device_name(0))" 2>/dev/null; then
-    GPU_NAME=$(python -c "import torch; print(torch.cuda.get_device_name(0))")
-    GPU_ARCH=$(python -c "import torch; cc = torch.cuda.get_device_capability(); print(f'sm_{cc[0]}{cc[1]}')")
-    echo -e "${GREEN}✓ $GPU_NAME ($GPU_ARCH)${NC}"
-else
-    echo -e "${YELLOW}⚠ Could not detect (will use defaults)${NC}"
+    echo -e "${YELLOW}⚠ Not found (Required for DTC-SpMM)${NC}"
 fi
 
 echo ""
 
-if [ "$PREREQ_OK" = false ]; then
-    echo -e "${RED}Some prerequisites are missing. Please install them first.${NC}"
+if [ "$PREREQ_OK" = false ] && [ "$CHECK_ONLY" = false ]; then
+    echo -e "${RED}Essential prerequisites are missing. Cannot proceed with installation.${NC}"
     exit 1
-fi
-
-if [ "$CHECK_ONLY" = true ]; then
-    echo "All prerequisites OK!"
-    exit 0
 fi
 
 # ========== INTERACTIVE SELECTION ==========

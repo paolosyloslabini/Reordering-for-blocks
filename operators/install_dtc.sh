@@ -17,6 +17,13 @@
 
 set -e  # Exit on first error
 
+# Initialize modules if available (needed for many clusters)
+if [ -f /etc/profile.d/modules.sh ]; then
+    source /etc/profile.d/modules.sh
+elif [ -f /usr/share/Modules/init/bash ]; then
+    source /usr/share/Modules/init/bash
+fi
+
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 DTC_DIR="${SCRIPT_DIR}/DTC-SpMM"
 DTC_REPO="https://github.com/Shigangli/DTC-SpMM.git"
@@ -42,6 +49,18 @@ echo ""
 # Step 1: Check prerequisites
 echo "[1/6] Checking prerequisites..."
 
+# Determine the best python executable
+if command -v python3 &> /dev/null && python3 -c "import torch" &> /dev/null; then
+    PYTHON_EXE=$(command -v python3)
+elif command -v python &> /dev/null && python -c "import torch" &> /dev/null; then
+    PYTHON_EXE=$(command -v python)
+else
+    echo "ERROR: PyTorch not found in your Python environment."
+    echo "Please ensure PyTorch is installed and your virtual environment is active."
+    exit 1
+fi
+echo "✓ Using Python: $PYTHON_EXE"
+
 # Try to load modules on clusters
 if ! command -v nvcc &> /dev/null; then
     echo "nvcc not found, attempting to load cuda module..."
@@ -55,7 +74,7 @@ if ! command -v nvcc &> /dev/null; then
     exit 1
 fi
 CUDA_VERSION=$(nvcc --version | grep "release" | sed 's/.*release //' | sed 's/,.*//')
-echo "✓ CUDA found: $CUDA_VERSION"
+echo "✓ CUDA (nvcc) found: $CUDA_VERSION"
 
 if ! command -v cmake &> /dev/null; then
     echo "ERROR: cmake not found in PATH"
@@ -64,23 +83,21 @@ fi
 echo "✓ cmake found: $(cmake --version | head -1)"
 
 # Check for PyTorch with CUDA
-if python -c "import torch; assert torch.cuda.is_available(), 'No CUDA'" 2>/dev/null; then
-    TORCH_VERSION=$(python -c "import torch; print(torch.__version__)")
-    TORCH_CUDA=$(python -c "import torch; print(torch.version.cuda)")
+if $PYTHON_EXE -c "import torch; assert torch.cuda.is_available()" 2>/dev/null; then
+    TORCH_VERSION=$($PYTHON_EXE -c "import torch; print(torch.__version__)")
+    TORCH_CUDA=$($PYTHON_EXE -c "import torch; print(torch.version.cuda)")
     echo "✓ PyTorch found: $TORCH_VERSION (CUDA $TORCH_CUDA)"
 else
-    echo "ERROR: PyTorch with CUDA support not found"
-    echo ""
-    echo "Please install PyTorch with CUDA. Example:"
-    echo "  conda install pytorch torchvision torchaudio pytorch-cuda=11.8 -c pytorch -c nvidia"
-    exit 1
+    echo "⚠ Warning: PyTorch is installed but torch.cuda.is_available() is False."
+    echo "  This is normal if you are on a login node without a GPU."
+    echo "  The installation will proceed, but you must run benchmarks on a compute node."
 fi
 
 # Detect GPU architecture if not specified
 if [ -z "$TORCH_CUDA_ARCH_LIST" ]; then
     echo ""
     echo "Detecting GPU architecture..."
-    GPU_ARCH=$(python -c "import torch; cc = torch.cuda.get_device_capability(); print(f'{cc[0]}.{cc[1]}')" 2>/dev/null || echo "")
+    GPU_ARCH=$($PYTHON_EXE -c "import torch; cc = torch.cuda.get_device_capability(); print(f'{cc[0]}.{cc[1]}')" 2>/dev/null || echo "")
     if [ -n "$GPU_ARCH" ]; then
         # DTC-SpMM cmake uses different format (e.g., "89" instead of "8.9")
         GPU_ARCH_CMAKE=$(echo "$GPU_ARCH" | tr -d '.')
@@ -88,9 +105,9 @@ if [ -z "$TORCH_CUDA_ARCH_LIST" ]; then
         echo "✓ Detected GPU compute capability: $GPU_ARCH (cmake: $GPU_ARCH_CMAKE)"
     else
         # Default to common architectures
-        GPU_ARCH_CMAKE="86;89"
-        export TORCH_CUDA_ARCH_LIST="8.6 8.9"
-        echo "Warning: Could not detect GPU. Using defaults: $TORCH_CUDA_ARCH_LIST"
+        echo "Warning: Could not detect GPU (normal on login nodes). Using SM80 (A100) as default."
+        GPU_ARCH_CMAKE="80"
+        export TORCH_CUDA_ARCH_LIST="8.0"
     fi
 else
     # Convert TORCH_CUDA_ARCH_LIST format to cmake format
@@ -184,14 +201,14 @@ if [ "$CLEAN_BUILD" = true ]; then
     rm -rf build dist *.egg-info
 fi
 
-python setup.py install
+$PYTHON_EXE setup.py install
 
 # Step 6: Verify
 echo ""
 echo "[6/6] Verifying installation..."
 cd "${SCRIPT_DIR}"  # Go back to avoid import issues
 
-if python -c "import DTCSpMM; print('✓ DTCSpMM module loaded successfully')" 2>/dev/null; then
+if $PYTHON_EXE -c "import DTCSpMM; print('✓ DTCSpMM module loaded successfully')" 2>/dev/null; then
     :
 else
     echo "ERROR: Could not import DTCSpMM module"
