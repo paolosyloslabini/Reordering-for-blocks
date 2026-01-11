@@ -26,6 +26,9 @@ jobs:
       - tag: "ASPT_SPMM_ROW"
         command: "python3 operators/aspt_spmm.py {mtx} --perm perms/{perm}/$mtx_name.perm --perm-type ROW --n-cols {n_cols}"
 
+      - tag: "DTC_SPMM_ROW"
+        command: "python3 operators/dtc_spmm.py {mtx} --perm perms/{perm}/$mtx_name.perm --perm-type ROW --n-cols {n_cols}"
+
 #      - tag: "CUSPARSE_SPMV_BSR_ROW"
 #        command: "python3 operators/cusparse_bsr_spmv.py {mtx} --perm perms/{perm}/$mtx_name.perm --blocksize {block_size} --perm-type ROW"
 #      - tag: "CUSPARSE_SPMV_CSR_ROW"

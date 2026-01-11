@@ -173,10 +173,10 @@ if [ -d "glog" ]; then
     make install
     cd ../..
     
-    export GLOG_PATH="${DTC_HOME}/third_party/glog/build"
-    export LD_LIBRARY_PATH="${GLOG_PATH}/lib:${GLOG_PATH}/lib64:${LD_LIBRARY_PATH}"
-    export LIBRARY_PATH="${GLOG_PATH}/lib:${GLOG_PATH}/lib64:${LIBRARY_PATH}"
-    export CPLUS_INCLUDE_PATH="${GLOG_PATH}/include:${CPLUS_INCLUDE_PATH}"
+    export GLOG_PATH="${DTC_HOME}/third_party/glog"
+    export LD_LIBRARY_PATH="${GLOG_PATH}/build/lib:${GLOG_PATH}/build/lib64:${LD_LIBRARY_PATH}"
+    export LIBRARY_PATH="${GLOG_PATH}/build/lib:${GLOG_PATH}/build/lib64:${LIBRARY_PATH}"
+    export CPLUS_INCLUDE_PATH="${GLOG_PATH}/build/include:${CPLUS_INCLUDE_PATH}"
     echo "✓ glog built"
 fi
 
@@ -188,9 +188,9 @@ if [ -d "sputnik" ]; then
     mkdir -p build && cd build
     
     # Find glog library
-    GLOG_LIB=$(find "${GLOG_PATH}" -name "libglog.so" -o -name "libglog.a" 2>/dev/null | head -1)
+    GLOG_LIB=$(find "${DTC_HOME}/third_party/glog/build" -name "libglog.so" -o -name "libglog.a" 2>/dev/null | head -1)
     if [ -z "$GLOG_LIB" ]; then
-        GLOG_LIB="${GLOG_PATH}/lib/libglog.so"
+        GLOG_LIB="${DTC_HOME}/third_party/glog/build/lib/libglog.so"
     fi
     
     # Convert TORCH_CUDA_ARCH_LIST to cmake format (e.g., "8.0 8.9" -> "80;89")
@@ -201,7 +201,7 @@ if [ -d "sputnik" ]; then
         -DBUILD_TEST=OFF \
         -DBUILD_BENCHMARK=OFF \
         -DCUDA_ARCHS="${CUDA_ARCHS}" \
-        -DGLOG_INCLUDE_DIR="${GLOG_PATH}/include" \
+        -DGLOG_INCLUDE_DIR="${DTC_HOME}/third_party/glog/build/include" \
         -DGLOG_LIBRARY="${GLOG_LIB}"
     make -j${MAX_JOBS}
     cd ../..
@@ -226,7 +226,7 @@ fi
 
 # The setup.py expects these environment variables
 export SPUTNIK_PATH="${DTC_HOME}/third_party/sputnik"
-export GLOG_PATH="${DTC_HOME}/third_party/glog/build"
+export GLOG_PATH="${DTC_HOME}/third_party/glog"
 
 echo "Building with:"
 echo "  TORCH_CUDA_ARCH_LIST=$TORCH_CUDA_ARCH_LIST"
