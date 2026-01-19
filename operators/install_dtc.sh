@@ -76,9 +76,14 @@ if [ "$PY_MAJOR" -eq 3 ] && [ "$PY_MINOR" -ge 12 ]; then
     echo "  Consider using Python 3.9-3.11 for best compatibility."
 fi
 
-# Try to load CUDA module on clusters
+# Ensure we have a modern GCC for GLIBCXX compatibility (required by cmake/glog)
+# and for general compilation consistency.
+echo "Loading GCC and CUDA modules..."
+# If on an EasyBuild cluster, GCCcore/binutils are often needed for consistency
+module load GCCcore/13.2.0 2>/dev/null || module load gcc/13.2.0 2>/dev/null || module load GCCcore/12.3.0 2>/dev/null || module load gcc/12.1.0 2>/dev/null || true
+
+# Try to load CUDA module on clusters if nvcc is missing
 if ! command -v nvcc &> /dev/null; then
-    echo "nvcc not found, attempting to load cuda module..."
     module load cuda 2>/dev/null || module load CUDA 2>/dev/null || module load cuda/12.1 2>/dev/null || true
 fi
 
