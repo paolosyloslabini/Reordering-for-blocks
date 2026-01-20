@@ -44,4 +44,10 @@ jobs:
         command: "python3 operators/smat_spmm.py {mtx} --perm perms/{perm}/$mtx_name.perm --blocksize {block_size} --perm-type SYMMETRIC --n-cols {n_cols}"
 
       - tag: "DTC_SPMM_SYMMETRIC"
+        preprocess: |
+          module purge
+          module load CUDA/
+          module load GCC/13.3.0
+          source ~/.conda/envs/DTCSpMM/bin/activate
+          mtx_name=$(basename {mtx} .mtx)
         command: "python3 operators/dtc_spmm.py {mtx} --perm perms/{perm}/$mtx_name.perm --perm-type SYMMETRIC --n-cols {n_cols}"

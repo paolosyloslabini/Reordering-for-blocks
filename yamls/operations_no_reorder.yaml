@@ -34,4 +34,10 @@ jobs:
         command: "python3 operators/smat_spmm.py {mtx} --blocksize {block_size} --n-cols {n_cols}"
 
       - tag: "DTC_SPMM_NO_REORDER"
+        preprocess: |
+          module purge
+          module load CUDA/
+          module load GCC/13.3.0
+          source ~/.conda/envs/DTCSpMM/bin/activate
+          mtx_name=$(basename {mtx} .mtx)
         command: "python3 operators/dtc_spmm.py {mtx} --n-cols {n_cols}"
