@@ -175,6 +175,7 @@ if [ -d "glog" ]; then
           -DWITH_GTEST=OFF \
           -DWITH_GFLAGS=OFF \
           -DCMAKE_DISABLE_FIND_PACKAGE_gflags=ON \
+          -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
           ..
     make -j${MAX_JOBS}
     make install
@@ -209,7 +210,8 @@ if [ -d "sputnik" ]; then
         -DBUILD_BENCHMARK=OFF \
         -DCUDA_ARCHS="${CUDA_ARCHS}" \
         -DGLOG_INCLUDE_DIR="${DTC_HOME}/third_party/glog/build/include" \
-        -DGLOG_LIBRARY="${GLOG_LIB}"
+        -DGLOG_LIBRARY="${GLOG_LIB}" \
+        -DCMAKE_POLICY_VERSION_MINIMUM=3.5
     make -j${MAX_JOBS}
     cd ../..
     
@@ -250,14 +252,20 @@ echo "[5/5] Verifying installation..."
 
 cd "${SCRIPT_DIR}"  # Go back to avoid import issues
 
-if $PYTHON_EXE -c "import DTCSpMM; print('✓ DTCSpMM module loaded successfully')" 2>/dev/null; then
+# Get PyTorch lib path for runtime linking
+TORCH_LIB=$($PYTHON_EXE -c "import torch; print(torch.__path__[0] + '/lib')")
+
+# Set library paths for verification
+export LD_LIBRARY_PATH="${TORCH_LIB}:${GLOG_PATH}/build/lib64:${GLOG_PATH}/build/lib:${SPUTNIK_PATH}/build/sputnik:${LD_LIBRARY_PATH}"
+
+if $PYTHON_EXE -c "import DTCSpMM; print('✓ DTCSpMM module loaded successfully')"; then
     echo ""
     echo "=========================================="
     echo "DTC-SpMM installation complete!"
     echo "=========================================="
     echo ""
     echo "Before running, set library paths:"
-    echo "  export LD_LIBRARY_PATH=\"${GLOG_PATH}/lib:${SPUTNIK_PATH}/build/sputnik:\$LD_LIBRARY_PATH\""
+    echo "  export LD_LIBRARY_PATH=\"${TORCH_LIB}:${GLOG_PATH}/build/lib64:${SPUTNIK_PATH}/build/sputnik:\$LD_LIBRARY_PATH\""
     echo ""
     echo "Usage in Python:"
     echo "  import DTCSpMM"
