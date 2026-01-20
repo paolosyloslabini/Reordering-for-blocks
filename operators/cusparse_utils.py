@@ -10,8 +10,8 @@ import cupyx.scipy.sparse as cupyx_sp
 import numpy as np
 
 # Import from MtxPerm
-# Add MtxPerm directory to path
-sys.path.append(str(Path(__file__).parent.parent / 'MtxPerm'))
+# Add MtxPerm directory to path (use insert to prioritize this path)
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / 'MtxPerm'))
 from utils import load_and_permute_matrix, load_permutation_file
 
 
