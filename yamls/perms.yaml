@@ -83,3 +83,10 @@ jobs:
           mkdir -p perms/SB_slashburn
           perm_path=perms/SB_slashburn/$mtx_name.perm
         command: "./MtxPerm/SPARSEBASE/build/slashburn_perm {mtx} $perm_path --k 1"
+
+      - tag: "GROOT_reorder"
+        preprocess: |
+          mtx_name=$(basename {mtx} .mtx)
+          mkdir -p perms/GROOT_reorder
+          perm_path=perms/GROOT_reorder/$mtx_name.perm
+        command: "python3 MtxPerm/GROOT/reorder.py {mtx} $perm_path"
