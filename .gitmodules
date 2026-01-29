@@ -8,3 +8,4 @@
 	path = MtxPerm
 	url = https://github.com/HicrestLaboratory/MtxPerm.git
 	ignore = untracked
+	branch = main
