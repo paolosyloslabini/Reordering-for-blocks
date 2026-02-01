@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import sys
+from pathlib import Path
 import argparse
 import torch
 import numpy as np
@@ -9,13 +10,19 @@ import time
 try:
     import FS_Block_gpu
     import FS_SpMM
-except ImportError:
-    # Fallback for development environment where extensions might not be installed
-    print("Warning: FlashSparse modules (FS_Block_gpu, FS_SpMM) not found.")
-    # sys.exit(1) 
+except ImportError as e:
+    print(f"Error: FlashSparse modules not found. {e}")
+    sys.exit(1)
 
-from cusparse_utils import load_and_permute_matrix, print_timer
+# Import from MtxPerm directly to avoid cupy dependency
+sys.path.append(str(Path(__file__).parent.parent / 'MtxPerm'))
+from utils import load_and_permute_matrix
+
 from config import SPMM_N_COLS_DEFAULT, N_ITERATIONS_DEFAULT, PERM_TYPE_DEFAULT
+
+def print_timer(label, time_ms):
+    """Print timing information in C++-compatible format."""
+    print(f"<Timer>[{label}] {time_ms:.6f} ms", flush=True)
 
 def main():
     parser = argparse.ArgumentParser(description='FlashSparse SpMM benchmark')
@@ -59,13 +66,25 @@ def main():
     
     if num_nodes % pad_align != 0:
         num_nodes = num_nodes + pad_align - (num_nodes % pad_align)
-        # We don't need to resize A_cpu, just pass the padded num_nodes to preprocess
-    
+
+    # Pad columns as well for non-square matrices
+    num_cols = k
+    if num_cols % pad_align != 0:
+        num_cols = num_cols + pad_align - (num_cols % pad_align)
+
     # Prepare tensors
     # FlashSparse expects IntTensor for indices and HalfTensor for values
+    # Use all ones for values to avoid float16 overflow (FlashSparse is for GNN-style SpMM)
     row_pointers = torch.IntTensor(A_cpu.indptr)
     column_index = torch.IntTensor(A_cpu.indices)
-    values = torch.from_numpy(A_cpu.data).half() 
+    values = torch.ones(nnz, dtype=torch.float16)
+
+    # CRITICAL: FlashSparse expects row_pointers to have length num_nodes+1 (padded)
+    # Pad row_pointers by appending nnz for the extra empty rows
+    if num_nodes > m:
+        extra_rows = num_nodes - m
+        padding = torch.full((extra_rows,), nnz, dtype=torch.int32)
+        row_pointers = torch.cat([row_pointers, padding]) 
     
     # Preprocess
     # Note: FS_Block_gpu functions return tensors that are likely on GPU or ready for FS_SpMM
@@ -82,9 +101,9 @@ def main():
     preprocessing_ms = (time.perf_counter() - t0) * 1000
 
     # Prepare Dense Matrix B (Features)
-    # B is k x n_cols. 
+    # B is num_cols x n_cols (use padded column dimension to match matrix)
     # Ensure B is on GPU and FP16
-    B_gpu = torch.randn(k, args.n_cols).half().cuda()
+    B_gpu = torch.randn(num_cols, args.n_cols).half().cuda()
     
     # Run SpMM
     epoches = args.n_iterations
@@ -112,6 +131,10 @@ def main():
     print_timer("loading", loading_ms)
     print_timer("preprocessing", preprocessing_ms)
     print_timer("operation", avg_time_ms)
+
+    # Calculate GFLOPs
+    gflops = (2 * nnz * args.n_cols) / (avg_time_ms * 1e6)
+    print(f"GFLOPs: {gflops:.2f}")
 
 if __name__ == '__main__':
     sys.exit(main())
