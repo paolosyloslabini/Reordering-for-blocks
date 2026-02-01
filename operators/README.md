@@ -37,8 +37,8 @@ cd operators/
 
 Or install individually:
 ```bash
-./install_flashsparse.sh  # FlashSparse (PPoPP 2025)
-./install_dtc.sh          # DTC-SpMM
+./flashsparse_install.sh  # FlashSparse (PPoPP 2025) - uses conda env FlashSparse
+./install_dtc.sh          # DTC-SpMM - uses conda env DTCSpMM
 ./install_aspt.sh         # ASpT (Adaptive Sparse Tiling)
 ./install_smat.sh         # SMaT
 ```
@@ -64,6 +64,12 @@ python cusparse_bsr_spmm.py matrix.mtx --n-cols 32 --blocksize 8
 
 ### FlashSparse
 ```bash
+# Activate environment
+source operators/flashsparse_preprocess.sh
+# Or manually:
+module load CUDA/12.1.1
+conda activate FlashSparse
+
 python flashsparse_spmm.py matrix.mtx --n-cols 32 --mode 16_1
 ```
 
@@ -103,7 +109,13 @@ export LD_LIBRARY_PATH="$PWD/DTC-SpMM/third_party/glog/build/lib:$PWD/DTC-SpMM/t
 
 Add to your job script:
 ```bash
+# For cuSPARSE, ASPT, SMAT
 module load cuda
-module load GCC/13.3.0
-source ~/.venv/bin/activate  # Your Python environment
+source ~/.venv/bin/activate
+
+# For FlashSparse
+source operators/flashsparse_preprocess.sh
+
+# For DTC-SpMM
+source operators/dtc_preprocess.sh
 ```
