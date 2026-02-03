@@ -168,7 +168,11 @@ def main():
     )
     parser.add_argument(
         "--matrices", type=str, nargs="+", default=None,
-        help="Specific matrices to plot (default: auto-select 10)"
+        help="Specific matrices to plot (default: read from spy_matrices.txt)"
+    )
+    parser.add_argument(
+        "--matrices-file", type=str, default=None,
+        help="File containing matrix names, one per line (default: scripts/spy_matrices.txt)"
     )
     parser.add_argument(
         "--algorithms", type=str, nargs="+", default=None,
@@ -250,6 +254,18 @@ def main():
     # Select matrices to process
     if args.matrices:
         selected_matrices = args.matrices
+    elif args.matrices_file:
+        # Read from specified file
+        with open(args.matrices_file, 'r') as f:
+            selected_matrices = [line.strip() for line in f
+                                if line.strip() and not line.startswith('#')]
+    elif (Path(__file__).parent / 'spy_matrices.txt').exists():
+        # Default: read from spy_matrices.txt in scripts directory
+        default_file = Path(__file__).parent / 'spy_matrices.txt'
+        print(f"Using default matrix list: {default_file}")
+        with open(default_file, 'r') as f:
+            selected_matrices = [line.strip() for line in f
+                                if line.strip() and not line.startswith('#')]
     elif args.use_curated:
         # Use curated list, filter to those available in analysis
         if not df.empty:
