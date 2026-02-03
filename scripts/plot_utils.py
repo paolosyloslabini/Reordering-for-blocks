@@ -258,7 +258,17 @@ def prepare_full_dataframe(df):
 # =============================================================================
 
 # Families to keep fully (not reduce to one representative)
-KEEP_FULL_FAMILIES = ['DIMACS10', 'SNAP']
+# These contain diverse, non-duplicate matrices commonly used in sparse matrix research
+KEEP_FULL_FAMILIES = [
+    'DIMACS10',    # Graph challenge benchmarks
+    'SNAP',        # Stanford social/web networks
+    'LAW',         # Web graphs (Laboratory for Web Algorithmics)
+    'Newman',      # Network science graphs
+    'Gleich',      # Web and social network graphs
+    'Janna',       # Large-scale FEM problems
+    'Norris',      # Structural engineering benchmarks
+    'vanHeukelum', # Cage graphs, unique structure
+]
 
 
 def load_matrix_family_map(matrices_list_path):
@@ -333,7 +343,7 @@ def filter_trivial_matrices(df, df_analysis, bandwidth_threshold=5):
     return df
 
 
-def filter_sparse_matrices(df, df_analysis, nnz_factor=3):
+def filter_sparse_matrices(df, df_analysis, nnz_factor=2):
     """Filter out very sparse matrices (nnz < factor * rows)."""
     if 'nnz' not in df_analysis.columns or 'rows' not in df_analysis.columns:
         return df
@@ -346,6 +356,24 @@ def filter_sparse_matrices(df, df_analysis, nnz_factor=3):
     if len(sparse) > 0:
         print(f"Filtering {len(sparse)} very sparse matrices (nnz < {nnz_factor}*N)")
         df = df[~df['matrix'].isin(sparse)]
+    
+    return df
+
+
+def filter_diagonal_matrices(df, df_analysis):
+    """Filter out purely diagonal matrices (nnz == rows for square matrices)."""
+    if 'nnz' not in df_analysis.columns or 'rows' not in df_analysis.columns:
+        return df
+    
+    diagonal = df_analysis[
+        (df_analysis['perm'] == 'None') & 
+        (df_analysis['rows'] == df_analysis['cols']) &
+        (df_analysis['nnz'] == df_analysis['rows'])
+    ]['matrix'].unique()
+    
+    if len(diagonal) > 0:
+        print(f"Filtering {len(diagonal)} purely diagonal matrices")
+        df = df[~df['matrix'].isin(diagonal)]
     
     return df
 
@@ -397,12 +425,24 @@ def apply_filters(df, df_analysis, matrices_list_path=None,
         if 'nnz' in df_analysis.columns and 'rows' in df_analysis.columns:
             sparse_matrices = df_analysis[
                 (df_analysis['perm'] == 'None') & 
-                (df_analysis['nnz'] < 3 * df_analysis['rows'])
+                (df_analysis['nnz'] < 2 * df_analysis['rows'])
             ]['matrix'].unique()
         if len(sparse_matrices) > 0:
             print(f"Filtering {len(sparse_matrices)} very sparse matrices")
             df = df[~df['matrix'].isin(sparse_matrices)]
             df_analysis = df_analysis[~df_analysis['matrix'].isin(sparse_matrices)]
+    
+    # Filter purely diagonal matrices
+    if 'nnz' in df_analysis.columns and 'rows' in df_analysis.columns:
+        diagonal_matrices = df_analysis[
+            (df_analysis['perm'] == 'None') & 
+            (df_analysis['rows'] == df_analysis['cols']) &
+            (df_analysis['nnz'] == df_analysis['rows'])
+        ]['matrix'].unique()
+        if len(diagonal_matrices) > 0:
+            print(f"Filtering {len(diagonal_matrices)} purely diagonal matrices")
+            df = df[~df['matrix'].isin(diagonal_matrices)]
+            df_analysis = df_analysis[~df_analysis['matrix'].isin(diagonal_matrices)]
     
     if square_only:
         df = filter_square_only(df)
@@ -447,8 +487,8 @@ def scatter_with_correlation(df, x_col, y_col, output_path,
         output_path: Path to save figure
         title: Plot title (auto-generated if None)
         hue_col: Column for color grouping
-        log_x: Use log scale for x (auto-detect if None)
-        log_y: Use log scale for y (auto-detect if None)
+        log_x: Use log scale for x (auto-detect if None, use False for linear)
+        log_y: Use log scale for y (auto-detect if None, use False for linear)
         show_correlation: Whether to show Kendall's Tau in title
         figsize: Figure size
     """
@@ -460,7 +500,7 @@ def scatter_with_correlation(df, x_col, y_col, output_path,
         print(f"Skipping {output_path}: insufficient data")
         return
     
-    # Auto-detect scales
+    # Auto-detect scales (only if None)
     if log_x is None:
         log_x = use_log_scale(x_col)
     if log_y is None:
