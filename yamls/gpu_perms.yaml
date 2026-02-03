@@ -1,0 +1,15 @@
+variables:
+  mtx: 'datasets/matrices_list_mtx.txt'
+preprocess: |
+    source ~/.venv/bin/activate
+
+jobs:
+  - config: "gpu"
+    config_jobs:
+      - tag: "GROOT_reorder"
+        preprocess: |
+          source MtxPerm/GROOT/groot_preprocess.sh
+          mtx_name=$(basename {mtx} .mtx)
+          mkdir -p perms/GROOT_reorder
+          perm_path=perms/GROOT_reorder/$mtx_name.perm
+        command: "python3 MtxPerm/GROOT/reorder.py {mtx} $perm_path"
