@@ -4,3 +4,4 @@ operators/ASpT/
 plots/
 /plots
 *.pyc
+test/groot_test.perm

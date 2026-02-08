@@ -101,7 +101,7 @@ def load_and_process_data(ops_path, analysis_path):
 
 
 def compute_correlations(df, n_cols, metrics, kernels=None):
-    """Compute Kendall's tau correlations between metrics and GFLOPS.
+    """Compute Kendall's tau and Pearson correlations between metrics and GFLOPS.
     
     Args:
         df: DataFrame with merged data
@@ -110,7 +110,7 @@ def compute_correlations(df, n_cols, metrics, kernels=None):
         kernels: List of kernels to include (None = all)
     
     Returns:
-        DataFrame with correlations (rows=kernels, cols=metrics)
+        DataFrame with correlations (rows=kernels, cols=metrics with _tau and _pearson suffixes)
     """
     df_nc = df[df['n_cols'] == n_cols]
     
@@ -124,15 +124,26 @@ def compute_correlations(df, n_cols, metrics, kernels=None):
         
         for metric in metrics:
             if metric not in df_k.columns:
-                row_data[metric] = np.nan
+                row_data[f'{metric}_tau'] = np.nan
+                row_data[f'{metric}_pearson'] = np.nan
                 continue
                 
             valid = df_k[[metric, 'gflops']].dropna()
+            # Filter positive values for log-based Pearson
+            valid_pos = valid[(valid[metric] > 0) & (valid['gflops'] > 0)]
+            
             if len(valid) >= 10:
-                tau, p = stats.kendalltau(valid[metric], valid['gflops'])
-                row_data[metric] = tau
+                tau, _ = stats.kendalltau(valid[metric], valid['gflops'])
+                row_data[f'{metric}_tau'] = tau
             else:
-                row_data[metric] = np.nan
+                row_data[f'{metric}_tau'] = np.nan
+            
+            if len(valid_pos) >= 10:
+                # Pearson on log values (both metric and gflops typically benefit from log scale)
+                pearson_r, _ = stats.pearsonr(np.log10(valid_pos[metric]), np.log10(valid_pos['gflops']))
+                row_data[f'{metric}_pearson'] = pearson_r
+            else:
+                row_data[f'{metric}_pearson'] = np.nan
         
         results.append(row_data)
     
@@ -144,14 +155,16 @@ def compute_correlations(df, n_cols, metrics, kernels=None):
 # =============================================================================
 
 def correlation_to_latex(corr_df, metrics, kernel_names, metric_names, 
-                         caption=None, label=None):
+                         corr_type='tau', caption=None, label=None):
     """Convert correlation DataFrame to LaTeX table string.
     
     Args:
-        corr_df: DataFrame with correlations (must have 'kernel' column)
-        metrics: List of metric columns in desired order
+        corr_df: DataFrame with correlations (must have 'kernel' column and 
+                 columns with _tau and _pearson suffixes)
+        metrics: List of metric columns in desired order (base names without suffix)
         kernel_names: Dict mapping kernel IDs to display names
         metric_names: Dict mapping metric columns to display names
+        corr_type: 'tau' for Kendall's tau or 'pearson' for Pearson's r
         caption: Table caption (optional)
         label: Table label for referencing (optional)
     
@@ -175,18 +188,20 @@ def correlation_to_latex(corr_df, metrics, kernel_names, metric_names,
     lines.append(r'\midrule')
     
     # Data rows
+    suffix = f'_{corr_type}'
     for _, row in corr_df.iterrows():
         kernel = row['kernel']
         kernel_display = kernel_names.get(kernel, kernel)
         
-        # Find the maximum value in this row (by absolute value for correlations)
-        metric_values = {m: row.get(m, np.nan) for m in metrics}
+        # Find the maximum value in this row (for bolding)
+        metric_values = {m: row.get(f'{m}{suffix}', np.nan) for m in metrics}
         valid_values = {m: v for m, v in metric_values.items() if not pd.isna(v)}
         max_metric = max(valid_values, key=lambda m: abs(valid_values[m])) if valid_values else None
         
         values = [kernel_display]
         for metric in metrics:
-            val = row.get(metric, np.nan)
+            val = row.get(f'{metric}{suffix}', np.nan)
+            
             if pd.isna(val):
                 values.append('--')
             elif metric == max_metric:
@@ -213,6 +228,8 @@ def correlation_to_latex(corr_df, metrics, kernel_names, metric_names,
 def generate_all_tables(df, output_dir, metrics=None, kernel_names=None, 
                         metric_names=None):
     """Generate LaTeX tables for all n_cols values.
+    
+    Creates separate tables for Kendall's tau and Pearson's r correlations.
     
     Args:
         df: Processed DataFrame
@@ -248,28 +265,44 @@ def generate_all_tables(df, output_dir, metrics=None, kernel_names=None,
         
         corr_df = compute_correlations(df, n_cols, metrics, kernels)
         
-        caption = (f"Kendall's $\\tau$ correlation between metrics and SpMM GFLOPS ($n_{{cols}} = {n_cols_int}$). "
-                   f"Correlation is calculated across matrices in SuiteSparse and all their reorderings, "
-                   f"for a total of {n_matrices:,} configurations.")
-        label = f"tab:correlation_ncols_{n_cols_int}"
+        # Generate Kendall's tau table
+        caption_tau = (f"Kendall's $\\tau$ correlation between metrics and SpMM GFLOPS ($n_{{cols}} = {n_cols_int}$). "
+                       f"Correlation is calculated across matrices in SuiteSparse and all their reorderings, "
+                       f"for a total of {n_matrices:,} configurations.")
+        label_tau = f"tab:correlation_tau_ncols_{n_cols_int}"
         
-        latex = correlation_to_latex(
+        latex_tau = correlation_to_latex(
             corr_df, metrics, kernel_names, metric_names,
-            caption=caption, label=label
+            corr_type='tau', caption=caption_tau, label=label_tau
         )
         
-        output_path = output_dir / f"correlation_ncols_{n_cols_int}.tex"
-        with open(output_path, 'w') as f:
-            f.write(latex)
+        output_path_tau = output_dir / f"correlation_tau_ncols_{n_cols_int}.tex"
+        with open(output_path_tau, 'w') as f:
+            f.write(latex_tau)
+        print(f"Saved: {output_path_tau}")
         
-        print(f"Saved: {output_path}")
+        # Generate Pearson's r table
+        caption_pearson = (f"Pearson's $r$ correlation (on log values) between metrics and SpMM GFLOPS ($n_{{cols}} = {n_cols_int}$). "
+                           f"Correlation is calculated across matrices in SuiteSparse and all their reorderings, "
+                           f"for a total of {n_matrices:,} configurations.")
+        label_pearson = f"tab:correlation_pearson_ncols_{n_cols_int}"
+        
+        latex_pearson = correlation_to_latex(
+            corr_df, metrics, kernel_names, metric_names,
+            corr_type='pearson', caption=caption_pearson, label=label_pearson
+        )
+        
+        output_path_pearson = output_dir / f"correlation_pearson_ncols_{n_cols_int}.tex"
+        with open(output_path_pearson, 'w') as f:
+            f.write(latex_pearson)
+        print(f"Saved: {output_path_pearson}")
 
 
 def generate_blocksize_tables(df, output_dir, kernel_names=None):
     """Generate LaTeX tables for block density correlations across block sizes.
     
-    Creates tables showing how block density at different block sizes 
-    correlates with GFLOPS for each kernel.
+    Creates separate tables for Kendall's tau and Pearson's r showing how 
+    block density at different block sizes correlates with GFLOPS for each kernel.
     
     Args:
         df: Processed DataFrame
@@ -299,21 +332,37 @@ def generate_blocksize_tables(df, output_dir, kernel_names=None):
         
         corr_df = compute_correlations(df, n_cols, BLOCK_DENSITY_METRICS, kernels)
         
-        caption = (f"Kendall's $\\tau$ correlation between block density and SpMM GFLOPS across block sizes ($n_{{cols}} = {n_cols_int}$). "
-                   f"Correlation is calculated across matrices in SuiteSparse and all their reorderings, "
-                   f"for a total of {n_matrices:,} configurations.")
-        label = f"tab:blocksize_correlation_ncols_{n_cols_int}"
+        # Generate Kendall's tau table
+        caption_tau = (f"Kendall's $\\tau$ correlation between block density and SpMM GFLOPS across block sizes ($n_{{cols}} = {n_cols_int}$). "
+                       f"Correlation is calculated across matrices in SuiteSparse and all their reorderings, "
+                       f"for a total of {n_matrices:,} configurations.")
+        label_tau = f"tab:blocksize_tau_ncols_{n_cols_int}"
         
-        latex = correlation_to_latex(
+        latex_tau = correlation_to_latex(
             corr_df, BLOCK_DENSITY_METRICS, kernel_names, BLOCK_DENSITY_METRIC_NAMES,
-            caption=caption, label=label
+            corr_type='tau', caption=caption_tau, label=label_tau
         )
         
-        output_path = output_dir / f"blocksize_correlation_ncols_{n_cols_int}.tex"
-        with open(output_path, 'w') as f:
-            f.write(latex)
+        output_path_tau = output_dir / f"blocksize_tau_ncols_{n_cols_int}.tex"
+        with open(output_path_tau, 'w') as f:
+            f.write(latex_tau)
+        print(f"Saved: {output_path_tau}")
         
-        print(f"Saved: {output_path}")
+        # Generate Pearson's r table
+        caption_pearson = (f"Pearson's $r$ correlation (on log values) between block density and SpMM GFLOPS across block sizes ($n_{{cols}} = {n_cols_int}$). "
+                           f"Correlation is calculated across matrices in SuiteSparse and all their reorderings, "
+                           f"for a total of {n_matrices:,} configurations.")
+        label_pearson = f"tab:blocksize_pearson_ncols_{n_cols_int}"
+        
+        latex_pearson = correlation_to_latex(
+            corr_df, BLOCK_DENSITY_METRICS, kernel_names, BLOCK_DENSITY_METRIC_NAMES,
+            corr_type='pearson', caption=caption_pearson, label=label_pearson
+        )
+        
+        output_path_pearson = output_dir / f"blocksize_pearson_ncols_{n_cols_int}.tex"
+        with open(output_path_pearson, 'w') as f:
+            f.write(latex_pearson)
+        print(f"Saved: {output_path_pearson}")
 
 
 # =============================================================================

@@ -478,7 +478,7 @@ def scatter_with_correlation(df, x_col, y_col, output_path,
                               log_x=None, log_y=None,
                               show_correlation=True,
                               figsize=(10, 8)):
-    """Create scatter plot with optional Kendall's Tau correlation.
+    """Create scatter plot with Kendall's Tau and Pearson correlations.
     
     Args:
         df: DataFrame
@@ -489,7 +489,7 @@ def scatter_with_correlation(df, x_col, y_col, output_path,
         hue_col: Column for color grouping
         log_x: Use log scale for x (auto-detect if None, use False for linear)
         log_y: Use log scale for y (auto-detect if None, use False for linear)
-        show_correlation: Whether to show Kendall's Tau in title
+        show_correlation: Whether to show correlations in title
         figsize: Figure size
     """
     # Clean data
@@ -506,8 +506,26 @@ def scatter_with_correlation(df, x_col, y_col, output_path,
     if log_y is None:
         log_y = use_log_scale(y_col)
     
-    # Calculate correlation
-    tau, p_value = stats.kendalltau(plot_df[x_col], plot_df[y_col])
+    # Calculate Kendall's tau correlation
+    tau, tau_p = stats.kendalltau(plot_df[x_col], plot_df[y_col])
+    
+    # Calculate Pearson correlation (on log values if using log scale)
+    x_vals = plot_df[x_col]
+    y_vals = plot_df[y_col]
+    
+    # For Pearson on log scale, use log-transformed values (filter out non-positive)
+    if log_x or log_y:
+        valid_mask = (x_vals > 0) & (y_vals > 0)
+        x_for_pearson = np.log10(x_vals[valid_mask]) if log_x else x_vals[valid_mask]
+        y_for_pearson = np.log10(y_vals[valid_mask]) if log_y else y_vals[valid_mask]
+    else:
+        x_for_pearson = x_vals
+        y_for_pearson = y_vals
+    
+    if len(x_for_pearson) >= 2:
+        pearson_r, pearson_p = stats.pearsonr(x_for_pearson, y_for_pearson)
+    else:
+        pearson_r, pearson_p = np.nan, np.nan
     
     # Create plot
     fig, ax = _setup_figure(figsize)
@@ -532,7 +550,7 @@ def scatter_with_correlation(df, x_col, y_col, output_path,
     if title is None:
         title = f"{get_display_name(y_col)} vs {get_display_name(x_col)}"
     if show_correlation:
-        title += f"\nKendall's τ = {tau:.3f} (p = {p_value:.2e})"
+        title += f"\nτ = {tau:.3f}, r = {pearson_r:.3f}"
     ax.set_title(title)
     
     ax.grid(True, alpha=0.3)
@@ -543,6 +561,7 @@ def boxplot_by_category(df, x_col, y_col, output_path,
                          title=None, order=None,
                          baseline=None, show_points=True,
                          clip_percentile=(1, 99),
+                         log_y=False,
                          figsize=(12, 8)):
     """Create boxplot with optional stripplot overlay.
     
@@ -556,13 +575,21 @@ def boxplot_by_category(df, x_col, y_col, output_path,
         baseline: Value for horizontal reference line
         show_points: Whether to overlay individual points
         clip_percentile: Tuple of (lower, upper) percentiles for clipping
+        log_y: Whether to use log scale on y-axis
         figsize: Figure size
     """
-    plot_df = df.dropna(subset=[x_col, y_col])
+    plot_df = df.dropna(subset=[x_col, y_col]).copy()
     
     if plot_df.empty:
         print(f"Skipping {output_path}: no data")
         return
+    
+    # For log scale, filter out non-positive values
+    if log_y:
+        plot_df = plot_df[plot_df[y_col] > 0]
+        if plot_df.empty:
+            print(f"Skipping {output_path}: no positive data for log scale")
+            return
     
     # Clip extreme values
     if clip_percentile:
@@ -586,6 +613,10 @@ def boxplot_by_category(df, x_col, y_col, output_path,
     
     if baseline is not None:
         ax.axhline(baseline, color='red', linestyle='--', alpha=0.7, label=f'Baseline = {baseline}')
+    
+    # Set log scale if requested
+    if log_y:
+        ax.set_yscale('log')
     
     ax.set_xlabel(get_display_name(x_col))
     ax.set_ylabel(get_display_name(y_col))

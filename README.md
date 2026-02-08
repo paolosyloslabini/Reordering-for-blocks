@@ -26,6 +26,8 @@ This repository systematically:
 | [`ccutils/`](ccutils/) | Header-only C++/CUDA utility library |
 | [`distributed_mmio/`](distributed_mmio/) | Matrix Market I/O library |
 | [`SbatchMan/`](SbatchMan/) | SLURM batch job management tool |
+| [`reports/`](reports/) | SLURM job status reports |
+| [`test/`](test/) | Test matrices, permutations, and fixtures |
 
 ## Quick Reference for Key Files
 
@@ -39,6 +41,7 @@ This repository systematically:
 ### Core Scripts
 - **[scripts/parse_results.py](scripts/parse_results.py)** - Aggregates job outputs into CSVs
 - **[scripts/plot.py](scripts/plot.py)** - Generates correlation and performance plots
+- **[scripts/correlation_table.py](scripts/correlation_table.py)** - Generates LaTeX correlation tables (metrics vs. GFLOPS)
 - **[scripts/job_check.py](scripts/job_check.py)** - Monitors SLURM job status
 
 ### Operator Wrappers
@@ -46,12 +49,15 @@ This repository systematically:
 - **[operators/cusparse_bsr_spmm.py](operators/cusparse_bsr_spmm.py)** - cuSPARSE BSR SpMM
 - **[operators/flashsparse_spmm.py](operators/flashsparse_spmm.py)** - FlashSparse (Tensor Core)
 - **[operators/dtc_spmm.py](operators/dtc_spmm.py)** - DTC-SpMM
+- **[operators/aspt_spmm.py](operators/aspt_spmm.py)** - ASpT (Adaptive Sparse Tiling)
+- **[operators/smat_spmm.py](operators/smat_spmm.py)** - SMaT (Sparse Matrix Tensor Core)
 - **[operators/config.py](operators/config.py)** - Shared configuration and utilities
 
 ### Permutation Tools
 - **[MtxPerm/SPARSEBASE/](MtxPerm/SPARSEBASE/)** - C++ reordering via SparseBase library
 - **[MtxPerm/RANDOM/](MtxPerm/RANDOM/)** - GraphBLAS random permutations
 - **[MtxPerm/SPARTA/](MtxPerm/SPARTA/)** - SPARTA blocking algorithm
+- **[MtxPerm/GROOT/](MtxPerm/GROOT/)** - Groot graph-centric row reordering (EuroSys'25)
 - **[MtxPerm/ANALYSIS/](MtxPerm/ANALYSIS/)** - Matrix structure analysis
 
 ## Reordering Algorithms
@@ -71,6 +77,7 @@ Defined in [yamls/perms.yaml](yamls/perms.yaml):
 | `SB_rabbit` | SparseBase | Rabbit reordering |
 | `SB_slashburn` | SparseBase | SlashBurn algorithm |
 | `SPARTA_reorder` | SPARTA | Sparse blocking for tensor cores |
+| `GROOT_reorder` | GROOT | k-NN + MST + DFS row reordering for tensor cores (EuroSys'25) |
 
 ## Permutation Types
 
@@ -154,3 +161,7 @@ Indices are **1-based**.
 ## Environment
 
 Designed for SLURM cluster execution. Job configurations in [yamls/configs.yaml](yamls/configs.yaml).
+
+## Ethics
+
+This repository includes an [`ETHICS.md`](ETHICS.md) — a statement of ethical principles addressed to AI agents and the humans who direct them.
