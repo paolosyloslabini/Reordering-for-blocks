@@ -21,28 +21,68 @@ warnings.filterwarnings('ignore')
 # Kernel display names (row labels)
 KERNEL_NAMES = {
     'ASPT_SPMM': 'ASPT',
-    'CUSPARSE_SPMM_BSR_bs32': 'cuSPARSE BSR',
-    'CUSPARSE_SPMM_CSR': 'cuSPARSE CSR',
+    'CUSPARSE_SPMM_BSR_bs32': 'cuSP BSR',
+    'CUSPARSE_SPMM_CSR': 'cuSP CSR',
     'DTC_SPMM': 'DTC',
-    'FLASHSPARSE_SPMM': 'FlashSparse',
+    'FLASHSPARSE_SPMM': 'FlashSP',
     'SMAT_SPMM_bs32': 'SMAT',
 }
 
-# Metric display names (column labels)
-METRIC_NAMES = {
-    'rel_bandwidth': 'Rel. Bandwidth',
-    'rel_row_spread': 'Rel. Row Spread',
-    'locality_vertical_adjacency_ratio': 'Vert. Adj. Ratio',
-    'block_density_32': 'Block Density',
+# ---------------------------------------------------------------------------
+# All structural metrics: set 'enabled' to True/False to include/exclude.
+# 'name' is the short display name for column headers.
+# Edit this dictionary to choose which metrics appear in the correlation table.
+# ---------------------------------------------------------------------------
+ALL_METRICS = {
+    # --- Bandwidth ---
+    'bandwidth_max':                       {'name': 'BW',          'enabled': False},
+    'bandwidth_avg':                       {'name': 'BW avg',      'enabled': False},
+    'rel_bandwidth':                       {'name': 'rBW',         'enabled': True},
+    # --- Row spread / locality ---
+    'locality_avg_row_spread':             {'name': 'Rspr',        'enabled': False},
+    'locality_max_row_spread':             {'name': 'Rspr mx',     'enabled': False},
+    'rel_row_spread':                      {'name': 'rRspr',       'enabled': True},
+    # --- Column spread ---
+    'locality_avg_col_spread':             {'name': 'Cspr',        'enabled': True},
+    'locality_max_col_spread':             {'name': 'Cspr mx',     'enabled': False},
+    # --- Vertical adjacency ---
+    'locality_consecutive_vertical_pairs': {'name': 'CVP',         'enabled': True},
+    'locality_vertical_adjacency_ratio':   {'name': 'VAR',         'enabled': True},
+    # --- NNZ distribution ---
+    'locality_avg_nnz_per_row':            {'name': 'nnz/r',       'enabled': True},
+    'locality_max_nnz_per_row':            {'name': 'nnz/r mx',    'enabled': False},
+    'locality_num_empty_rows':             {'name': 'Erows',       'enabled': False},
+    'locality_num_empty_cols':             {'name': 'Ecols',       'enabled': False},
+    # --- Profile ---
+    'locality_profile':                    {'name': 'Prof',        'enabled': True},
+    # --- Overall density ---
+    'density':                             {'name': 'Dens',        'enabled': False},
+    # --- Block density (per block size) ---
+    'block_density_4':                     {'name': 'BD4',         'enabled': False},
+    'block_density_8':                     {'name': 'BD8',         'enabled': False},
+    'block_density_16':                    {'name': 'BD16',        'enabled': False},
+    'block_density_32':                    {'name': 'BD32',        'enabled': True},
+    'block_density_64':                    {'name': 'BD64',        'enabled': False},
+    'block_density_128':                   {'name': 'BD128',       'enabled': False},
+    # --- Avg blocks per row (per block size) ---
+    'avg_blocks_per_row_4':                {'name': 'aB/r4',       'enabled': False},
+    'avg_blocks_per_row_8':                {'name': 'aB/r8',       'enabled': False},
+    'avg_blocks_per_row_16':               {'name': 'aB/r16',      'enabled': False},
+    'avg_blocks_per_row_32':               {'name': 'aB/r32',      'enabled': True},
+    'avg_blocks_per_row_64':               {'name': 'aB/r64',      'enabled': False},
+    'avg_blocks_per_row_128':              {'name': 'aB/r128',     'enabled': False},
+    # --- Max blocks per row (per block size) ---
+    'max_blocks_per_row_4':                {'name': 'mB/r4',       'enabled': False},
+    'max_blocks_per_row_8':                {'name': 'mB/r8',       'enabled': False},
+    'max_blocks_per_row_16':               {'name': 'mB/r16',      'enabled': False},
+    'max_blocks_per_row_32':               {'name': 'mB/r32',      'enabled': True},
+    'max_blocks_per_row_64':               {'name': 'mB/r64',      'enabled': False},
+    'max_blocks_per_row_128':              {'name': 'mB/r128',     'enabled': False},
 }
 
-# Metrics to include in the table (in order)
-METRICS = [
-    'rel_bandwidth',
-    'rel_row_spread',
-    'locality_vertical_adjacency_ratio',
-    'block_density_32',
-]
+# Derived lists from the dictionary (do not edit manually)
+METRICS = [k for k, v in ALL_METRICS.items() if v['enabled']]
+METRIC_NAMES = {k: v['name'] for k, v in ALL_METRICS.items()}
 
 # Block sizes available for block density metrics
 BLOCK_SIZES = [4, 8, 16, 32, 64, 128]
