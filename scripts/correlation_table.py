@@ -35,54 +35,55 @@ KERNEL_NAMES = {
 # ---------------------------------------------------------------------------
 ALL_METRICS = {
     # --- Bandwidth ---
-    'bandwidth_max':                       {'name': 'BW',          'enabled': False},
-    'bandwidth_avg':                       {'name': 'BW avg',      'enabled': False},
-    'rel_bandwidth':                       {'name': 'rBW',         'enabled': True},
+    'bandwidth_max':                       {'name': 'BW',      'full_name': 'Bandwidth',                          'enabled': False},
+    'bandwidth_avg':                       {'name': 'ABW',     'full_name': 'Average Bandwidth',                  'enabled': False},
+    'rel_bandwidth':                       {'name': 'RBW',     'full_name': 'Relative Bandwidth',                 'enabled': True},
     # --- Row spread / locality ---
-    'locality_avg_row_spread':             {'name': 'Rspr',        'enabled': False},
-    'locality_max_row_spread':             {'name': 'Rspr mx',     'enabled': False},
-    'rel_row_spread':                      {'name': 'rRspr',       'enabled': True},
+    'locality_avg_row_spread':             {'name': 'ARS',     'full_name': 'Average Row Spread',                 'enabled': False},
+    'locality_max_row_spread':             {'name': 'MRS',     'full_name': 'Maximum Row Spread',                 'enabled': False},
+    'rel_row_spread':                      {'name': 'RRS',     'full_name': 'Relative Row Spread',                'enabled': True},
     # --- Column spread ---
-    'locality_avg_col_spread':             {'name': 'Cspr',        'enabled': True},
-    'locality_max_col_spread':             {'name': 'Cspr mx',     'enabled': False},
+    'locality_avg_col_spread':             {'name': 'ACS',     'full_name': 'Average Column Spread',              'enabled': False},
+    'locality_max_col_spread':             {'name': 'MCS',     'full_name': 'Maximum Column Spread',              'enabled': False},
     # --- Vertical adjacency ---
-    'locality_consecutive_vertical_pairs': {'name': 'CVP',         'enabled': True},
-    'locality_vertical_adjacency_ratio':   {'name': 'VAR',         'enabled': True},
+    'locality_consecutive_vertical_pairs': {'name': 'CVP',     'full_name': 'Consecutive Vertical Pairs',         'enabled': False},
+    'locality_vertical_adjacency_ratio':   {'name': 'VAR',     'full_name': 'Vertical Adjacency Ratio',           'enabled': True},
     # --- NNZ distribution ---
-    'locality_avg_nnz_per_row':            {'name': 'nnz/r',       'enabled': True},
-    'locality_max_nnz_per_row':            {'name': 'nnz/r mx',    'enabled': False},
-    'locality_num_empty_rows':             {'name': 'Erows',       'enabled': False},
-    'locality_num_empty_cols':             {'name': 'Ecols',       'enabled': False},
+    'locality_avg_nnz_per_row':            {'name': 'ANR',     'full_name': 'Average NNZ per Row',                'enabled': False},
+    'locality_max_nnz_per_row':            {'name': 'MNR',     'full_name': 'Maximum NNZ per Row',                'enabled': False},
+    'locality_num_empty_rows':             {'name': 'NER',     'full_name': 'Number of Empty Rows',               'enabled': False},
+    'locality_num_empty_cols':             {'name': 'NEC',     'full_name': 'Number of Empty Columns',            'enabled': False},
     # --- Profile ---
-    'locality_profile':                    {'name': 'Prof',        'enabled': True},
+    'locality_profile':                    {'name': 'Prof',    'full_name': 'Profile',                            'enabled': False},
     # --- Overall density ---
-    'density':                             {'name': 'Dens',        'enabled': False},
+    'density':                             {'name': 'Dens',    'full_name': 'Density',                            'enabled': False},
     # --- Block density (per block size) ---
-    'block_density_4':                     {'name': 'BD4',         'enabled': False},
-    'block_density_8':                     {'name': 'BD8',         'enabled': False},
-    'block_density_16':                    {'name': 'BD16',        'enabled': False},
-    'block_density_32':                    {'name': 'BD32',        'enabled': True},
-    'block_density_64':                    {'name': 'BD64',        'enabled': False},
-    'block_density_128':                   {'name': 'BD128',       'enabled': False},
+    'block_density_4':                     {'name': 'BD4',     'full_name': 'Block Density $4{\\times}4$',         'enabled': False},
+    'block_density_8':                     {'name': 'BD8',     'full_name': 'Block Density $8{\\times}8$',         'enabled': True},
+    'block_density_16':                    {'name': 'BD16',    'full_name': 'Block Density $16{\\times}16$',       'enabled': False},
+    'block_density_32':                    {'name': 'BD32',    'full_name': 'Block Density $32{\\times}32$',       'enabled': True},
+    'block_density_64':                    {'name': 'BD64',    'full_name': 'Block Density $64{\\times}64$',       'enabled': False},
+    'block_density_128':                   {'name': 'BD128',   'full_name': 'Block Density $128{\\times}128$',     'enabled': True},
     # --- Avg blocks per row (per block size) ---
-    'avg_blocks_per_row_4':                {'name': 'aB/r4',       'enabled': False},
-    'avg_blocks_per_row_8':                {'name': 'aB/r8',       'enabled': False},
-    'avg_blocks_per_row_16':               {'name': 'aB/r16',      'enabled': False},
-    'avg_blocks_per_row_32':               {'name': 'aB/r32',      'enabled': True},
-    'avg_blocks_per_row_64':               {'name': 'aB/r64',      'enabled': False},
-    'avg_blocks_per_row_128':              {'name': 'aB/r128',     'enabled': False},
+    'avg_blocks_per_row_4':                {'name': 'ABR4',    'full_name': 'Avg Blocks/Row $4{\\times}4$',        'enabled': False},
+    'avg_blocks_per_row_8':                {'name': 'ABR8',    'full_name': 'Avg Blocks/Row $8{\\times}8$',        'enabled': False},
+    'avg_blocks_per_row_16':               {'name': 'ABR16',   'full_name': 'Avg Blocks/Row $16{\\times}16$',      'enabled': False},
+    'avg_blocks_per_row_32':               {'name': 'ABR32',   'full_name': 'Avg Blocks/Row $32{\\times}32$',      'enabled': False},
+    'avg_blocks_per_row_64':               {'name': 'ABR64',   'full_name': 'Avg Blocks/Row $64{\\times}64$',      'enabled': False},
+    'avg_blocks_per_row_128':              {'name': 'ABR128',  'full_name': 'Avg Blocks/Row $128{\\times}128$',    'enabled': False},
     # --- Max blocks per row (per block size) ---
-    'max_blocks_per_row_4':                {'name': 'mB/r4',       'enabled': False},
-    'max_blocks_per_row_8':                {'name': 'mB/r8',       'enabled': False},
-    'max_blocks_per_row_16':               {'name': 'mB/r16',      'enabled': False},
-    'max_blocks_per_row_32':               {'name': 'mB/r32',      'enabled': True},
-    'max_blocks_per_row_64':               {'name': 'mB/r64',      'enabled': False},
-    'max_blocks_per_row_128':              {'name': 'mB/r128',     'enabled': False},
+    'max_blocks_per_row_4':                {'name': 'MBR4',    'full_name': 'Max Blocks/Row $4{\\times}4$',        'enabled': False},
+    'max_blocks_per_row_8':                {'name': 'MBR8',    'full_name': 'Max Blocks/Row $8{\\times}8$',        'enabled': False},
+    'max_blocks_per_row_16':               {'name': 'MBR16',   'full_name': 'Max Blocks/Row $16{\\times}16$',      'enabled': False},
+    'max_blocks_per_row_32':               {'name': 'MBR32',   'full_name': 'Max Blocks/Row $32{\\times}32$',      'enabled': False},
+    'max_blocks_per_row_64':               {'name': 'MBR64',   'full_name': 'Max Blocks/Row $64{\\times}64$',      'enabled': False},
+    'max_blocks_per_row_128':              {'name': 'MBR128',  'full_name': 'Max Blocks/Row $128{\\times}128$',    'enabled': False},
 }
 
 # Derived lists from the dictionary (do not edit manually)
 METRICS = [k for k, v in ALL_METRICS.items() if v['enabled']]
 METRIC_NAMES = {k: v['name'] for k, v in ALL_METRICS.items()}
+METRIC_FULL_NAMES = {k: v['full_name'] for k, v in ALL_METRICS.items()}
 
 # Block sizes available for block density metrics
 BLOCK_SIZES = [4, 8, 16, 32, 64, 128]
@@ -194,8 +195,31 @@ def compute_correlations(df, n_cols, metrics, kernels=None):
 # LaTeX Generation
 # =============================================================================
 
+def _multiline_header(name):
+    """Wrap a metric name into a \\shortstack with up to 3 lines for compact headers."""
+    import re as _re
+    # Special case: names ending with a $...$ block (e.g. 'Block Density $32{\times}32$')
+    m = _re.match(r'^(.+?)\s+(\$.*\$)$', name)
+    if m:
+        prefix = m.group(1)
+        suffix = m.group(2)
+        prefix_words = prefix.split()
+        if len(prefix_words) == 1:
+            return r'\shortstack{' + prefix_words[0] + r'\\' + suffix + '}'
+        else:
+            return r'\shortstack{' + r'\\'.join(prefix_words) + r'\\' + suffix + '}'
+    words = name.split()
+    if len(words) <= 1:
+        return name
+    if len(words) == 2:
+        return r'\shortstack{' + words[0] + r'\\' + words[1] + '}'
+    # 3+ words: one word per line (up to ~3-4 lines)
+    return r'\shortstack{' + r'\\'.join(words) + '}'
+
+
 def correlation_to_latex(corr_df, metrics, kernel_names, metric_names, 
-                         corr_type='tau', caption=None, label=None):
+                         corr_type='tau', caption=None, label=None,
+                         metric_full_names=None):
     """Convert correlation DataFrame to LaTeX table string.
     
     Args:
@@ -207,23 +231,29 @@ def correlation_to_latex(corr_df, metrics, kernel_names, metric_names,
         corr_type: 'tau' for Kendall's tau or 'pearson' for Pearson's r
         caption: Table caption (optional)
         label: Table label for referencing (optional)
+        metric_full_names: Dict mapping metric columns to full display names
+                           (used for multiline column headers). Falls back to
+                           metric_names if not provided.
     
     Returns:
         LaTeX table string
     """
+    header_names = metric_full_names if metric_full_names else metric_names
+    
     lines = []
     
     # Table header
     lines.append(r'\begin{table}[htbp]')
     lines.append(r'\centering')
+    lines.append(r'\footnotesize')
     
     # Column specification: first column left-aligned, rest centered
     col_spec = 'l' + 'c' * len(metrics)
     lines.append(r'\begin{tabular}{' + col_spec + '}')
     lines.append(r'\toprule')
     
-    # Header row
-    header_cols = ['Kernel'] + [metric_names.get(m, m) for m in metrics]
+    # Header row (multiline full names)
+    header_cols = ['Kernel'] + [_multiline_header(header_names.get(m, m)) for m in metrics]
     lines.append(' & '.join(header_cols) + r' \\')
     lines.append(r'\midrule')
     
@@ -263,6 +293,19 @@ def correlation_to_latex(corr_df, metrics, kernel_names, metric_names,
     lines.append(r'\end{table}')
     
     return '\n'.join(lines)
+
+
+def _build_metric_legend(metrics, metric_names, metric_full_names):
+    """Build a LaTeX legend string expanding metric acronyms.
+    
+    Example output: 'RBW: Relative Bandwidth, RRS: Relative Row Spread, ...'
+    """
+    parts = []
+    for m in metrics:
+        abbr = metric_names.get(m, m)
+        full = metric_full_names.get(m, m)
+        parts.append(f"{abbr}: {full}")
+    return ', '.join(parts) + '.'
 
 
 def generate_all_tables(df, output_dir, metrics=None, kernel_names=None, 
@@ -313,7 +356,8 @@ def generate_all_tables(df, output_dir, metrics=None, kernel_names=None,
         
         latex_tau = correlation_to_latex(
             corr_df, metrics, kernel_names, metric_names,
-            corr_type='tau', caption=caption_tau, label=label_tau
+            corr_type='tau', caption=caption_tau, label=label_tau,
+            metric_full_names=METRIC_FULL_NAMES
         )
         
         output_path_tau = output_dir / f"correlation_tau_ncols_{n_cols_int}.tex"
@@ -329,7 +373,8 @@ def generate_all_tables(df, output_dir, metrics=None, kernel_names=None,
         
         latex_pearson = correlation_to_latex(
             corr_df, metrics, kernel_names, metric_names,
-            corr_type='pearson', caption=caption_pearson, label=label_pearson
+            corr_type='pearson', caption=caption_pearson, label=label_pearson,
+            metric_full_names=METRIC_FULL_NAMES
         )
         
         output_path_pearson = output_dir / f"correlation_pearson_ncols_{n_cols_int}.tex"
@@ -380,7 +425,8 @@ def generate_blocksize_tables(df, output_dir, kernel_names=None):
         
         latex_tau = correlation_to_latex(
             corr_df, BLOCK_DENSITY_METRICS, kernel_names, BLOCK_DENSITY_METRIC_NAMES,
-            corr_type='tau', caption=caption_tau, label=label_tau
+            corr_type='tau', caption=caption_tau, label=label_tau,
+            metric_full_names=METRIC_FULL_NAMES
         )
         
         output_path_tau = output_dir / f"blocksize_tau_ncols_{n_cols_int}.tex"
@@ -396,7 +442,8 @@ def generate_blocksize_tables(df, output_dir, kernel_names=None):
         
         latex_pearson = correlation_to_latex(
             corr_df, BLOCK_DENSITY_METRICS, kernel_names, BLOCK_DENSITY_METRIC_NAMES,
-            corr_type='pearson', caption=caption_pearson, label=label_pearson
+            corr_type='pearson', caption=caption_pearson, label=label_pearson,
+            metric_full_names=METRIC_FULL_NAMES
         )
         
         output_path_pearson = output_dir / f"blocksize_pearson_ncols_{n_cols_int}.tex"
