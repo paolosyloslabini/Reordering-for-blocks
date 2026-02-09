@@ -154,3 +154,5 @@ Indices are **1-based**.
 ## Environment
 
 Designed for SLURM cluster execution. Job configurations in [yamls/configs.yaml](yamls/configs.yaml).
+
+**Note**: DTC-SpMM uses a separate conda env (`DTCSpMM`) and requires `operators/dtc_preprocess.sh` for module/library setup.
