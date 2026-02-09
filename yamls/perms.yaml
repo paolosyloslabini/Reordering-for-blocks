@@ -55,7 +55,7 @@ jobs:
           mtx_name=$(basename {mtx} .mtx)
           mkdir -p perms/SB_metis
           perm_path=perms/SB_metis/$mtx_name.perm
-        command: "./MtxPerm/SPARSEBASE/build/metis_part_perm {mtx} $perm_path --niter 1"
+        command: "./MtxPerm/SPARSEBASE/build/metis_part_perm {mtx} $perm_path --nparts 128"
 
       - tag: "SPARTA_reorder"
         preprocess: |
@@ -83,7 +83,7 @@ jobs:
           mtx_name=$(basename {mtx} .mtx)
           mkdir -p perms/SB_patoh
           perm_path=perms/SB_patoh/$mtx_name.perm
-        command: "./MtxPerm/SPARSEBASE/build/patoh_perm {mtx} $perm_path"
+        command: "./MtxPerm/SPARSEBASE/build/patoh_perm {mtx} $perm_path --nparts 128"
 
       - tag: "SB_slashburn"
         preprocess: |
