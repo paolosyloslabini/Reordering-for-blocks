@@ -141,7 +141,8 @@ def generate_kernel_plots(df, out_dir, args):
                     speedup_dir / f"speedup_boxplot_{perm_type}.png",
                     title=f"Speedup Distribution - {perm_type}\n{kernel}",
                     order=strategies,
-                    baseline=1.0
+                    baseline=1.0,
+                    log_y=True
                 )
             
             # -----------------------------------------------------------------
@@ -300,13 +301,16 @@ def generate_reorderability_plots(df_analysis, out_dir):
         
         # Add correlation (use full data for correlation)
         valid = df_metric[['baseline_value', 'improvement_ratio']].dropna()
+        valid = valid[(valid['baseline_value'] > 0) & (valid['improvement_ratio'] > 0)]
         if len(valid) > 10:
             tau, p = stats.kendalltau(valid['baseline_value'], valid['improvement_ratio'])
-            ax.set_title(f'Reorderability vs Baseline {metric_display}\nKendall τ = {tau:.3f} (p = {p:.2e}){clip_note}')
+            # Pearson on log values since we use log scale
+            pearson_r, _ = stats.pearsonr(np.log10(valid['baseline_value']), np.log10(valid['improvement_ratio']))
+            ax.set_title(f'Improvement vs {metric_display}\nτ = {tau:.3f}, r = {pearson_r:.3f}{clip_note}')
         else:
-            ax.set_title(f'Reorderability vs Baseline {metric_display}{clip_note}')
+            ax.set_title(f'Improvement vs {metric_display}{clip_note}')
         
-        ax.set_xlabel(f'Baseline {metric_display}')
+        ax.set_xlabel(f'{metric_display}')
         ax.set_ylabel(y_label)
         ax.axhline(y=1.0, color='red', linestyle='--', alpha=0.7, label='No improvement')
         ax.set_xscale('log')
@@ -324,9 +328,12 @@ def generate_reorderability_plots(df_analysis, out_dir):
             ax.scatter(df_metric_clipped['baseline_density'], df_metric_clipped['improvement_ratio'], alpha=0.5)
             
             valid = df_metric[['baseline_density', 'improvement_ratio']].dropna()
+            valid = valid[(valid['baseline_density'] > 0) & (valid['improvement_ratio'] > 0)]
             if len(valid) > 10:
                 tau, p = stats.kendalltau(valid['baseline_density'], valid['improvement_ratio'])
-                ax.set_title(f'{metric_display} Improvement vs Matrix Density\nKendall τ = {tau:.3f} (p = {p:.2e}){clip_note}')
+                # Pearson on log values since we use log scale
+                pearson_r, _ = stats.pearsonr(np.log10(valid['baseline_density']), np.log10(valid['improvement_ratio']))
+                ax.set_title(f'{metric_display} Improvement vs Matrix Density\nτ = {tau:.3f}, r = {pearson_r:.3f}{clip_note}')
             else:
                 ax.set_title(f'{metric_display} Improvement vs Matrix Density{clip_note}')
             
@@ -347,9 +354,12 @@ def generate_reorderability_plots(df_analysis, out_dir):
             ax.scatter(df_metric_clipped['baseline_rows'], df_metric_clipped['improvement_ratio'], alpha=0.5)
             
             valid = df_metric[['baseline_rows', 'improvement_ratio']].dropna()
+            valid = valid[(valid['baseline_rows'] > 0) & (valid['improvement_ratio'] > 0)]
             if len(valid) > 10:
                 tau, p = stats.kendalltau(valid['baseline_rows'], valid['improvement_ratio'])
-                ax.set_title(f'{metric_display} Improvement vs Matrix Size\nKendall τ = {tau:.3f} (p = {p:.2e}){clip_note}')
+                # Pearson on log values since we use log scale
+                pearson_r, _ = stats.pearsonr(np.log10(valid['baseline_rows']), np.log10(valid['improvement_ratio']))
+                ax.set_title(f'{metric_display} Improvement vs Matrix Size\nτ = {tau:.3f}, r = {pearson_r:.3f}{clip_note}')
             else:
                 ax.set_title(f'{metric_display} Improvement vs Matrix Size{clip_note}')
             
@@ -370,9 +380,12 @@ def generate_reorderability_plots(df_analysis, out_dir):
             ax.scatter(df_metric_clipped['baseline_locality_avg_nnz_per_row'], df_metric_clipped['improvement_ratio'], alpha=0.5)
             
             valid = df_metric[['baseline_locality_avg_nnz_per_row', 'improvement_ratio']].dropna()
+            valid = valid[(valid['baseline_locality_avg_nnz_per_row'] > 0) & (valid['improvement_ratio'] > 0)]
             if len(valid) > 10:
                 tau, p = stats.kendalltau(valid['baseline_locality_avg_nnz_per_row'], valid['improvement_ratio'])
-                ax.set_title(f'{metric_display} Improvement vs Avg NNZ/Row\nKendall τ = {tau:.3f} (p = {p:.2e}){clip_note}')
+                # Pearson on log values since we use log scale
+                pearson_r, _ = stats.pearsonr(np.log10(valid['baseline_locality_avg_nnz_per_row']), np.log10(valid['improvement_ratio']))
+                ax.set_title(f'{metric_display} Improvement vs Avg NNZ/Row\nτ = {tau:.3f}, r = {pearson_r:.3f}{clip_note}')
             else:
                 ax.set_title(f'{metric_display} Improvement vs Avg NNZ/Row{clip_note}')
             
@@ -470,7 +483,8 @@ def generate_reorder_analysis_plots(df_analysis, out_dir):
                 bw_dir / f"bandwidth_reduction_{perm_type}.png",
                 title=f"Bandwidth Reduction (Original / Reordered) - {perm_type}",
                 order=[s for s in strategies if s in df_pt['strategy'].unique()],
-                baseline=1.0
+                baseline=1.0,
+                log_y=True
             )
         
         # Avg bandwidth improvement
@@ -482,7 +496,8 @@ def generate_reorder_analysis_plots(df_analysis, out_dir):
                     bw_dir / f"bandwidth_avg_reduction_{perm_type}.png",
                     title=f"Avg Bandwidth Reduction (Original / Reordered) - {perm_type}",
                     order=[s for s in strategies if s in df_pt['strategy'].unique()],
-                    baseline=1.0
+                    baseline=1.0,
+                    log_y=True
                 )
     
     # -----------------------------------------------------------------
@@ -503,7 +518,8 @@ def generate_reorder_analysis_plots(df_analysis, out_dir):
                 dens_dir / f"density_improvement_bs{bs}_{perm_type}.png",
                 title=f"Density Improvement (BS {bs}) - {perm_type}",
                 order=[s for s in strategies if s in df_pt['strategy'].unique()],
-                baseline=1.0
+                baseline=1.0,
+                log_y=True
             )
     
     # -----------------------------------------------------------------
@@ -525,7 +541,8 @@ def generate_reorder_analysis_plots(df_analysis, out_dir):
                     blocks_dir / f"{prefix}_blocks_per_row_improvement_bs{bs}_{perm_type}.png",
                     title=f"{name} Blocks/Row Reduction (BS {bs}) - {perm_type}",
                     order=[s for s in strategies if s in df_pt['strategy'].unique()],
-                    baseline=1.0
+                    baseline=1.0,
+                    log_y=True
                 )
     
     # -----------------------------------------------------------------
@@ -551,7 +568,8 @@ def generate_reorder_analysis_plots(df_analysis, out_dir):
                 loc_dir / f"{imp_col}_{perm_type}.png",
                 title=f"{name} - {perm_type}",
                 order=[s for s in strategies if s in df_pt['strategy'].unique()],
-                baseline=1.0
+                baseline=1.0,
+                log_y=True
             )
 
 
