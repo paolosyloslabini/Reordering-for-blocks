@@ -396,9 +396,9 @@ def filter_min_size(df, min_rows):
     return df
 
 
-def apply_filters(df, df_analysis, matrices_list_path=None, 
-                  one_per_family=False, square_only=True, 
-                  min_size=None, filter_trivial=True, filter_sparse=True):
+def apply_filters(df, df_analysis, matrices_list_path=None,
+                  one_per_family=True, square_only=True,
+                  min_size=None, filter_trivial=False, filter_sparse=True):
     """Apply all configured filters to both DataFrames.
     
     Returns:
