@@ -1,5 +1,8 @@
 operators/ASpT/
 
+# Claude Code local settings
+.claude/
+
 # Generated plots
 plots/
 /plots
