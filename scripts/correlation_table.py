@@ -628,10 +628,11 @@ def generate_improvement_tables(df_analysis, output_dir, metrics=None,
 
     n_matrices = df_analysis[df_analysis['perm'] == 'None']['matrix'].nunique()
 
+    imp_cols = [f'{m}_imp' for m in used_metrics]
+
     for perm_type in sorted(imp_df['perm_type'].unique()):
         df_pt = imp_df[imp_df['perm_type'] == perm_type]
 
-        imp_cols = [f'{m}_imp' for m in used_metrics]
         median_df = df_pt.groupby('perm')[imp_cols].median().reset_index()
 
         # Sort by PERM_NAMES order
@@ -653,6 +654,27 @@ def generate_improvement_tables(df_analysis, output_dir, metrics=None,
         with open(out_path, 'w') as f:
             f.write(latex)
         print(f"Saved: {out_path}")
+
+    # Combined table with both symmetric and row reorderings
+    median_df_both = imp_df.groupby('perm')[imp_cols].median().reset_index()
+    perm_order = {p: i for i, p in enumerate(ordered_perms)}
+    median_df_both['_order'] = median_df_both['perm'].map(perm_order).fillna(999)
+    median_df_both = median_df_both.sort_values('_order').drop(columns='_order')
+
+    caption_both = (f"Median structural improvement ratio per reordering algorithm "
+                    f"(all permutation types, {n_matrices} matrices). "
+                    f"Values $>1$ indicate improvement over the original ordering.")
+    label_both = "tab:improvement_both"
+
+    latex_both = improvement_to_latex(
+        median_df_both, used_metrics, perm_names,
+        caption=caption_both, label=label_both
+    )
+
+    out_path_both = output_dir / "improvement_both.tex"
+    with open(out_path_both, 'w') as f:
+        f.write(latex_both)
+    print(f"Saved: {out_path_both}")
 
 
 # =============================================================================
