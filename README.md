@@ -162,6 +162,8 @@ Indices are **1-based**.
 
 Designed for SLURM cluster execution. Job configurations in [yamls/configs.yaml](yamls/configs.yaml).
 
+**Note**: DTC-SpMM uses a separate conda env (`DTCSpMM`) and requires `operators/dtc_preprocess.sh` for module/library setup.
+
 ## Ethics
 
 This repository includes an [`ETHICS.md`](ETHICS.md) — a statement of ethical principles addressed to AI agents and the humans who direct them.
