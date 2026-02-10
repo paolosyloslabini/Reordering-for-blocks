@@ -3,6 +3,7 @@ import json
 import re
 import os
 import sys
+import time
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 from sbatchman import jobs_list
@@ -177,17 +178,20 @@ def main():
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     workers = args.workers
+    t_total_start = time.perf_counter()
 
     print("Fetching jobs (this may take a while)...", file=sys.stderr)
     
     # Fetch ALL completed jobs
+    t0 = time.perf_counter()
     try:
         all_jobs = jobs_list(from_archived=True, status=["COMPLETED"], update_jobs=False)
     except Exception as e:
         print(f"Error fetching jobs: {e}", file=sys.stderr)
         sys.exit(1)
+    t_fetch = time.perf_counter() - t0
         
-    print(f"Total completed jobs found: {len(all_jobs)}", file=sys.stderr)
+    print(f"Total completed jobs found: {len(all_jobs)} ({t_fetch:.1f}s)", file=sys.stderr)
     
     if len(all_jobs) == 0:
         print("No completed jobs found.", file=sys.stderr)
@@ -206,6 +210,7 @@ def main():
     # --- 1. Process Analysis Jobs (parallel) ---
     print(f"Found {len(analysis_jobs)} analysis jobs.", file=sys.stderr)
 
+    t0 = time.perf_counter()
     with ThreadPoolExecutor(max_workers=workers) as pool:
         results = list(tqdm(
             pool.map(parse_one_analysis_job, analysis_jobs, chunksize=256),
@@ -213,6 +218,8 @@ def main():
             desc="Parsing Analysis Jobs"
         ))
     analysis_results = [r for r in results if r is not None]
+    t_analysis = time.perf_counter() - t0
+    print(f"Analysis parsing: {t_analysis:.1f}s", file=sys.stderr)
 
     # Export Analysis CSV
     if analysis_results:
@@ -226,6 +233,7 @@ def main():
     # --- 2. Process Operation Jobs (parallel) ---
     print(f"Found {len(op_jobs)} operation jobs.", file=sys.stderr)
 
+    t0 = time.perf_counter()
     with ThreadPoolExecutor(max_workers=workers) as pool:
         results = list(tqdm(
             pool.map(parse_one_operation_job, op_jobs, chunksize=256),
@@ -233,6 +241,8 @@ def main():
             desc="Parsing Operation Jobs"
         ))
     op_results = [r for r in results if r is not None]
+    t_ops = time.perf_counter() - t0
+    print(f"Operations parsing: {t_ops:.1f}s", file=sys.stderr)
 
     # Export Operation CSV
     if op_results:
@@ -242,6 +252,10 @@ def main():
         print(f"Exported {len(df_op)} operation rows to {out_file}")
     else:
         print("No operation results found.")
+
+    t_total = time.perf_counter() - t_total_start
+    print(f"\nTotal time: {t_total:.1f}s  (fetch: {t_fetch:.1f}s, analysis: {t_analysis:.1f}s, operations: {t_ops:.1f}s)",
+          file=sys.stderr)
 
 if __name__ == "__main__":
     main()
