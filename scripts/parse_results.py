@@ -4,6 +4,7 @@ import re
 import os
 import sys
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 from sbatchman import jobs_list
 
 try:
@@ -44,8 +45,8 @@ def parse_timers(stdout):
 
     timers = {}
     
-    # Remove ANSI color codes (robust regex for escape sequences)
-    clean_stdout = ANSI_ESCAPE.sub('', stdout)
+    # Remove ANSI color codes only if needed
+    clean_stdout = ANSI_ESCAPE.sub('', stdout) if '\x1b' in stdout or '\x1B' in stdout else stdout
     
     # Look for lines like: <Timer>[label] 123.456 ms
     for match in TIMER_PATTERN.finditer(clean_stdout):
@@ -54,15 +55,128 @@ def parse_timers(stdout):
         timers[f"time_{label}_ms"] = value
     return timers
 
+# Number of threads for parallel I/O (tunable via --workers)
+DEFAULT_WORKERS = 32
+
+
+def _get_perm_type(tag):
+    """Determine perm_type from a job tag string."""
+    if 'ROW' in tag:
+        return 'ROW'
+    elif 'SYMMETRIC' in tag:
+        return 'SYMMETRIC'
+    elif 'ASYMMETRIC' in tag:
+        return 'ASYMMETRIC'
+    elif 'NO_REORDER' in tag:
+        return 'ROW'
+    return 'UNKNOWN'
+
+
+def parse_one_analysis_job(job):
+    """Parse a single analysis job. Returns a dict row or None."""
+    try:
+        mtx_path = safe_get_var(job, 'mtx', '')
+        matrix_name = get_matrix_name(mtx_path)
+        perm = safe_get_var(job, 'perm', 'None')
+        perm_type = _get_perm_type(job.tag)
+
+        stdout = job.get_stdout()
+        if stdout is None:
+            return None
+
+        start = stdout.find('{')
+        end = stdout.rfind('}')
+
+        if start == -1 or end == -1:
+            return None
+
+        json_str = stdout[start:end+1]
+        data = json.loads(json_str)
+
+        row = {
+            'matrix': matrix_name,
+            'perm': perm,
+            'perm_type': perm_type,
+            'rows': data.get('rows'),
+            'cols': data.get('cols'),
+            'nnz': data.get('nnz'),
+            'density': data.get('density'),
+        }
+
+        # Flatten Bandwidth
+        for k, v in data.get('bandwidth', {}).items():
+            row[k] = v
+
+        # Flatten Locality
+        for k, v in data.get('locality', {}).items():
+            row[f"locality_{k}"] = v
+
+        # Flatten Block Analysis
+        for b in data.get('block_analysis', []):
+            bs = b.get('block_size')
+            if bs:
+                row[f'block_density_{bs}'] = b.get('block_density')
+                row[f'nonzero_blocks_{bs}'] = b.get('nonzero_blocks')
+                row[f'total_blocks_{bs}'] = b.get('total_blocks')
+                row[f'max_blocks_per_row_{bs}'] = b.get('max_blocks_per_row')
+                row[f'avg_blocks_per_row_{bs}'] = b.get('avg_blocks_per_row')
+
+        return row
+
+    except Exception as e:
+        job_id = getattr(job, 'id', getattr(job, 'job_id', 'unknown'))
+        print(f"Error parsing analysis job {job_id}: {e}", file=sys.stderr)
+        return None
+
+
+def parse_one_operation_job(job):
+    """Parse a single operation job. Returns a dict row or None."""
+    try:
+        mtx_path = safe_get_var(job, 'mtx', '')
+        matrix_name = get_matrix_name(mtx_path)
+        perm = safe_get_var(job, 'perm', 'None')
+        tag = job.tag
+        perm_type = _get_perm_type(tag)
+
+        block_size = safe_get_var(job, 'block_size', DEFAULT_BLOCK_SIZE, int)
+        n_cols = safe_get_var(job, 'n_cols', DEFAULT_N_COLS, int)
+
+        timers = parse_timers(job.get_stdout())
+        if not timers:
+            return None
+
+        job_id = getattr(job, 'id', getattr(job, 'job_id', 'unknown'))
+
+        return {
+            'job_id': job_id,
+            'tag': tag,
+            'matrix': matrix_name,
+            'perm': perm,
+            'perm_type': perm_type,
+            'algo': tag,
+            'block_size': block_size if block_size > 0 else None,
+            'n_cols': n_cols,
+            **timers
+        }
+
+    except Exception as e:
+        job_id = getattr(job, 'id', getattr(job, 'job_id', 'unknown'))
+        print(f"Error parsing operation job {job_id}: {e}", file=sys.stderr)
+        return None
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Parse job results into CSV files.")
     parser.add_argument("--out-dir", default="results", help="Directory for output CSV files")
+    parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS,
+                        help=f"Number of parallel I/O threads (default: {DEFAULT_WORKERS})")
     args = parser.parse_args()
 
     # Create output directory
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    workers = args.workers
 
     print("Fetching jobs (this may take a while)...", file=sys.stderr)
     
@@ -79,81 +193,26 @@ def main():
         print("No completed jobs found.", file=sys.stderr)
         sys.exit(0)
 
-    # --- 1. Process Analysis Jobs ---
-    analysis_results = []
-    analysis_jobs = [j for j in all_jobs if j.tag and j.tag.startswith("ANALYSIS_")]
-    print(f"Found {len(analysis_jobs)} analysis jobs.", file=sys.stderr)
-    
-    for job in tqdm(analysis_jobs, desc="Parsing Analysis Jobs"):
-        try:
-            # Parse variables
-            mtx_path = safe_get_var(job, 'mtx', '')
-            matrix_name = get_matrix_name(mtx_path)
-            perm = safe_get_var(job, 'perm', 'None')
-            
-            # Determine perm_type
-            tag = job.tag
-            if 'ROW' in tag: perm_type = 'ROW'
-            elif 'SYMMETRIC' in tag: perm_type = 'SYMMETRIC'
-            elif 'ASYMMETRIC' in tag: perm_type = 'ASYMMETRIC'
-            elif 'NO_REORDER' in tag: perm_type = 'ROW'
-            else: perm_type = 'UNKNOWN'
-            
-            # Parse JSON output
-            stdout = job.get_stdout()
-            if stdout is None:
-                job_id = getattr(job, 'id', getattr(job, 'job_id', 'unknown'))
-                print(f"Warning: stdout is None for analysis job {job_id}", file=sys.stderr)
-                continue
+    # --- Single-pass job categorization ---
+    analysis_jobs = []
+    op_jobs = []
+    for j in all_jobs:
+        tag = j.tag or ""
+        if tag.startswith("ANALYSIS_"):
+            analysis_jobs.append(j)
+        elif "SPMM" in tag:
+            op_jobs.append(j)
 
-            start = stdout.find('{')
-            end = stdout.rfind('}')
-            
-            if start != -1 and end != -1:
-                json_str = stdout[start:end+1]
-                data = json.loads(json_str)
-                
-                # Base row
-                row = {
-                    'matrix': matrix_name,
-                    'perm': perm,
-                    'perm_type': perm_type,
-                    'rows': data.get('rows'),
-                    'cols': data.get('cols'),
-                    'nnz': data.get('nnz'),
-                    'density': data.get('density'),
-                }
-                
-                # Flatten Bandwidth
-                bw = data.get('bandwidth', {})
-                for k, v in bw.items():
-                    row[k] = v
-                    
-                # Flatten Locality
-                loc = data.get('locality', {})
-                for k, v in loc.items():
-                    row[f"locality_{k}"] = v
-                    
-                # Flatten Block Analysis
-                # Create columns like block_density_4, block_density_8, etc.
-                block_analysis = data.get('block_analysis', [])
-                for b in block_analysis:
-                    bs = b.get('block_size')
-                    if bs:
-                        row[f'block_density_{bs}'] = b.get('block_density')
-                        row[f'nonzero_blocks_{bs}'] = b.get('nonzero_blocks')
-                        row[f'total_blocks_{bs}'] = b.get('total_blocks')
-                        row[f'max_blocks_per_row_{bs}'] = b.get('max_blocks_per_row')
-                        row[f'avg_blocks_per_row_{bs}'] = b.get('avg_blocks_per_row')
-                
-                analysis_results.append(row)
-            else:
-                job_id = getattr(job, 'id', getattr(job, 'job_id', 'unknown'))
-                print(f"Warning: No JSON in output for analysis job {job_id}", file=sys.stderr)
-                
-        except Exception as e:
-            job_id = getattr(job, 'id', getattr(job, 'job_id', 'unknown'))
-            print(f"Error parsing analysis job {job_id}: {e}", file=sys.stderr)
+    # --- 1. Process Analysis Jobs (parallel) ---
+    print(f"Found {len(analysis_jobs)} analysis jobs.", file=sys.stderr)
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        results = list(tqdm(
+            pool.map(parse_one_analysis_job, analysis_jobs, chunksize=256),
+            total=len(analysis_jobs),
+            desc="Parsing Analysis Jobs"
+        ))
+    analysis_results = [r for r in results if r is not None]
 
     # Export Analysis CSV
     if analysis_results:
@@ -164,55 +223,16 @@ def main():
     else:
         print("No analysis results found.")
 
-    # --- 2. Process Operation Jobs (SpMM, etc.) ---
-    op_results = []
-    # Filter for operation jobs (tags containing SPMM for now, but generic enough)
-    # Assuming any job that is NOT analysis is an operation job? 
-    # Or stick to explicit tags. Let's stick to SPMM for now but rename variable.
-    op_jobs = [j for j in all_jobs if j.tag and "SPMM" in j.tag]
+    # --- 2. Process Operation Jobs (parallel) ---
     print(f"Found {len(op_jobs)} operation jobs.", file=sys.stderr)
-    
-    for job in tqdm(op_jobs, desc="Parsing Operation Jobs"):
-        try:
-            # Basic Job Info
-            mtx_path = safe_get_var(job, 'mtx', '')
-            matrix_name = get_matrix_name(mtx_path)
-            perm = safe_get_var(job, 'perm', 'None')
-            tag = job.tag
-            
-            if 'ROW' in tag: perm_type = 'ROW'
-            elif 'SYMMETRIC' in tag: perm_type = 'SYMMETRIC'
-            elif 'ASYMMETRIC' in tag: perm_type = 'ASYMMETRIC'
-            elif 'NO_REORDER' in tag: perm_type = 'ROW'
-            else: perm_type = 'UNKNOWN'
-            
-            algo = tag
-            block_size = safe_get_var(job, 'block_size', DEFAULT_BLOCK_SIZE, int)
-            n_cols = safe_get_var(job, 'n_cols', DEFAULT_N_COLS, int)
 
-            # Parse Timers
-            timers = parse_timers(job.get_stdout())
-            if not timers:
-                continue
-                
-            job_id = getattr(job, 'id', getattr(job, 'job_id', 'unknown'))
-            
-            row = {
-                'job_id': job_id,
-                'tag': tag,
-                'matrix': matrix_name,
-                'perm': perm,
-                'perm_type': perm_type,
-                'algo': algo,
-                'block_size': block_size if block_size > 0 else None,
-                'n_cols': n_cols,
-                **timers
-            }
-            op_results.append(row)
-            
-        except Exception as e:
-            job_id = getattr(job, 'id', getattr(job, 'job_id', 'unknown'))
-            print(f"Error parsing operation job {job_id}: {e}", file=sys.stderr)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        results = list(tqdm(
+            pool.map(parse_one_operation_job, op_jobs, chunksize=256),
+            total=len(op_jobs),
+            desc="Parsing Operation Jobs"
+        ))
+    op_results = [r for r in results if r is not None]
 
     # Export Operation CSV
     if op_results:

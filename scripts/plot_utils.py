@@ -10,11 +10,61 @@ This module provides:
 import pandas as pd
 import numpy as np
 import seaborn as sns
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 from pathlib import Path
 from scipy import stats
 import re
 import sys
+
+
+# =============================================================================
+# Professional Plot Style
+# =============================================================================
+
+# Colorblind-friendly palette for categorical data (Tol's muted scheme)
+PALETTE = [
+    '#332288', '#88CCEE', '#44AA99', '#117733',
+    '#999933', '#DDCC77', '#CC6677', '#882255',
+    '#AA4499', '#DDDDDD',
+]
+
+def set_professional_style():
+    """Configure matplotlib/seaborn for publication-quality plots.
+
+    Call once at the start of a script. Produces clean, serif-font figures
+    suitable for LaTeX papers.
+    """
+    sns.set_theme(style='whitegrid', font='serif', palette=PALETTE)
+    mpl.rcParams.update({
+        # Font
+        'font.family': 'serif',
+        'font.size': 11,
+        'axes.titlesize': 13,
+        'axes.labelsize': 12,
+        'xtick.labelsize': 10,
+        'ytick.labelsize': 10,
+        'legend.fontsize': 10,
+        # Lines & markers
+        'lines.linewidth': 1.5,
+        'lines.markersize': 5,
+        # Axes
+        'axes.linewidth': 0.8,
+        'axes.edgecolor': '#333333',
+        'axes.grid': True,
+        'grid.alpha': 0.3,
+        'grid.linewidth': 0.5,
+        # Figure
+        'figure.dpi': 150,
+        'savefig.dpi': 300,
+        'savefig.bbox': 'tight',
+        'savefig.pad_inches': 0.05,
+        # Ticks
+        'xtick.direction': 'out',
+        'ytick.direction': 'out',
+        'xtick.major.width': 0.8,
+        'ytick.major.width': 0.8,
+    })
 
 
 # =============================================================================
@@ -171,59 +221,102 @@ def add_speedup(df):
     return df
 
 
-def add_improvement_columns(df):
-    """Add improvement columns comparing reordered to original.
-    
-    Adds for each metric:
-        - {metric}_improvement: ratio showing improvement factor
-        
-    For metrics where higher is better: improvement = reordered / original
-    For metrics where lower is better: improvement = original / reordered
+def build_metrics_config(df, include_extended=False):
+    """Build a metrics config dict for improvement calculation.
+
+    Args:
+        df: DataFrame whose columns determine which metrics are available.
+        include_extended: If True, include additional metrics (bandwidth_avg,
+            max spreads, blocks-per-row) used by reorder analysis plots.
+
+    Returns:
+        Dict mapping metric column names to dicts with keys
+        'improvement_name' and 'higher_is_better'.
     """
-    df = df.copy()
-    
-    # Define which metrics exist and their improvement direction
-    # higher_is_better: True means improvement = reordered/original
-    # higher_is_better: False means improvement = original/reordered
     metrics_config = {
         'bandwidth_max': {'improvement_name': 'bandwidth_improvement', 'higher_is_better': False},
         'locality_avg_row_spread': {'improvement_name': 'row_spread_improvement', 'higher_is_better': False},
         'locality_avg_col_spread': {'improvement_name': 'col_spread_improvement', 'higher_is_better': False},
         'locality_vertical_adjacency_ratio': {'improvement_name': 'vertical_adjacency_improvement', 'higher_is_better': True},
     }
-    
+
+    if include_extended:
+        metrics_config.update({
+            'bandwidth_avg': {'improvement_name': 'bandwidth_avg_improvement', 'higher_is_better': False},
+            'locality_max_row_spread': {'improvement_name': 'max_row_spread_improvement', 'higher_is_better': False},
+            'locality_max_col_spread': {'improvement_name': 'max_col_spread_improvement', 'higher_is_better': False},
+        })
+
     # Add block density improvements
-    density_cols = [c for c in df.columns if c.startswith('block_density_')]
-    for col in density_cols:
-        bs = col.split('_')[-1]
-        metrics_config[col] = {'improvement_name': f'density_improvement_{bs}', 'higher_is_better': True}
-    
-    # Get available metrics
-    available_metrics = [m for m in metrics_config.keys() if m in df.columns]
-    
+    for col in df.columns:
+        if col.startswith('block_density_'):
+            bs = col.split('_')[-1]
+            metrics_config[col] = {'improvement_name': f'density_improvement_{bs}', 'higher_is_better': True}
+
+    # Add blocks-per-row improvements (extended mode only)
+    if include_extended:
+        for bs in [4, 8, 16, 32, 64, 128]:
+            for prefix in ('avg', 'max'):
+                col = f'{prefix}_blocks_per_row_{bs}'
+                if col in df.columns:
+                    metrics_config[col] = {
+                        'improvement_name': f'{prefix}_blocks_per_row_improvement_{bs}',
+                        'higher_is_better': False,
+                    }
+
+    return metrics_config
+
+
+def compute_improvements(df, metrics_config):
+    """Compute improvement columns from a metrics config.
+
+    For each metric present in both the DataFrame and the config, merges in
+    the per-matrix Original baseline and computes the improvement ratio.
+
+    Args:
+        df: DataFrame that must contain a 'strategy' column with 'Original'
+            rows and a 'matrix' column.
+        metrics_config: Dict produced by build_metrics_config.
+
+    Returns:
+        DataFrame with improvement columns added.
+    """
+    df = df.copy()
+
+    available_metrics = [m for m in metrics_config if m in df.columns]
     if not available_metrics:
         return df
-    
-    # Get original values
+
     original = df[df['strategy'] == 'Original'][['matrix'] + available_metrics].drop_duplicates()
     original = original.groupby('matrix')[available_metrics].mean().reset_index()
     original = original.rename(columns={m: f'{m}_original' for m in available_metrics})
-    
+
     df = pd.merge(df, original, on='matrix', how='left')
-    
-    # Calculate improvements
+
     for metric, config in metrics_config.items():
         if metric not in available_metrics:
             continue
         orig_col = f'{metric}_original'
         imp_col = config['improvement_name']
-        
         if config['higher_is_better']:
             df[imp_col] = df[metric] / df[orig_col]
         else:
             df[imp_col] = df[orig_col] / df[metric]
-    
+
     return df
+
+
+def add_improvement_columns(df):
+    """Add improvement columns comparing reordered to original.
+
+    Adds for each metric:
+        - {metric}_improvement: ratio showing improvement factor
+
+    For metrics where higher is better: improvement = reordered / original
+    For metrics where lower is better: improvement = original / reordered
+    """
+    metrics_config = build_metrics_config(df)
+    return compute_improvements(df, metrics_config)
 
 
 def add_size_class(df):
@@ -396,62 +489,64 @@ def filter_min_size(df, min_rows):
     return df
 
 
+def _filter_matrices_from_both(df, df_analysis, matrices_to_remove, reason):
+    """Remove matrices from both DataFrames and print a message."""
+    if len(matrices_to_remove) > 0:
+        print(f"Filtering {len(matrices_to_remove)} {reason}")
+        df = df[~df['matrix'].isin(matrices_to_remove)]
+        df_analysis = df_analysis[~df_analysis['matrix'].isin(matrices_to_remove)]
+    return df, df_analysis
+
+
 def apply_filters(df, df_analysis, matrices_list_path=None,
                   one_per_family=True, square_only=True,
                   min_size=None, filter_trivial=False, filter_sparse=True):
     """Apply all configured filters to both DataFrames.
-    
+
     Returns:
         Tuple of (filtered_df, filtered_df_analysis)
     """
     if one_per_family and matrices_list_path:
         df = filter_one_per_family(df, matrices_list_path)
         df_analysis = filter_one_per_family(df_analysis, matrices_list_path)
-    
+
     if filter_trivial:
-        trivial_matrices = []
+        trivial = filter_trivial_matrices(pd.DataFrame(), df_analysis)  # get list only
         if 'bandwidth_max' in df_analysis.columns:
             trivial_matrices = df_analysis[
-                (df_analysis['perm'] == 'None') & 
+                (df_analysis['perm'] == 'None') &
                 (df_analysis['bandwidth_max'] < 5)
             ]['matrix'].unique()
-        if len(trivial_matrices) > 0:
-            print(f"Filtering {len(trivial_matrices)} trivial matrices")
-            df = df[~df['matrix'].isin(trivial_matrices)]
-            df_analysis = df_analysis[~df_analysis['matrix'].isin(trivial_matrices)]
-    
+            df, df_analysis = _filter_matrices_from_both(
+                df, df_analysis, trivial_matrices, "trivial matrices")
+
     if filter_sparse:
-        sparse_matrices = []
         if 'nnz' in df_analysis.columns and 'rows' in df_analysis.columns:
             sparse_matrices = df_analysis[
-                (df_analysis['perm'] == 'None') & 
+                (df_analysis['perm'] == 'None') &
                 (df_analysis['nnz'] < 2 * df_analysis['rows'])
             ]['matrix'].unique()
-        if len(sparse_matrices) > 0:
-            print(f"Filtering {len(sparse_matrices)} very sparse matrices")
-            df = df[~df['matrix'].isin(sparse_matrices)]
-            df_analysis = df_analysis[~df_analysis['matrix'].isin(sparse_matrices)]
-    
+            df, df_analysis = _filter_matrices_from_both(
+                df, df_analysis, sparse_matrices, "very sparse matrices")
+
     # Filter purely diagonal matrices
     if 'nnz' in df_analysis.columns and 'rows' in df_analysis.columns:
         diagonal_matrices = df_analysis[
-            (df_analysis['perm'] == 'None') & 
+            (df_analysis['perm'] == 'None') &
             (df_analysis['rows'] == df_analysis['cols']) &
             (df_analysis['nnz'] == df_analysis['rows'])
         ]['matrix'].unique()
-        if len(diagonal_matrices) > 0:
-            print(f"Filtering {len(diagonal_matrices)} purely diagonal matrices")
-            df = df[~df['matrix'].isin(diagonal_matrices)]
-            df_analysis = df_analysis[~df_analysis['matrix'].isin(diagonal_matrices)]
-    
+        df, df_analysis = _filter_matrices_from_both(
+            df, df_analysis, diagonal_matrices, "purely diagonal matrices")
+
     if square_only:
         df = filter_square_only(df)
         df_analysis = filter_square_only(df_analysis)
-    
+
     if min_size is not None:
         df = filter_min_size(df, min_size)
         df_analysis = filter_min_size(df_analysis, min_size)
-    
+
     return df, df_analysis
 
 

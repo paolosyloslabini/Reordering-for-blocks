@@ -322,255 +322,137 @@ def generate_reorderability_plots(df_analysis, out_dir):
         plt.close()
         print(f"  Saved: baseline_vs_improvement_{metric_safe}.png")
         
-        # 3. Matrix density vs Improvement
-        if 'baseline_density' in df_metric_clipped.columns:
-            fig, ax = plt.subplots(figsize=(10, 6))
-            ax.scatter(df_metric_clipped['baseline_density'], df_metric_clipped['improvement_ratio'], alpha=0.5)
-            
-            valid = df_metric[['baseline_density', 'improvement_ratio']].dropna()
-            valid = valid[(valid['baseline_density'] > 0) & (valid['improvement_ratio'] > 0)]
-            if len(valid) > 10:
-                tau, p = stats.kendalltau(valid['baseline_density'], valid['improvement_ratio'])
-                # Pearson on log values since we use log scale
-                pearson_r, _ = stats.pearsonr(np.log10(valid['baseline_density']), np.log10(valid['improvement_ratio']))
-                ax.set_title(f'{metric_display} Improvement vs Matrix Density\nτ = {tau:.3f}, r = {pearson_r:.3f}{clip_note}')
-            else:
-                ax.set_title(f'{metric_display} Improvement vs Matrix Density{clip_note}')
-            
-            ax.set_xlabel('Matrix Density')
-            ax.set_ylabel(y_label)
-            ax.axhline(y=1.0, color='red', linestyle='--', alpha=0.7)
-            ax.set_xscale('log')
-            ax.set_yscale('log')
-            ax.grid(True, alpha=0.3)
-            plt.tight_layout()
-            plt.savefig(reorder_dir / f"density_vs_improvement_{metric_safe}.png", dpi=150)
-            plt.close()
-            print(f"  Saved: density_vs_improvement_{metric_safe}.png")
-        
-        # 4. Matrix size vs Improvement
-        if 'baseline_rows' in df_metric_clipped.columns:
-            fig, ax = plt.subplots(figsize=(10, 6))
-            ax.scatter(df_metric_clipped['baseline_rows'], df_metric_clipped['improvement_ratio'], alpha=0.5)
-            
-            valid = df_metric[['baseline_rows', 'improvement_ratio']].dropna()
-            valid = valid[(valid['baseline_rows'] > 0) & (valid['improvement_ratio'] > 0)]
-            if len(valid) > 10:
-                tau, p = stats.kendalltau(valid['baseline_rows'], valid['improvement_ratio'])
-                # Pearson on log values since we use log scale
-                pearson_r, _ = stats.pearsonr(np.log10(valid['baseline_rows']), np.log10(valid['improvement_ratio']))
-                ax.set_title(f'{metric_display} Improvement vs Matrix Size\nτ = {tau:.3f}, r = {pearson_r:.3f}{clip_note}')
-            else:
-                ax.set_title(f'{metric_display} Improvement vs Matrix Size{clip_note}')
-            
-            ax.set_xlabel('Matrix Size (rows)')
-            ax.set_ylabel(y_label)
-            ax.axhline(y=1.0, color='red', linestyle='--', alpha=0.7)
-            ax.set_xscale('log')
-            ax.set_yscale('log')
-            ax.grid(True, alpha=0.3)
-            plt.tight_layout()
-            plt.savefig(reorder_dir / f"size_vs_improvement_{metric_safe}.png", dpi=150)
-            plt.close()
-            print(f"  Saved: size_vs_improvement_{metric_safe}.png")
-        
-        # 5. Avg NNZ per row vs Improvement
-        if 'baseline_locality_avg_nnz_per_row' in df_metric_clipped.columns:
-            fig, ax = plt.subplots(figsize=(10, 6))
-            ax.scatter(df_metric_clipped['baseline_locality_avg_nnz_per_row'], df_metric_clipped['improvement_ratio'], alpha=0.5)
-            
-            valid = df_metric[['baseline_locality_avg_nnz_per_row', 'improvement_ratio']].dropna()
-            valid = valid[(valid['baseline_locality_avg_nnz_per_row'] > 0) & (valid['improvement_ratio'] > 0)]
-            if len(valid) > 10:
-                tau, p = stats.kendalltau(valid['baseline_locality_avg_nnz_per_row'], valid['improvement_ratio'])
-                # Pearson on log values since we use log scale
-                pearson_r, _ = stats.pearsonr(np.log10(valid['baseline_locality_avg_nnz_per_row']), np.log10(valid['improvement_ratio']))
-                ax.set_title(f'{metric_display} Improvement vs Avg NNZ/Row\nτ = {tau:.3f}, r = {pearson_r:.3f}{clip_note}')
-            else:
-                ax.set_title(f'{metric_display} Improvement vs Avg NNZ/Row{clip_note}')
-            
-            ax.set_xlabel('Avg Nonzeros per Row')
-            ax.set_ylabel(y_label)
-            ax.axhline(y=1.0, color='red', linestyle='--', alpha=0.7)
-            ax.set_xscale('log')
-            ax.set_yscale('log')
-            ax.grid(True, alpha=0.3)
-            plt.tight_layout()
-            plt.savefig(reorder_dir / f"nnz_per_row_vs_improvement_{metric_safe}.png", dpi=150)
-            plt.close()
-            print(f"  Saved: nnz_per_row_vs_improvement_{metric_safe}.png")
+        # 3-5. Baseline features vs Improvement
+        feature_scatter_specs = [
+            ('baseline_density', 'Matrix Density', 'density_vs_improvement'),
+            ('baseline_rows', 'Matrix Size (rows)', 'size_vs_improvement'),
+            ('baseline_locality_avg_nnz_per_row', 'Avg Nonzeros per Row', 'nnz_per_row_vs_improvement'),
+        ]
+        for x_col, x_label, filename_prefix in feature_scatter_specs:
+            _reorderability_scatter(
+                df_metric, df_metric_clipped, x_col, x_label, y_label,
+                metric_display, clip_note,
+                reorder_dir / f"{filename_prefix}_{metric_safe}.png")
     
     print(f"\n  All reorderability plots saved to {reorder_dir}")
 
 
+def _reorderability_scatter(df_full, df_clipped, x_col, x_label, y_label,
+                            metric_display, clip_note, output_path):
+    """Scatter plot: x_col vs improvement_ratio with Kendall/Pearson annotation."""
+    if x_col not in df_clipped.columns:
+        return
+    fig, ax = plt.subplots(figsize=(10, 6))
+    ax.scatter(df_clipped[x_col], df_clipped['improvement_ratio'], alpha=0.5)
+
+    valid = df_full[[x_col, 'improvement_ratio']].dropna()
+    valid = valid[(valid[x_col] > 0) & (valid['improvement_ratio'] > 0)]
+    if len(valid) > 10:
+        tau, _ = stats.kendalltau(valid[x_col], valid['improvement_ratio'])
+        pearson_r, _ = stats.pearsonr(np.log10(valid[x_col]),
+                                       np.log10(valid['improvement_ratio']))
+        ax.set_title(f'{metric_display} Improvement vs {x_label}\n'
+                     f'\u03c4 = {tau:.3f}, r = {pearson_r:.3f}{clip_note}')
+    else:
+        ax.set_title(f'{metric_display} Improvement vs {x_label}{clip_note}')
+
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
+    ax.axhline(y=1.0, color='red', linestyle='--', alpha=0.7)
+    ax.set_xscale('log')
+    ax.set_yscale('log')
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=150)
+    plt.close()
+    print(f"  Saved: {output_path.name}")
+
+
+def _boxplot_for_perm_types(df_reordered, strategies, imp_col, title_template,
+                            output_dir, filename_template):
+    """Generate one boxplot per perm_type for a given improvement column."""
+    if imp_col not in df_reordered.columns:
+        return
+    for perm_type in df_reordered['perm_type'].unique():
+        df_pt = df_reordered[df_reordered['perm_type'] == perm_type]
+        pu.boxplot_by_category(
+            df_pt, 'strategy', imp_col,
+            output_dir / filename_template.format(perm_type=perm_type),
+            title=title_template.format(perm_type=perm_type),
+            order=[s for s in strategies if s in df_pt['strategy'].unique()],
+            baseline=1.0,
+            log_y=True
+        )
+
+
 def generate_reorder_analysis_plots(df_analysis, out_dir):
     """Generate reordering analysis plots (independent of kernel performance)."""
-    
+
     print("\n=== Reordering Analysis ===")
-    
+
     reorder_dir = out_dir / "reorder_analysis"
-    
+
     # Process analysis data
     df = df_analysis.copy()
     df['strategy'] = df['perm'].apply(lambda x: 'Original' if x == 'None' else str(x))
-    
-    # Calculate improvements (same logic as add_improvement_columns but for analysis-only data)
-    metrics_config = {
-        'bandwidth_max': {'improvement_name': 'bandwidth_improvement', 'higher_is_better': False},
-        'bandwidth_avg': {'improvement_name': 'bandwidth_avg_improvement', 'higher_is_better': False},
-        'locality_avg_row_spread': {'improvement_name': 'row_spread_improvement', 'higher_is_better': False},
-        'locality_max_row_spread': {'improvement_name': 'max_row_spread_improvement', 'higher_is_better': False},
-        'locality_avg_col_spread': {'improvement_name': 'col_spread_improvement', 'higher_is_better': False},
-        'locality_max_col_spread': {'improvement_name': 'max_col_spread_improvement', 'higher_is_better': False},
-        'locality_vertical_adjacency_ratio': {'improvement_name': 'vertical_adjacency_improvement', 'higher_is_better': True},
-    }
-    
-    # Add density improvements
-    density_cols = [c for c in df.columns if c.startswith('block_density_')]
-    for col in density_cols:
-        bs = col.split('_')[-1]
-        metrics_config[col] = {'improvement_name': f'density_improvement_{bs}', 'higher_is_better': True}
-    
-    # Add blocks per row improvements (fewer blocks per row = better locality)
-    for bs in [4, 8, 16, 32, 64, 128]:
-        avg_col = f'avg_blocks_per_row_{bs}'
-        max_col = f'max_blocks_per_row_{bs}'
-        if avg_col in df.columns:
-            metrics_config[avg_col] = {'improvement_name': f'avg_blocks_per_row_improvement_{bs}', 'higher_is_better': False}
-        if max_col in df.columns:
-            metrics_config[max_col] = {'improvement_name': f'max_blocks_per_row_improvement_{bs}', 'higher_is_better': False}
-    
-    available_metrics = [m for m in metrics_config.keys() if m in df.columns]
-    
-    # Get original values
-    original = df[df['strategy'] == 'Original'][['matrix'] + available_metrics].drop_duplicates()
-    original = original.groupby('matrix')[available_metrics].mean().reset_index()
-    original = original.rename(columns={m: f'{m}_original' for m in available_metrics})
-    
-    df = df.merge(original, on='matrix', how='left')
-    
-    # Calculate improvements
-    for metric, config in metrics_config.items():
-        if metric not in available_metrics:
-            continue
-        orig_col = f'{metric}_original'
-        imp_col = config['improvement_name']
-        if config['higher_is_better']:
-            df[imp_col] = df[metric] / df[orig_col]
-        else:
-            df[imp_col] = df[orig_col] / df[metric]
-    
+
+    # Calculate improvements using the shared utility (extended mode includes
+    # bandwidth_avg, max spreads, and blocks-per-row metrics)
+    metrics_config = pu.build_metrics_config(df, include_extended=True)
+    df = pu.compute_improvements(df, metrics_config)
+
     # Filter to reordered only
     df_reordered = df[df['strategy'] != 'Original']
-    
+
     if df_reordered.empty:
         print("No reordered data for analysis plots")
         return
-    
+
     strategies = sorted(df_reordered['strategy'].unique())
-    
+
     # -----------------------------------------------------------------
-    # Bandwidth Reduction
+    # All boxplot sections: (imp_col, title_template, subdir, filename_template)
     # -----------------------------------------------------------------
-    if 'bandwidth_improvement' in df_reordered.columns:
-        bw_dir = reorder_dir / "bandwidth"
-        bw_dir.mkdir(parents=True, exist_ok=True)
-        
-        for perm_type in df_reordered['perm_type'].unique():
-            df_pt = df_reordered[df_reordered['perm_type'] == perm_type]
-            pu.boxplot_by_category(
-                df_pt, 'strategy', 'bandwidth_improvement',
-                bw_dir / f"bandwidth_reduction_{perm_type}.png",
-                title=f"Bandwidth Reduction (Original / Reordered) - {perm_type}",
-                order=[s for s in strategies if s in df_pt['strategy'].unique()],
-                baseline=1.0,
-                log_y=True
-            )
-        
-        # Avg bandwidth improvement
-        if 'bandwidth_avg_improvement' in df_reordered.columns:
-            for perm_type in df_reordered['perm_type'].unique():
-                df_pt = df_reordered[df_reordered['perm_type'] == perm_type]
-                pu.boxplot_by_category(
-                    df_pt, 'strategy', 'bandwidth_avg_improvement',
-                    bw_dir / f"bandwidth_avg_reduction_{perm_type}.png",
-                    title=f"Avg Bandwidth Reduction (Original / Reordered) - {perm_type}",
-                    order=[s for s in strategies if s in df_pt['strategy'].unique()],
-                    baseline=1.0,
-                    log_y=True
-                )
-    
-    # -----------------------------------------------------------------
-    # Density Improvement
-    # -----------------------------------------------------------------
-    dens_dir = reorder_dir / "density"
-    dens_dir.mkdir(parents=True, exist_ok=True)
-    
+    boxplot_specs = [
+        ('bandwidth_improvement',
+         "Bandwidth Reduction (Original / Reordered) - {perm_type}",
+         "bandwidth", "bandwidth_reduction_{perm_type}.png"),
+        ('bandwidth_avg_improvement',
+         "Avg Bandwidth Reduction (Original / Reordered) - {perm_type}",
+         "bandwidth", "bandwidth_avg_reduction_{perm_type}.png"),
+    ]
+
     for bs in [4, 8, 16, 32, 64, 128]:
-        imp_col = f'density_improvement_{bs}'
-        if imp_col not in df_reordered.columns:
-            continue
-        
-        for perm_type in df_reordered['perm_type'].unique():
-            df_pt = df_reordered[df_reordered['perm_type'] == perm_type]
-            pu.boxplot_by_category(
-                df_pt, 'strategy', imp_col,
-                dens_dir / f"density_improvement_bs{bs}_{perm_type}.png",
-                title=f"Density Improvement (BS {bs}) - {perm_type}",
-                order=[s for s in strategies if s in df_pt['strategy'].unique()],
-                baseline=1.0,
-                log_y=True
-            )
-    
-    # -----------------------------------------------------------------
-    # Blocks Per Row Improvement
-    # -----------------------------------------------------------------
-    blocks_dir = reorder_dir / "blocks_per_row"
-    blocks_dir.mkdir(parents=True, exist_ok=True)
-    
+        boxplot_specs.append((
+            f'density_improvement_{bs}',
+            f"Density Improvement (BS {bs})" + " - {perm_type}",
+            "density", f"density_improvement_bs{bs}_{{perm_type}}.png"))
+
     for bs in [4, 8, 16, 32, 64, 128]:
         for prefix, name in [('avg', 'Avg'), ('max', 'Max')]:
-            imp_col = f'{prefix}_blocks_per_row_improvement_{bs}'
-            if imp_col not in df_reordered.columns:
-                continue
-            
-            for perm_type in df_reordered['perm_type'].unique():
-                df_pt = df_reordered[df_reordered['perm_type'] == perm_type]
-                pu.boxplot_by_category(
-                    df_pt, 'strategy', imp_col,
-                    blocks_dir / f"{prefix}_blocks_per_row_improvement_bs{bs}_{perm_type}.png",
-                    title=f"{name} Blocks/Row Reduction (BS {bs}) - {perm_type}",
-                    order=[s for s in strategies if s in df_pt['strategy'].unique()],
-                    baseline=1.0,
-                    log_y=True
-                )
-    
-    # -----------------------------------------------------------------
-    # Locality Improvement
-    # -----------------------------------------------------------------
-    loc_dir = reorder_dir / "locality"
-    loc_dir.mkdir(parents=True, exist_ok=True)
-    
+            boxplot_specs.append((
+                f'{prefix}_blocks_per_row_improvement_{bs}',
+                f"{name} Blocks/Row Reduction (BS {bs})" + " - {perm_type}",
+                "blocks_per_row",
+                f"{prefix}_blocks_per_row_improvement_bs{bs}_{{perm_type}}.png"))
+
     for imp_col, name in [
         ('row_spread_improvement', 'Row Spread Reduction'),
         ('max_row_spread_improvement', 'Max Row Spread Reduction'),
         ('col_spread_improvement', 'Col Spread Reduction'),
         ('max_col_spread_improvement', 'Max Col Spread Reduction'),
-        ('vertical_adjacency_improvement', 'Vertical Adjacency Improvement')
+        ('vertical_adjacency_improvement', 'Vertical Adjacency Improvement'),
     ]:
-        if imp_col not in df_reordered.columns:
-            continue
-        
-        for perm_type in df_reordered['perm_type'].unique():
-            df_pt = df_reordered[df_reordered['perm_type'] == perm_type]
-            pu.boxplot_by_category(
-                df_pt, 'strategy', imp_col,
-                loc_dir / f"{imp_col}_{perm_type}.png",
-                title=f"{name} - {perm_type}",
-                order=[s for s in strategies if s in df_pt['strategy'].unique()],
-                baseline=1.0,
-                log_y=True
-            )
+        boxplot_specs.append((
+            imp_col, name + " - {perm_type}",
+            "locality", f"{imp_col}_{{perm_type}}.png"))
+
+    for imp_col, title_template, subdir, filename_template in boxplot_specs:
+        output_dir = reorder_dir / subdir
+        output_dir.mkdir(parents=True, exist_ok=True)
+        _boxplot_for_perm_types(
+            df_reordered, strategies, imp_col,
+            title_template, output_dir, filename_template)
 
 
 def main():
@@ -585,8 +467,8 @@ def main():
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     
-    # Set style
-    sns.set_theme(style="whitegrid")
+    # Set professional publication style
+    pu.set_professional_style()
     
     # -----------------------------------------------------------------
     # 1. Load Data

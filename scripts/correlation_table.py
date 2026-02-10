@@ -116,49 +116,14 @@ BLOCK_DENSITY_METRICS = [f'block_density_{bs}' for bs in BLOCK_SIZES]
 
 
 # =============================================================================
-# Data Loading and Processing
+# Helpers
 # =============================================================================
 
-def load_and_process_data(ops_path, analysis_path):
-    """Load and merge operations and analysis data."""
-    df_op = pd.read_csv(ops_path)
-    df_analysis = pd.read_csv(analysis_path)
-
-    # Normalize keys
-    for df in [df_op, df_analysis]:
-        df['perm'] = df['perm'].fillna('None').astype(str)
-        df['perm_type'] = df['perm_type'].fillna('UNKNOWN').astype(str)
-        df['matrix'] = df['matrix'].astype(str)
-
-    # Merge
-    df = pd.merge(df_op, df_analysis, on=['matrix', 'perm', 'perm_type'], how='left')
-
-    # Ensure n_cols exists
-    if 'n_cols' in df.columns:
-        df['n_cols'] = pd.to_numeric(df['n_cols'], errors='coerce').fillna(32)
-    else:
-        df['n_cols'] = 32
-
-    # Calculate GFLOPS
-    df['gflops'] = (2 * df['nnz'] * df['n_cols']) / (df['time_operation_ms'] * 1e-3) / 1e9
-
-    # Create kernel_id
-    def get_kernel_id(row):
-        algo = row['algo']
-        algo = re.sub(r'_(NO_REORDER|ROW|SYMMETRIC|ASYMMETRIC)', '', algo)
-        if pd.notnull(row.get('block_size')) and row['block_size'] > 0:
-            return f"{algo}_bs{int(row['block_size'])}"
-        return algo
-
-    df['kernel_id'] = df.apply(get_kernel_id, axis=1)
-
-    # Add relative metrics
-    if 'bandwidth_max' in df.columns and 'rows' in df.columns:
-        df['rel_bandwidth'] = df['bandwidth_max'] / df['rows']
-    if 'locality_avg_row_spread' in df.columns and 'cols' in df.columns:
-        df['rel_row_spread'] = df['locality_avg_row_spread'] / df['cols']
-
-    return df
+def _ordered_kernels(df, kernel_names):
+    """Return kernel IDs in kernel_names order, falling back to alphabetical."""
+    all_kernels = sorted(df['kernel_id'].unique())
+    kernels = [k for k in kernel_names.keys() if k in all_kernels]
+    return kernels if kernels else all_kernels
 
 
 def compute_correlations(df, n_cols, metrics, kernels=None):
@@ -217,9 +182,8 @@ def compute_correlations(df, n_cols, metrics, kernels=None):
 
 def _multiline_header(name):
     """Wrap a metric name into a \\shortstack with up to 3 lines for compact headers."""
-    import re as _re
     # Special case: names ending with a $...$ block (e.g. 'Block Density $32{\times}32$')
-    m = _re.match(r'^(.+?)\s+(\$.*\$)$', name)
+    m = re.match(r'^(.+?)\s+(\$.*\$)$', name)
     if m:
         prefix = m.group(1)
         suffix = m.group(2)
@@ -328,169 +292,89 @@ def _build_metric_legend(metrics, metric_names, metric_full_names):
     return ', '.join(parts) + '.'
 
 
-def generate_all_tables(df, output_dir, metrics=None, kernel_names=None, 
+def _generate_corr_table_pair(corr_df, metrics, kernel_names, metric_names,
+                               output_dir, caption_tpl, label_prefix,
+                               filename_prefix, n_cols_int,
+                               metric_full_names=None):
+    """Generate Kendall tau and Pearson r LaTeX tables for one n_cols value."""
+    for corr_type, corr_name in [('tau', r"Kendall's $\tau$"),
+                                  ('pearson', r"Pearson's $r$ (on log values)")]:
+        caption = caption_tpl.format(corr_display=corr_name)
+        label = f"tab:{label_prefix}_{corr_type}_ncols_{n_cols_int}"
+
+        latex = correlation_to_latex(
+            corr_df, metrics, kernel_names, metric_names,
+            corr_type=corr_type, caption=caption, label=label,
+            metric_full_names=metric_full_names)
+
+        out_path = output_dir / f"{filename_prefix}_{corr_type}_ncols_{n_cols_int}.tex"
+        with open(out_path, 'w') as f:
+            f.write(latex)
+        print(f"Saved: {out_path}")
+
+
+def generate_all_tables(df, output_dir, metrics=None, kernel_names=None,
                         metric_names=None):
-    """Generate LaTeX tables for all n_cols values.
-    
-    Creates separate tables for Kendall's tau and Pearson's r correlations.
-    
-    Args:
-        df: Processed DataFrame
-        output_dir: Directory to save .tex files
-        metrics: List of metrics to include (default: METRICS)
-        kernel_names: Dict for kernel display names (default: KERNEL_NAMES)
-        metric_names: Dict for metric display names (default: METRIC_NAMES)
-    """
+    """Generate LaTeX correlation tables (tau + Pearson) for all n_cols values."""
     if metrics is None:
         metrics = METRICS
     if kernel_names is None:
         kernel_names = KERNEL_NAMES
     if metric_names is None:
         metric_names = METRIC_NAMES
-    
+
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Get kernels in the order defined by KERNEL_NAMES, or all if not defined
-    all_kernels = sorted(df['kernel_id'].unique())
-    kernels = [k for k in kernel_names.keys() if k in all_kernels]
-    if not kernels:
-        kernels = all_kernels
-    
-    n_cols_values = sorted(df['n_cols'].unique())
-    
-    for n_cols in n_cols_values:
+    kernels = _ordered_kernels(df, kernel_names)
+
+    for n_cols in sorted(df['n_cols'].unique()):
         n_cols_int = int(n_cols)
-        
-        # Count unique (matrix, perm, perm_type) combinations for this n_cols
         df_nc = df[df['n_cols'] == n_cols]
         n_matrices = df_nc[['matrix', 'perm', 'perm_type']].drop_duplicates().shape[0]
-        
         corr_df = compute_correlations(df, n_cols, metrics, kernels)
-        
-        # Generate Kendall's tau table
-        caption_tau = (f"Kendall's $\\tau$ correlation between metrics and SpMM GFLOPS ($n_{{cols}} = {n_cols_int}$). "
-                       f"Correlation is calculated across matrices in SuiteSparse and all their reorderings, "
-                       f"for a total of {n_matrices:,} configurations.")
-        label_tau = f"tab:correlation_tau_ncols_{n_cols_int}"
-        
-        latex_tau = correlation_to_latex(
+
+        caption_tpl = (
+            "{{corr_display}} correlation between metrics and SpMM GFLOPS "
+            f"($n_{{{{cols}}}} = {n_cols_int}$). "
+            f"Correlation is calculated across matrices in SuiteSparse and all "
+            f"their reorderings, for a total of {n_matrices:,} configurations.")
+
+        _generate_corr_table_pair(
             corr_df, metrics, kernel_names, metric_names,
-            corr_type='tau', caption=caption_tau, label=label_tau,
-            metric_full_names=METRIC_FULL_NAMES
-        )
-        
-        output_path_tau = output_dir / f"correlation_tau_ncols_{n_cols_int}.tex"
-        with open(output_path_tau, 'w') as f:
-            f.write(latex_tau)
-        print(f"Saved: {output_path_tau}")
-        
-        # Generate Pearson's r table
-        caption_pearson = (f"Pearson's $r$ correlation (on log values) between metrics and SpMM GFLOPS ($n_{{cols}} = {n_cols_int}$). "
-                           f"Correlation is calculated across matrices in SuiteSparse and all their reorderings, "
-                           f"for a total of {n_matrices:,} configurations.")
-        label_pearson = f"tab:correlation_pearson_ncols_{n_cols_int}"
-        
-        latex_pearson = correlation_to_latex(
-            corr_df, metrics, kernel_names, metric_names,
-            corr_type='pearson', caption=caption_pearson, label=label_pearson,
-            metric_full_names=METRIC_FULL_NAMES
-        )
-        
-        output_path_pearson = output_dir / f"correlation_pearson_ncols_{n_cols_int}.tex"
-        with open(output_path_pearson, 'w') as f:
-            f.write(latex_pearson)
-        print(f"Saved: {output_path_pearson}")
+            output_dir, caption_tpl, 'correlation', 'correlation',
+            n_cols_int, metric_full_names=METRIC_FULL_NAMES)
 
 
 def generate_blocksize_tables(df, output_dir, kernel_names=None):
-    """Generate LaTeX tables for block density correlations across block sizes.
-    
-    Creates separate tables for Kendall's tau and Pearson's r showing how 
-    block density at different block sizes correlates with GFLOPS for each kernel.
-    
-    Args:
-        df: Processed DataFrame
-        output_dir: Directory to save .tex files
-        kernel_names: Dict for kernel display names (default: KERNEL_NAMES)
-    """
+    """Generate LaTeX block-density correlation tables (tau + Pearson) for all n_cols."""
     if kernel_names is None:
         kernel_names = KERNEL_NAMES
-    
+
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Get kernels in the order defined by KERNEL_NAMES, or all if not defined
-    all_kernels = sorted(df['kernel_id'].unique())
-    kernels = [k for k in kernel_names.keys() if k in all_kernels]
-    if not kernels:
-        kernels = all_kernels
-    
-    n_cols_values = sorted(df['n_cols'].unique())
-    
-    for n_cols in n_cols_values:
+    kernels = _ordered_kernels(df, kernel_names)
+
+    for n_cols in sorted(df['n_cols'].unique()):
         n_cols_int = int(n_cols)
-        
-        # Count unique (matrix, perm, perm_type) combinations for this n_cols
         df_nc = df[df['n_cols'] == n_cols]
         n_matrices = df_nc[['matrix', 'perm', 'perm_type']].drop_duplicates().shape[0]
-        
         corr_df = compute_correlations(df, n_cols, BLOCK_DENSITY_METRICS, kernels)
-        
-        # Generate Kendall's tau table
-        caption_tau = (f"Kendall's $\\tau$ correlation between block density and SpMM GFLOPS across block sizes ($n_{{cols}} = {n_cols_int}$). "
-                       f"Correlation is calculated across matrices in SuiteSparse and all their reorderings, "
-                       f"for a total of {n_matrices:,} configurations.")
-        label_tau = f"tab:blocksize_tau_ncols_{n_cols_int}"
-        
-        latex_tau = correlation_to_latex(
+
+        caption_tpl = (
+            "{{corr_display}} correlation between block density and SpMM GFLOPS "
+            f"across block sizes ($n_{{{{cols}}}} = {n_cols_int}$). "
+            f"Correlation is calculated across matrices in SuiteSparse and all "
+            f"their reorderings, for a total of {n_matrices:,} configurations.")
+
+        _generate_corr_table_pair(
             corr_df, BLOCK_DENSITY_METRICS, kernel_names, BLOCK_DENSITY_METRIC_NAMES,
-            corr_type='tau', caption=caption_tau, label=label_tau,
-            metric_full_names=METRIC_FULL_NAMES
-        )
-        
-        output_path_tau = output_dir / f"blocksize_tau_ncols_{n_cols_int}.tex"
-        with open(output_path_tau, 'w') as f:
-            f.write(latex_tau)
-        print(f"Saved: {output_path_tau}")
-        
-        # Generate Pearson's r table
-        caption_pearson = (f"Pearson's $r$ correlation (on log values) between block density and SpMM GFLOPS across block sizes ($n_{{cols}} = {n_cols_int}$). "
-                           f"Correlation is calculated across matrices in SuiteSparse and all their reorderings, "
-                           f"for a total of {n_matrices:,} configurations.")
-        label_pearson = f"tab:blocksize_pearson_ncols_{n_cols_int}"
-        
-        latex_pearson = correlation_to_latex(
-            corr_df, BLOCK_DENSITY_METRICS, kernel_names, BLOCK_DENSITY_METRIC_NAMES,
-            corr_type='pearson', caption=caption_pearson, label=label_pearson,
-            metric_full_names=METRIC_FULL_NAMES
-        )
-        
-        output_path_pearson = output_dir / f"blocksize_pearson_ncols_{n_cols_int}.tex"
-        with open(output_path_pearson, 'w') as f:
-            f.write(latex_pearson)
-        print(f"Saved: {output_path_pearson}")
+            output_dir, caption_tpl, 'blocksize', 'blocksize',
+            n_cols_int, metric_full_names=METRIC_FULL_NAMES)
 
 
 # =============================================================================
 # Median Structural Improvement Ratio Tables
 # =============================================================================
-
-def load_analysis_data(analysis_path):
-    """Load analysis data and add derived metrics (rel_bandwidth, rel_row_spread)."""
-    df = pd.read_csv(analysis_path)
-    df['perm'] = df['perm'].fillna('None').astype(str)
-    df['perm_type'] = df['perm_type'].fillna('UNKNOWN').astype(str)
-    df['matrix'] = df['matrix'].astype(str)
-
-    # Add relative metrics
-    if 'bandwidth_max' in df.columns and 'rows' in df.columns:
-        df['rel_bandwidth'] = df['bandwidth_max'] / df['rows']
-    if 'locality_avg_row_spread' in df.columns and 'cols' in df.columns:
-        df['rel_row_spread'] = df['locality_avg_row_spread'] / df['cols']
-
-    return df
-
 
 def compute_improvement_ratios(df_analysis, metrics=None):
     """Compute per-(matrix, perm, perm_type) improvement ratios vs the original.
@@ -594,17 +478,26 @@ def improvement_to_latex(median_df, metrics, perm_names, caption=None, label=Non
     return '\n'.join(lines)
 
 
+def _write_improvement_table(imp_df, imp_cols, used_metrics, perm_names,
+                              ordered_perms, caption, label, out_path):
+    """Compute medians, sort by perm order, and write one improvement table."""
+    median_df = imp_df.groupby('perm')[imp_cols].median().reset_index()
+    perm_order = {p: i for i, p in enumerate(ordered_perms)}
+    median_df['_order'] = median_df['perm'].map(perm_order).fillna(999)
+    median_df = median_df.sort_values('_order').drop(columns='_order')
+
+    latex = improvement_to_latex(median_df, used_metrics, perm_names,
+                                  caption=caption, label=label)
+    with open(out_path, 'w') as f:
+        f.write(latex)
+    print(f"Saved: {out_path}")
+
+
 def generate_improvement_tables(df_analysis, output_dir, metrics=None,
                                 perm_names=None):
     """Generate LaTeX tables of median structural improvement ratios.
 
-    Creates one table per perm_type (SYMMETRIC, ROW).
-
-    Args:
-        df_analysis: raw analysis DataFrame (from load_analysis_data).
-        output_dir: directory for .tex output.
-        metrics: list of metric keys (default: enabled METRICS).
-        perm_names: display-name dict (default: PERM_NAMES).
+    Creates one table per perm_type plus a combined table.
     """
     if metrics is None:
         metrics = METRICS
@@ -615,7 +508,6 @@ def generate_improvement_tables(df_analysis, output_dir, metrics=None,
     output_dir.mkdir(parents=True, exist_ok=True)
 
     imp_df, used_metrics = compute_improvement_ratios(df_analysis, metrics)
-
     if imp_df.empty:
         print("No improvement data to generate tables.")
         return
@@ -623,58 +515,25 @@ def generate_improvement_tables(df_analysis, output_dir, metrics=None,
     # Determine perm order from PERM_NAMES (or alphabetical fallback)
     all_perms = sorted(imp_df['perm'].unique())
     ordered_perms = [p for p in perm_names.keys() if p in all_perms]
-    remaining = [p for p in all_perms if p not in ordered_perms]
-    ordered_perms += remaining
+    ordered_perms += [p for p in all_perms if p not in ordered_perms]
 
     n_matrices = df_analysis[df_analysis['perm'] == 'None']['matrix'].nunique()
-
     imp_cols = [f'{m}_imp' for m in used_metrics]
 
-    for perm_type in sorted(imp_df['perm_type'].unique()):
-        df_pt = imp_df[imp_df['perm_type'] == perm_type]
+    # Per perm_type tables + combined ("both")
+    table_specs = [(pt, imp_df[imp_df['perm_type'] == pt])
+                   for pt in sorted(imp_df['perm_type'].unique())]
+    table_specs.append(('both', imp_df))
 
-        median_df = df_pt.groupby('perm')[imp_cols].median().reset_index()
-
-        # Sort by PERM_NAMES order
-        perm_order = {p: i for i, p in enumerate(ordered_perms)}
-        median_df['_order'] = median_df['perm'].map(perm_order).fillna(999)
-        median_df = median_df.sort_values('_order').drop(columns='_order')
-
+    for tag, df_subset in table_specs:
+        ptype_label = f"{tag} permutation" if tag != 'both' else "all permutation types"
         caption = (f"Median structural improvement ratio per reordering algorithm "
-                   f"({perm_type} permutation, {n_matrices} matrices). "
+                   f"({ptype_label}, {n_matrices} matrices). "
                    f"Values $>1$ indicate improvement over the original ordering.")
-        label = f"tab:improvement_{perm_type.lower()}"
-
-        latex = improvement_to_latex(
-            median_df, used_metrics, perm_names,
-            caption=caption, label=label
-        )
-
-        out_path = output_dir / f"improvement_{perm_type.lower()}.tex"
-        with open(out_path, 'w') as f:
-            f.write(latex)
-        print(f"Saved: {out_path}")
-
-    # Combined table with both symmetric and row reorderings
-    median_df_both = imp_df.groupby('perm')[imp_cols].median().reset_index()
-    perm_order = {p: i for i, p in enumerate(ordered_perms)}
-    median_df_both['_order'] = median_df_both['perm'].map(perm_order).fillna(999)
-    median_df_both = median_df_both.sort_values('_order').drop(columns='_order')
-
-    caption_both = (f"Median structural improvement ratio per reordering algorithm "
-                    f"(all permutation types, {n_matrices} matrices). "
-                    f"Values $>1$ indicate improvement over the original ordering.")
-    label_both = "tab:improvement_both"
-
-    latex_both = improvement_to_latex(
-        median_df_both, used_metrics, perm_names,
-        caption=caption_both, label=label_both
-    )
-
-    out_path_both = output_dir / "improvement_both.tex"
-    with open(out_path_both, 'w') as f:
-        f.write(latex_both)
-    print(f"Saved: {out_path_both}")
+        _write_improvement_table(
+            df_subset, imp_cols, used_metrics, perm_names, ordered_perms,
+            caption=caption, label=f"tab:improvement_{tag.lower()}",
+            out_path=output_dir / f"improvement_{tag.lower()}.tex")
 
 
 # =============================================================================
@@ -730,33 +589,26 @@ def main():
     args = parse_args()
 
     # ------------------------------------------------------------------
-    # Load & filter data using the same pipeline as plot.py
+    # Load, filter, and add derived columns (single pipeline)
     # ------------------------------------------------------------------
     print("Loading data...")
-    df_merged, df_analysis = pu.load_data(args.operations, args.analysis)
+    df, df_analysis = pu.load_data(args.operations, args.analysis)
 
     print("\nApplying filters...")
-    df_merged, df_analysis = pu.apply_filters(
-        df_merged, df_analysis,
+    df, df_analysis = pu.apply_filters(
+        df, df_analysis,
         matrices_list_path=args.matrices_list,
         one_per_family=args.one_per_family,
         square_only=True,
     )
-    print(f"After filtering: {len(df_merged)} operation rows, "
+    print(f"After filtering: {len(df)} operation rows, "
           f"{len(df_analysis)} analysis rows")
 
-    # Add derived columns needed by correlation tables
-    df = load_and_process_data(args.operations, args.analysis)
-    # Keep only filtered matrices
-    keep_matrices = df_merged['matrix'].unique()
-    df = df[df['matrix'].isin(keep_matrices)]
-    print(f"Merged+filtered: {len(df)} rows")
-
-    # Add derived metrics to analysis df for improvement tables
-    if 'bandwidth_max' in df_analysis.columns and 'rows' in df_analysis.columns:
-        df_analysis['rel_bandwidth'] = df_analysis['bandwidth_max'] / df_analysis['rows']
-    if 'locality_avg_row_spread' in df_analysis.columns and 'cols' in df_analysis.columns:
-        df_analysis['rel_row_spread'] = df_analysis['locality_avg_row_spread'] / df_analysis['cols']
+    # Add gflops, kernel_id, and relative metrics for correlation tables
+    df = pu.add_base_metrics(df)
+    df = pu.add_relative_metrics(df)
+    # Add relative metrics to analysis df for improvement tables
+    df_analysis = pu.add_relative_metrics(df_analysis)
 
     # ------------------------------------------------------------------
     # Generate tables
