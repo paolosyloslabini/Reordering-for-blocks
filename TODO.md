@@ -22,3 +22,5 @@ improve titles to look good in paper (too small now)
 review tables captions.
 
 better looking plots (especially nicer axess)
+
+Axes span equal for similar plots

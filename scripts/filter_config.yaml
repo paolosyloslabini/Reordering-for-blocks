@@ -1,0 +1,37 @@
+# ===========================================================================
+# Centralized Filter Configuration
+# ===========================================================================
+# All plotting and table scripts read this file.
+#
+# CLI flags (--one-per-family, --include-rectangular, etc.) are still
+# accepted but they OVERRIDE values from this file. When no CLI flag is
+# given, the value below is used.
+# ===========================================================================
+
+# ---- Data Paths -----------------------------------------------------------
+data:
+  operations_csv: "results/results_operations.csv"
+  analysis_csv: "results/results_analysis.csv"
+  matrices_list: "datasets/matrices_list_mtx.txt"
+
+# ---- Filtering ------------------------------------------------------------
+filters:
+  # Keep only one matrix per SuiteSparse family (reduces redundancy).
+  one_per_family: true
+
+  # Keep only square matrices (rows == cols).
+  square_only: true
+
+  # Minimum number of rows. Set to null to disable.
+  min_size: null
+
+  # Remove matrices whose original bandwidth is below this threshold
+  # (trivially banded). Set to null to disable.
+  min_bandwidth: 2          # e.g. 5
+
+  # Remove very sparse matrices where nnz < factor * rows.
+  # Set to null to disable.
+  max_sparsity_factor: 1       # 2
+
+  # Remove purely diagonal matrices (nnz == rows for square matrices).
+  filter_diagonal: true

@@ -16,103 +16,13 @@ import argparse
 # Allow importing plot_utils from the same directory
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import plot_utils as pu
+from settings import (
+    PERM_NAMES, KERNEL_NAMES, ALL_METRICS,
+    METRICS, METRIC_NAMES, METRIC_FULL_NAMES,
+    BLOCK_SIZES, BLOCK_DENSITY_METRIC_NAMES, BLOCK_DENSITY_METRICS,
+)
 
 warnings.filterwarnings('ignore')
-
-
-# =============================================================================
-# Display Name Dictionaries - Edit these to change table labels
-# =============================================================================
-
-# Reordering algorithm display names (row labels for improvement tables)
-PERM_NAMES = {
-    'SB_rcm':          'RCM',
-    'SB_amd':          'AMD',
-    'SB_metis':        'Metis',
-    'SB_patoh':        'PaToH',
-    'SB_rabbit':       'Rabbit',
-    'SB_gray':         'Gray',
-    'SB_degree':       'Degree',
-    'GROOT_reorder':   'GROOT',
-    'SPARTA_reorder':  'SPARTA',
-    'random1D':        'Random',
-}
-
-# Kernel display names (row labels)
-KERNEL_NAMES = {
-    'ASPT_SPMM': 'ASPT',
-    'CUSPARSE_SPMM_BSR_bs32': 'cuSP BSR',
-    'CUSPARSE_SPMM_CSR': 'cuSP CSR',
-    'DTC_SPMM': 'DTC',
-    'FLASHSPARSE_SPMM': 'FlashSP',
-    'SMAT_SPMM_bs32': 'SMAT',
-}
-
-# ---------------------------------------------------------------------------
-# All structural metrics: set 'enabled' to True/False to include/exclude.
-# 'name' is the short display name for column headers.
-# Edit this dictionary to choose which metrics appear in the correlation table.
-# ---------------------------------------------------------------------------
-ALL_METRICS = {
-    # --- Bandwidth ---
-    'bandwidth_max':                       {'name': 'BW',      'full_name': 'Bandwidth',                          'enabled': False, 'higher_is_better': False},
-    'bandwidth_avg':                       {'name': 'ABW',     'full_name': 'Average Bandwidth',                  'enabled': False, 'higher_is_better': False},
-    'rel_bandwidth':                       {'name': 'RBW',     'full_name': 'Relative Bandwidth',                 'enabled': True,  'higher_is_better': False},
-    # --- Row spread / locality ---
-    'locality_avg_row_spread':             {'name': 'ARS',     'full_name': 'Average Row Spread',                 'enabled': False, 'higher_is_better': False},
-    'locality_max_row_spread':             {'name': 'MRS',     'full_name': 'Maximum Row Spread',                 'enabled': False, 'higher_is_better': False},
-    'rel_row_spread':                      {'name': 'RRS',     'full_name': 'Relative Row Spread',                'enabled': True,  'higher_is_better': False},
-    # --- Column spread ---
-    'locality_avg_col_spread':             {'name': 'ACS',     'full_name': 'Average Column Spread',              'enabled': False, 'higher_is_better': False},
-    'locality_max_col_spread':             {'name': 'MCS',     'full_name': 'Maximum Column Spread',              'enabled': False, 'higher_is_better': False},
-    # --- Vertical adjacency ---
-    'locality_consecutive_vertical_pairs': {'name': 'CVP',     'full_name': 'Consecutive Vertical Pairs',         'enabled': False, 'higher_is_better': True},
-    'locality_vertical_adjacency_ratio':   {'name': 'VAR',     'full_name': 'Vertical Adjacency Ratio',           'enabled': True,  'higher_is_better': True},
-    # --- NNZ distribution ---
-    'locality_avg_nnz_per_row':            {'name': 'ANR',     'full_name': 'Average NNZ per Row',                'enabled': False, 'higher_is_better': None},
-    'locality_max_nnz_per_row':            {'name': 'MNR',     'full_name': 'Maximum NNZ per Row',                'enabled': False, 'higher_is_better': None},
-    'locality_num_empty_rows':             {'name': 'NER',     'full_name': 'Number of Empty Rows',               'enabled': False, 'higher_is_better': None},
-    'locality_num_empty_cols':             {'name': 'NEC',     'full_name': 'Number of Empty Columns',            'enabled': False, 'higher_is_better': None},
-    # --- Profile ---
-    'locality_profile':                    {'name': 'Prof',    'full_name': 'Profile',                            'enabled': False, 'higher_is_better': False},
-    # --- Overall density ---
-    'density':                             {'name': 'Dens',    'full_name': 'Density',                            'enabled': False, 'higher_is_better': None},
-    # --- Block density (per block size) ---
-    'block_density_4':                     {'name': 'BD4',     'full_name': 'Block Density $4{\\times}4$',         'enabled': False, 'higher_is_better': True},
-    'block_density_8':                     {'name': 'BD8',     'full_name': 'Block Density $8{\\times}8$',         'enabled': True,  'higher_is_better': True},
-    'block_density_16':                    {'name': 'BD16',    'full_name': 'Block Density $16{\\times}16$',       'enabled': False, 'higher_is_better': True},
-    'block_density_32':                    {'name': 'BD32',    'full_name': 'Block Density $32{\\times}32$',       'enabled': True,  'higher_is_better': True},
-    'block_density_64':                    {'name': 'BD64',    'full_name': 'Block Density $64{\\times}64$',       'enabled': False, 'higher_is_better': True},
-    'block_density_128':                   {'name': 'BD128',   'full_name': 'Block Density $128{\\times}128$',     'enabled': True,  'higher_is_better': True},
-    # --- Avg blocks per row (per block size) ---
-    'avg_blocks_per_row_4':                {'name': 'ABR4',    'full_name': 'Avg Blocks/Row $4{\\times}4$',        'enabled': False, 'higher_is_better': False},
-    'avg_blocks_per_row_8':                {'name': 'ABR8',    'full_name': 'Avg Blocks/Row $8{\\times}8$',        'enabled': False, 'higher_is_better': False},
-    'avg_blocks_per_row_16':               {'name': 'ABR16',   'full_name': 'Avg Blocks/Row $16{\\times}16$',      'enabled': False, 'higher_is_better': False},
-    'avg_blocks_per_row_32':               {'name': 'ABR32',   'full_name': 'Avg Blocks/Row $32{\\times}32$',      'enabled': False, 'higher_is_better': False},
-    'avg_blocks_per_row_64':               {'name': 'ABR64',   'full_name': 'Avg Blocks/Row $64{\\times}64$',      'enabled': False, 'higher_is_better': False},
-    'avg_blocks_per_row_128':              {'name': 'ABR128',  'full_name': 'Avg Blocks/Row $128{\\times}128$',    'enabled': False, 'higher_is_better': False},
-    # --- Max blocks per row (per block size) ---
-    'max_blocks_per_row_4':                {'name': 'MBR4',    'full_name': 'Max Blocks/Row $4{\\times}4$',        'enabled': False, 'higher_is_better': False},
-    'max_blocks_per_row_8':                {'name': 'MBR8',    'full_name': 'Max Blocks/Row $8{\\times}8$',        'enabled': False, 'higher_is_better': False},
-    'max_blocks_per_row_16':               {'name': 'MBR16',   'full_name': 'Max Blocks/Row $16{\\times}16$',      'enabled': False, 'higher_is_better': False},
-    'max_blocks_per_row_32':               {'name': 'MBR32',   'full_name': 'Max Blocks/Row $32{\\times}32$',      'enabled': False, 'higher_is_better': False},
-    'max_blocks_per_row_64':               {'name': 'MBR64',   'full_name': 'Max Blocks/Row $64{\\times}64$',      'enabled': False, 'higher_is_better': False},
-    'max_blocks_per_row_128':              {'name': 'MBR128',  'full_name': 'Max Blocks/Row $128{\\times}128$',    'enabled': False, 'higher_is_better': False},
-}
-
-# Derived lists from the dictionary (do not edit manually)
-METRICS = [k for k, v in ALL_METRICS.items() if v['enabled']]
-METRIC_NAMES = {k: v['name'] for k, v in ALL_METRICS.items()}
-METRIC_FULL_NAMES = {k: v['full_name'] for k, v in ALL_METRICS.items()}
-
-# Block sizes available for block density metrics
-BLOCK_SIZES = [4, 8, 16, 32, 64, 128]
-
-# Block density metric display names
-BLOCK_DENSITY_METRIC_NAMES = {f'block_density_{bs}': f'${bs}\\times{bs}$' for bs in BLOCK_SIZES}
-
-# Block density metrics in order
-BLOCK_DENSITY_METRICS = [f'block_density_{bs}' for bs in BLOCK_SIZES]
 
 
 # =============================================================================
@@ -545,32 +455,35 @@ def parse_args():
         description="Generate correlation tables as LaTeX files"
     )
     parser.add_argument(
-        "--operations", 
-        default="results/results_operations.csv",
-        help="Path to operations CSV"
-    )
-    parser.add_argument(
-        "--analysis", 
-        default="results/results_analysis.csv",
-        help="Path to analysis CSV"
-    )
-    parser.add_argument(
         "--output", 
         default="plots/correlation_tables",
         help="Output directory for .tex files"
     )
+    # Filter config (all filtering is driven by filter_config.yaml;
+    # these flags *override* settings in the config file)
     parser.add_argument(
-        "--matrices-list",
-        default="datasets/matrices_list_mtx.txt",
-        help="Path to matrices list (for --one-per-family filter)"
+        "--filter-config", default=None,
+        help="Path to filter_config.yaml (default: scripts/filter_config.yaml)"
     )
     parser.add_argument(
-        "--one-per-family", action="store_true", default=True,
-        help="Keep only one matrix per SuiteSparse family (default: True)"
+        "--operations", default=None,
+        help="Override operations CSV path from config"
+    )
+    parser.add_argument(
+        "--analysis", default=None,
+        help="Override analysis CSV path from config"
+    )
+    parser.add_argument(
+        "--matrices-list", default=None,
+        help="Override matrices list path from config"
+    )
+    parser.add_argument(
+        "--one-per-family", action="store_true", default=None,
+        help="Override: enable one-per-family filter"
     )
     parser.add_argument(
         "--no-one-per-family", action="store_false", dest="one_per_family",
-        help="Disable one-per-family filtering"
+        help="Override: disable one-per-family filter"
     )
     parser.add_argument(
         "--blocksize-only",
@@ -591,18 +504,17 @@ def main():
     # ------------------------------------------------------------------
     # Load, filter, and add derived columns (single pipeline)
     # ------------------------------------------------------------------
-    print("Loading data...")
-    df, df_analysis = pu.load_data(args.operations, args.analysis)
+    cli_overrides = {
+        'operations_csv': args.operations,
+        'analysis_csv': args.analysis,
+        'matrices_list': args.matrices_list,
+        'one_per_family': args.one_per_family,
+    }
 
-    print("\nApplying filters...")
-    df, df_analysis = pu.apply_filters(
-        df, df_analysis,
-        matrices_list_path=args.matrices_list,
-        one_per_family=args.one_per_family,
-        square_only=True,
+    df, df_analysis, _cfg = pu.load_and_filter_data(
+        config_path=args.filter_config,
+        cli_overrides=cli_overrides,
     )
-    print(f"After filtering: {len(df)} operation rows, "
-          f"{len(df_analysis)} analysis rows")
 
     # Add gflops, kernel_id, and relative metrics for correlation tables
     df = pu.add_base_metrics(df)

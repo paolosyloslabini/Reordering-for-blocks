@@ -20,16 +20,27 @@ import plot_utils as pu
 def parse_args():
     parser = argparse.ArgumentParser(description="Generate plots from analysis results.")
     
-    # Input/Output
-    parser.add_argument("--operations", default="results/results_operations.csv")
-    parser.add_argument("--analysis", default="results/results_analysis.csv")
+    # Output
     parser.add_argument("--out", default="plots", help="Output directory")
     
-    # Filtering options
-    parser.add_argument("--one-per-family", action="store_true")
-    parser.add_argument("--matrices-list", default="datasets/matrices_list_mtx.txt")
-    parser.add_argument("--include-rectangular", action="store_true")
-    parser.add_argument("--min-size", type=int, default=None)
+    # Filter config (all filtering is driven by filter_config.yaml;
+    # these flags *override* settings in the config file)
+    parser.add_argument("--filter-config", default=None,
+                        help="Path to filter_config.yaml (default: scripts/filter_config.yaml)")
+    parser.add_argument("--operations", default=None,
+                        help="Override operations CSV path from config")
+    parser.add_argument("--analysis", default=None,
+                        help="Override analysis CSV path from config")
+    parser.add_argument("--matrices-list", default=None,
+                        help="Override matrices list path from config")
+    parser.add_argument("--one-per-family", action="store_true", default=None,
+                        help="Override: enable one-per-family filter")
+    parser.add_argument("--no-one-per-family", action="store_false", dest="one_per_family",
+                        help="Override: disable one-per-family filter")
+    parser.add_argument("--include-rectangular", action="store_true", default=None,
+                        help="Override: include rectangular matrices")
+    parser.add_argument("--min-size", type=int, default=None,
+                        help="Override: minimum matrix size (rows)")
     
     # Plot selection
     parser.add_argument("--only-reorder-analysis", action="store_true")
@@ -471,27 +482,26 @@ def main():
     pu.set_professional_style()
     
     # -----------------------------------------------------------------
-    # 1. Load Data
+    # 1. Load & Filter Data (single pipeline from filter_config.yaml)
     # -----------------------------------------------------------------
-    print("Loading data...")
-    df, df_analysis = pu.load_data(args.operations, args.analysis)
-    
-    # -----------------------------------------------------------------
-    # 2. Apply Filters
-    # -----------------------------------------------------------------
-    print("\nApplying filters...")
-    df, df_analysis = pu.apply_filters(
-        df, df_analysis,
-        matrices_list_path=args.matrices_list,
-        one_per_family=args.one_per_family,
-        square_only=not args.include_rectangular,
-        min_size=args.min_size
+    cli_overrides = {
+        'operations_csv': args.operations,
+        'analysis_csv': args.analysis,
+        'matrices_list': args.matrices_list,
+        'one_per_family': args.one_per_family,
+        'min_size': args.min_size,
+    }
+    # --include-rectangular means square_only=False
+    if args.include_rectangular is not None:
+        cli_overrides['square_only'] = not args.include_rectangular
+
+    df, df_analysis, _cfg = pu.load_and_filter_data(
+        config_path=args.filter_config,
+        cli_overrides=cli_overrides,
     )
     
-    print(f"After filtering: {len(df)} operation rows, {len(df_analysis)} analysis rows")
-    
     # -----------------------------------------------------------------
-    # 3. Process Data (add all derived columns)
+    # 2. Process Data (add all derived columns)
     # -----------------------------------------------------------------
     print("\nProcessing data...")
     df = pu.prepare_full_dataframe(df)
@@ -500,7 +510,7 @@ def main():
     print(f"Unique n_cols: {sorted(df['n_cols'].unique())}")
     
     # -----------------------------------------------------------------
-    # 4. Generate Plots
+    # 3. Generate Plots
     # -----------------------------------------------------------------
     
     # Kernel performance plots
