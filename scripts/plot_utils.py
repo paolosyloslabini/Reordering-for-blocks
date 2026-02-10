@@ -16,18 +16,13 @@ from pathlib import Path
 from scipy import stats
 import re
 import sys
+import yaml
+from settings import PALETTE, METRIC_CONFIG, KEEP_FULL_FAMILIES
 
 
 # =============================================================================
 # Professional Plot Style
 # =============================================================================
-
-# Colorblind-friendly palette for categorical data (Tol's muted scheme)
-PALETTE = [
-    '#332288', '#88CCEE', '#44AA99', '#117733',
-    '#999933', '#DDCC77', '#CC6677', '#882255',
-    '#AA4499', '#DDDDDD',
-]
 
 def set_professional_style():
     """Configure matplotlib/seaborn for publication-quality plots.
@@ -66,35 +61,6 @@ def set_professional_style():
         'ytick.major.width': 0.8,
     })
 
-
-# =============================================================================
-# Metric Configuration
-# =============================================================================
-
-METRIC_CONFIG = {
-    # Performance metrics
-    'gflops': {'display': 'GFLOPS', 'log_scale': True},
-    'speedup': {'display': 'Speedup', 'log_scale': False},
-    
-    # Bandwidth metrics
-    'bandwidth_max': {'display': 'Bandwidth', 'log_scale': True},
-    'rel_bandwidth': {'display': 'Relative Bandwidth', 'log_scale': True},
-    'bandwidth_improvement': {'display': 'Bandwidth Reduction', 'log_scale': False},
-    
-    # Density metrics (block sizes added dynamically)
-    'density': {'display': 'Density', 'log_scale': True},
-    
-    # Locality metrics  
-    'rel_row_spread': {'display': 'Relative Row Spread', 'log_scale': True},
-    'locality_vertical_adjacency_ratio': {'display': 'Vertical Adjacency Ratio', 'log_scale': False},
-    'row_spread_improvement': {'display': 'Row Spread Reduction', 'log_scale': False},
-    'col_spread_improvement': {'display': 'Col Spread Reduction', 'log_scale': False},
-    'vertical_adjacency_improvement': {'display': 'Vertical Adjacency Improvement', 'log_scale': False},
-}
-
-for bs in [4, 8, 16, 32, 64, 128]:
-    METRIC_CONFIG[f'block_density_{bs}'] = {'display': f'Block Density (BS {bs})', 'log_scale': True}
-    METRIC_CONFIG[f'density_improvement_{bs}'] = {'display': f'Density Improvement (BS {bs})', 'log_scale': False}
 
 
 def get_display_name(col):
@@ -350,18 +316,7 @@ def prepare_full_dataframe(df):
 # Filtering Functions
 # =============================================================================
 
-# Families to keep fully (not reduce to one representative)
-# These contain diverse, non-duplicate matrices commonly used in sparse matrix research
-KEEP_FULL_FAMILIES = [
-    'DIMACS10',    # Graph challenge benchmarks
-    'SNAP',        # Stanford social/web networks
-    'LAW',         # Web graphs (Laboratory for Web Algorithmics)
-    'Newman',      # Network science graphs
-    'Gleich',      # Web and social network graphs
-    'Janna',       # Large-scale FEM problems
-    'Norris',      # Structural engineering benchmarks
-    'vanHeukelum', # Cage graphs, unique structure
-]
+
 
 
 def load_matrix_family_map(matrices_list_path):
@@ -498,10 +453,63 @@ def _filter_matrices_from_both(df, df_analysis, matrices_to_remove, reason):
     return df, df_analysis
 
 
+# =============================================================================
+# Filter Config Loading
+# =============================================================================
+
+# Default path to the centralized filter config (next to this file)
+_DEFAULT_FILTER_CONFIG = Path(__file__).resolve().parent / 'filter_config.yaml'
+
+
+def load_filter_config(config_path=None):
+    """Load the centralized filter configuration from a YAML file.
+
+    Args:
+        config_path: Path to YAML config. Defaults to
+                     ``scripts/filter_config.yaml`` next to this module.
+
+    Returns:
+        dict with keys ``data`` and ``filters``.
+    """
+    if config_path is None:
+        config_path = _DEFAULT_FILTER_CONFIG
+    config_path = Path(config_path)
+
+    if not config_path.exists():
+        print(f"Warning: filter config {config_path} not found. Using built-in defaults.",
+              file=sys.stderr)
+        return {
+            'data': {
+                'operations_csv': 'results/results_operations.csv',
+                'analysis_csv': 'results/results_analysis.csv',
+                'matrices_list': 'datasets/matrices_list_mtx.txt',
+            },
+            'filters': {
+                'one_per_family': True,
+                'square_only': True,
+                'min_size': None,
+                'min_bandwidth': None,
+                'max_sparsity_factor': 2,
+                'filter_diagonal': True,
+            }
+        }
+
+    with open(config_path, 'r') as f:
+        cfg = yaml.safe_load(f)
+    return cfg
+
+
 def apply_filters(df, df_analysis, matrices_list_path=None,
                   one_per_family=True, square_only=True,
-                  min_size=None, filter_trivial=False, filter_sparse=True):
+                  min_size=None, min_bandwidth=None,
+                  max_sparsity_factor=None, filter_diagonal=True):
     """Apply all configured filters to both DataFrames.
+
+    Args:
+        min_bandwidth: Remove matrices whose original bandwidth is below
+            this value.  ``None`` disables the filter.
+        max_sparsity_factor: Remove matrices where
+            ``nnz < factor * rows``.  ``None`` disables the filter.
 
     Returns:
         Tuple of (filtered_df, filtered_df_analysis)
@@ -510,34 +518,36 @@ def apply_filters(df, df_analysis, matrices_list_path=None,
         df = filter_one_per_family(df, matrices_list_path)
         df_analysis = filter_one_per_family(df_analysis, matrices_list_path)
 
-    if filter_trivial:
-        trivial = filter_trivial_matrices(pd.DataFrame(), df_analysis)  # get list only
+    if min_bandwidth is not None:
         if 'bandwidth_max' in df_analysis.columns:
             trivial_matrices = df_analysis[
                 (df_analysis['perm'] == 'None') &
-                (df_analysis['bandwidth_max'] < 5)
+                (df_analysis['bandwidth_max'] < min_bandwidth)
             ]['matrix'].unique()
             df, df_analysis = _filter_matrices_from_both(
-                df, df_analysis, trivial_matrices, "trivial matrices")
+                df, df_analysis, trivial_matrices,
+                f"trivial matrices (bandwidth < {min_bandwidth})")
 
-    if filter_sparse:
+    if max_sparsity_factor is not None:
         if 'nnz' in df_analysis.columns and 'rows' in df_analysis.columns:
             sparse_matrices = df_analysis[
                 (df_analysis['perm'] == 'None') &
-                (df_analysis['nnz'] < 2 * df_analysis['rows'])
+                (df_analysis['nnz'] < max_sparsity_factor * df_analysis['rows'])
             ]['matrix'].unique()
             df, df_analysis = _filter_matrices_from_both(
-                df, df_analysis, sparse_matrices, "very sparse matrices")
+                df, df_analysis, sparse_matrices,
+                f"very sparse matrices (nnz < {max_sparsity_factor}*rows)")
 
     # Filter purely diagonal matrices
-    if 'nnz' in df_analysis.columns and 'rows' in df_analysis.columns:
-        diagonal_matrices = df_analysis[
-            (df_analysis['perm'] == 'None') &
-            (df_analysis['rows'] == df_analysis['cols']) &
-            (df_analysis['nnz'] == df_analysis['rows'])
-        ]['matrix'].unique()
-        df, df_analysis = _filter_matrices_from_both(
-            df, df_analysis, diagonal_matrices, "purely diagonal matrices")
+    if filter_diagonal:
+        if 'nnz' in df_analysis.columns and 'rows' in df_analysis.columns:
+            diagonal_matrices = df_analysis[
+                (df_analysis['perm'] == 'None') &
+                (df_analysis['rows'] == df_analysis['cols']) &
+                (df_analysis['nnz'] == df_analysis['rows'])
+            ]['matrix'].unique()
+            df, df_analysis = _filter_matrices_from_both(
+                df, df_analysis, diagonal_matrices, "purely diagonal matrices")
 
     if square_only:
         df = filter_square_only(df)
@@ -548,6 +558,63 @@ def apply_filters(df, df_analysis, matrices_list_path=None,
         df_analysis = filter_min_size(df_analysis, min_size)
 
     return df, df_analysis
+
+
+def load_and_filter_data(config_path=None, cli_overrides=None):
+    """Single entry-point: load CSVs, apply every filter from config.
+
+    This is the **only** function that plotting / table scripts should call
+    to obtain their DataFrames.  It guarantees that all consumers work on
+    identically filtered data.
+
+    Args:
+        config_path: Path to ``filter_config.yaml``. ``None`` -> default.
+        cli_overrides: Optional dict of overrides (e.g. from argparse).
+            Only keys whose values are not ``None`` override the config.
+            Recognised keys mirror the YAML ``filters`` section plus
+            ``operations_csv``, ``analysis_csv``, ``matrices_list``.
+
+    Returns:
+        Tuple of (filtered_operations_df, filtered_analysis_df, cfg)
+    """
+    cfg = load_filter_config(config_path)
+    data_cfg = dict(cfg.get('data', {}))
+    filt_cfg = dict(cfg.get('filters', {}))
+
+    # Apply CLI overrides --------------------------------------------------
+    if cli_overrides:
+        for key in ('operations_csv', 'analysis_csv', 'matrices_list'):
+            if cli_overrides.get(key) is not None:
+                data_cfg[key] = cli_overrides[key]
+        for key in filt_cfg:
+            if key in cli_overrides and cli_overrides[key] is not None:
+                filt_cfg[key] = cli_overrides[key]
+
+    # Load -----------------------------------------------------------------
+    print("Loading data...")
+    df, df_analysis = load_data(
+        data_cfg.get('operations_csv', 'results/results_operations.csv'),
+        data_cfg.get('analysis_csv', 'results/results_analysis.csv'),
+    )
+
+    # Filter ---------------------------------------------------------------
+    print("\nApplying filters (from filter_config.yaml)...")
+    df, df_analysis = apply_filters(
+        df, df_analysis,
+        matrices_list_path=data_cfg.get('matrices_list',
+                                        'datasets/matrices_list_mtx.txt'),
+        one_per_family=filt_cfg.get('one_per_family', True),
+        square_only=filt_cfg.get('square_only', True),
+        min_size=filt_cfg.get('min_size'),
+        min_bandwidth=filt_cfg.get('min_bandwidth'),
+        max_sparsity_factor=filt_cfg.get('max_sparsity_factor'),
+        filter_diagonal=filt_cfg.get('filter_diagonal', True),
+    )
+
+    print(f"After filtering: {len(df)} operation rows, "
+          f"{len(df_analysis)} analysis rows")
+
+    return df, df_analysis, cfg
 
 
 # =============================================================================
