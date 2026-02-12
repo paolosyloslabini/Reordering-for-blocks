@@ -4,7 +4,6 @@ variables:
     - random1D
     - SB_degree
     - SB_gray
-    - SB_slashburn
     - SPARTA_reorder
 
 preprocess: |

@@ -10,6 +10,8 @@ variables:
     - SB_rabbit
     - SB_patoh
     - SB_slashburn
+    - GROOT_reorder
+    - SPARTA_reorder
   block_size:
     - 32
   n_cols:
@@ -45,9 +47,12 @@ jobs:
 
       - tag: "DTC_SPMM_SYMMETRIC"
         preprocess: |
-          module purge
-          module load CUDA/
-          module load GCC/13.3.0
-          source ~/.conda/envs/DTCSpMM/bin/activate
+          source operators/dtc_preprocess.sh
           mtx_name=$(basename {mtx} .mtx)
         command: "python3 operators/dtc_spmm.py {mtx} --perm perms/{perm}/$mtx_name.perm --perm-type SYMMETRIC --n-cols {n_cols}"
+
+      - tag: "FLASHSPARSE_SPMM_SYMMETRIC"
+        preprocess: |
+          source operators/flashsparse_preprocess.sh
+          mtx_name=$(basename {mtx} .mtx)
+        command: "python3 operators/flashsparse_spmm.py {mtx} --perm perms/{perm}/$mtx_name.perm --perm-type SYMMETRIC --n-cols {n_cols}"

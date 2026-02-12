@@ -4,7 +4,6 @@ variables:
     - random1D
     - SB_degree
     - SB_gray
-    - SB_slashburn
     - SPARTA_reorder
   block_size:
     - 32
@@ -28,12 +27,15 @@ jobs:
 
       - tag: "DTC_SPMM_ROW"
         preprocess: |
-          module purge
-          module load CUDA/
-          module load GCC/13.3.0
-          source ~/.conda/envs/DTCSpMM/bin/activate
+          source operators/dtc_preprocess.sh
           mtx_name=$(basename {mtx} .mtx)
         command: "python3 operators/dtc_spmm.py {mtx} --perm perms/{perm}/$mtx_name.perm --perm-type ROW --n-cols {n_cols}"
+
+      - tag: "FLASHSPARSE_SPMM_ROW"
+        preprocess: |
+          source operators/flashsparse_preprocess.sh
+          mtx_name=$(basename {mtx} .mtx)
+        command: "python3 operators/flashsparse_spmm.py {mtx} --perm perms/{perm}/$mtx_name.perm --perm-type ROW --n-cols {n_cols}"
 
 #      - tag: "CUSPARSE_SPMV_BSR_ROW"
 #        command: "python3 operators/cusparse_bsr_spmv.py {mtx} --perm perms/{perm}/$mtx_name.perm --blocksize {block_size} --perm-type ROW"
