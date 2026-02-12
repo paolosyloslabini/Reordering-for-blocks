@@ -10,9 +10,11 @@ Random scrambling experiments
 
 Reordering-time analysis and break-even analysis. 
 
-Re-run GROOT, METIS, PATOH
+Re-run GROOT
 
-Optimize or job parse results: too slow!
+run geometric mean.
+
+per-matrix study: are the same matrices easy/hard? calculate avg improvement over all reordering (geomean) + variance of the logs. plot avg-variance scatterplot.
 
 
 # STYLE
@@ -21,6 +23,6 @@ improve titles to look good in paper (too small now)
 
 review tables captions.
 
-better looking plots (especially nicer axess)
+better looking plots (especially nicer axes in log plots)
 
 Axes span equal for similar plots
