@@ -17,7 +17,7 @@ from collections import defaultdict
 import pandas as pd
 
 from plot_utils import load_filter_config, apply_filters
-from settings import KERNEL_NAMES, PERM_NAMES
+from settings import KERNEL_NAMES, get_perm_display
 
 
 # ── helpers ─────────────────────────────────────────────────────────────────
@@ -37,7 +37,7 @@ def _display_kernel(kid: str) -> str:
 def _display_perm(perm: str) -> str:
     if perm == 'None':
         return 'None (original)'
-    return PERM_NAMES.get(perm, perm)
+    return get_perm_display(perm)
 
 
 # ── main ────────────────────────────────────────────────────────────────────

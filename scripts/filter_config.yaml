@@ -12,6 +12,7 @@
 data:
   operations_csv: "results/results_operations.csv"
   analysis_csv: "results/results_analysis.csv"
+  reordering_csv: "results/results_reordering.csv"
   matrices_list: "datasets/matrices_list_mtx.txt"
 
 # ---- Filtering ------------------------------------------------------------
@@ -31,7 +32,20 @@ filters:
 
   # Remove very sparse matrices where nnz < factor * rows.
   # Set to null to disable.
-  max_sparsity_factor: 1       # 2
+  max_sparsity_factor: 1.5       # 2
 
   # Remove purely diagonal matrices (nnz == rows for square matrices).
   filter_diagonal: true
+
+  # Families to keep fully (not reduce to one representative).
+  # These contain diverse, non-duplicate matrices commonly used in sparse
+  # matrix research. Set to [] to disable.
+  keep_full_families:
+    - DIMACS10     # Graph challenge benchmarks
+    - SNAP         # Stanford social/web networks
+    - LAW          # Web graphs (Laboratory for Web Algorithmics)
+    - Newman       # Network science graphs
+    - Gleich       # Web and social network graphs
+    - Janna        # Large-scale FEM problems
+    - Norris       # Structural engineering benchmarks
+    - vanHeukelum  # Cage graphs, unique structure

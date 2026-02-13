@@ -1,10 +1,5 @@
 """
-Shared settings and display-name dictionaries.
-
-All configurable look-up tables (palette, metric configs, kernel/perm display
-names, etc.) live here so that every script in ``scripts/`` imports from a
-single source of truth.
-"""
+Shared settings and display-name dictionaries for plots and tables."""
 
 # =============================================================================
 # Professional Plot Style - Palette
@@ -14,57 +9,205 @@ single source of truth.
 PALETTE = [
     '#332288', '#88CCEE', '#44AA99', '#117733',
     '#999933', '#DDCC77', '#CC6677', '#882255',
-    '#AA4499', '#DDDDDD',
+    '#AA4499', '#DDDDDD', '#000000',
 ]
 
 # =============================================================================
-# Metric Configuration (used by plot_utils for display names / log scale)
+# Metric Configuration – single source of truth
+# =============================================================================
+# Every metric column lives here.  Each entry can carry:
+#   display          – full human-readable name (plot labels, LaTeX captions)
+#   short            – compact abbreviation for table column headers
+#                      (defaults to *display* when omitted)
+#   log_scale        – whether to use log scale on plot axes (default False)
+#   enabled          – include in default correlation tables (default False)
+#   higher_is_better – direction of improvement; True / False / None (N/A)
+#
+# Add or remove metrics here; every other module derives its look-ups from
+# this single dict.
 # =============================================================================
 
-METRIC_CONFIG = {
-    # Performance metrics
-    'gflops': {'display': 'GFLOPS', 'log_scale': True},
-    'speedup': {'display': 'Speedup', 'log_scale': False},
-
-    # Bandwidth metrics
-    'bandwidth_max': {'display': 'Bandwidth', 'log_scale': True},
-    'rel_bandwidth': {'display': 'Relative Bandwidth', 'log_scale': True},
-    'bandwidth_improvement': {'display': 'Bandwidth Reduction', 'log_scale': False},
-
-    # Density metrics (block sizes added dynamically below)
-    'density': {'display': 'Density', 'log_scale': True},
-
-    # Locality metrics
-    'rel_row_spread': {'display': 'Relative Row Spread', 'log_scale': True},
-    'locality_vertical_adjacency_ratio': {'display': 'Vertical Adjacency Ratio', 'log_scale': False},
-    'row_spread_improvement': {'display': 'Row Spread Reduction', 'log_scale': False},
-    'col_spread_improvement': {'display': 'Col Spread Reduction', 'log_scale': False},
-    'vertical_adjacency_improvement': {'display': 'Vertical Adjacency Improvement', 'log_scale': False},
-}
-
-# Block sizes available for block density metrics
 BLOCK_SIZES = [4, 8, 16, 32, 64, 128]
 
-for _bs in BLOCK_SIZES:
-    METRIC_CONFIG[f'block_density_{_bs}'] = {'display': f'Block Density (BS {_bs})', 'log_scale': True}
-    METRIC_CONFIG[f'density_improvement_{_bs}'] = {'display': f'Density Improvement (BS {_bs})', 'log_scale': False}
+ALL_METRICS = {
+    # ── Performance ──────────────────────────────────────────────────────
+    'gflops':  {'display': 'GFLOPS',  'log_scale': True},
+    'speedup': {'display': 'Speedup'},
 
-# =============================================================================
-# Reordering Algorithm Display Names
-# =============================================================================
+    # ── Bandwidth ────────────────────────────────────────────────────────
+    'bandwidth_max': {
+        'display': 'Bandwidth', 'short': 'BW',
+        'log_scale': True, 'higher_is_better': False,
+    },
+    'bandwidth_avg': {
+        'display': 'Average Bandwidth', 'short': 'ABW',
+        'higher_is_better': False,
+    },
+    'rel_bandwidth': {
+        'display': 'Relative Bandwidth', 'short': 'RBW',
+        'log_scale': True, 'enabled': True, 'higher_is_better': False,
+    },
+    'bandwidth_improvement': {
+        'display': 'Bandwidth Reduction',
+    },
 
-PERM_NAMES = {
-    'SB_rcm':          'RCM',
-    'SB_amd':          'AMD',
-    'SB_metis':        'Metis',
-    'SB_patoh':        'PaToH',
-    'SB_rabbit':       'Rabbit',
-    'SB_gray':         'Gray',
-    'SB_degree':       'Degree',
-    'GROOT_reorder':   'GROOT',
-    'SPARTA_reorder':  'SPARTA',
-    'random1D':        'Random',
+    # ── Row spread / locality ────────────────────────────────────────────
+    'locality_avg_row_spread': {
+        'display': 'Average Row Spread', 'short': 'ARS',
+        'higher_is_better': False,
+    },
+    'locality_max_row_spread': {
+        'display': 'Maximum Row Spread', 'short': 'MRS',
+        'higher_is_better': False,
+    },
+    'rel_row_spread': {
+        'display': 'Relative Row Spread', 'short': 'RRS',
+        'log_scale': True, 'enabled': True, 'higher_is_better': False,
+    },
+    'row_spread_improvement':  {'display': 'Row Spread Reduction'},
+    'col_spread_improvement':  {'display': 'Col Spread Reduction'},
+
+    # ── Column spread ────────────────────────────────────────────────────
+    'locality_avg_col_spread': {
+        'display': 'Average Column Spread', 'short': 'ACS',
+        'higher_is_better': False,
+    },
+    'locality_max_col_spread': {
+        'display': 'Maximum Column Spread', 'short': 'MCS',
+        'higher_is_better': False,
+    },
+
+    # ── Vertical adjacency ───────────────────────────────────────────────
+    'locality_consecutive_vertical_pairs': {
+        'display': 'Consecutive Vertical Pairs', 'short': 'CVP',
+        'higher_is_better': True,
+    },
+    'locality_vertical_adjacency_ratio': {
+        'display': 'Vertical Adjacency Ratio', 'short': 'VAR',
+        'enabled': True, 'higher_is_better': True,
+    },
+    'vertical_adjacency_improvement': {
+        'display': 'Vertical Adjacency Improvement',
+    },
+
+    # ── NNZ distribution ─────────────────────────────────────────────────
+    'locality_avg_nnz_per_row': {
+        'display': 'Average NNZ per Row', 'short': 'ANR',
+    },
+    'locality_max_nnz_per_row': {
+        'display': 'Maximum NNZ per Row', 'short': 'MNR',
+    },
+    'locality_num_empty_rows': {
+        'display': 'Number of Empty Rows', 'short': 'NER',
+    },
+    'locality_num_empty_cols': {
+        'display': 'Number of Empty Columns', 'short': 'NEC',
+    },
+
+    # ── Profile ──────────────────────────────────────────────────────────
+    'locality_profile': {
+        'display': 'Profile', 'short': 'Prof',
+        'higher_is_better': False,
+    },
+
+    # ── Overall density ──────────────────────────────────────────────────
+    'density': {
+        'display': 'Density', 'short': 'Dens',
+        'log_scale': True,
+    },
 }
+
+# ── Block-size-dependent metrics (generated from BLOCK_SIZES) ────────────
+_BLOCK_DENSITY_ENABLED = {8, 32, 128}  # which block densities show in tables
+
+for _bs in BLOCK_SIZES:
+    ALL_METRICS[f'block_density_{_bs}'] = {
+        'display': f'Block Density ${_bs}{{\\times}}{_bs}$',
+        'short':   f'BD{_bs}',
+        'log_scale': True,
+        'enabled': _bs in _BLOCK_DENSITY_ENABLED,
+        'higher_is_better': True,
+    }
+    ALL_METRICS[f'density_improvement_{_bs}'] = {
+        'display': f'Density Improvement (BS {_bs})',
+    }
+    for _pfx, _nm in [('avg', 'Avg'), ('max', 'Max')]:
+        ALL_METRICS[f'{_pfx}_blocks_per_row_{_bs}'] = {
+            'display': f'{_nm} Blocks/Row ${_bs}{{\\times}}{_bs}$',
+            'short':   f'{"A" if _pfx == "avg" else "M"}BR{_bs}',
+            'higher_is_better': False,
+        }
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Metric helpers – use these instead of reaching into ALL_METRICS manually
+# ─────────────────────────────────────────────────────────────────────────
+
+def get_metric_display(col: str) -> str:
+    """Full human-readable name for *col*, or a formatted fallback."""
+    m = ALL_METRICS.get(col)
+    if m:
+        return m['display']
+    return col.replace('_', ' ').title()
+
+
+def get_metric_short(col: str) -> str:
+    """Short abbreviation for *col* (falls back to display name)."""
+    m = ALL_METRICS.get(col)
+    if m:
+        return m.get('short', m['display'])
+    return col
+
+
+def use_log_scale(col: str) -> bool:
+    """Whether *col* should default to a log axis."""
+    return ALL_METRICS.get(col, {}).get('log_scale', False)
+
+
+def enabled_metrics() -> list[str]:
+    """Metric keys with ``enabled=True`` (default correlation-table set)."""
+    return [k for k, v in ALL_METRICS.items() if v.get('enabled')]
+
+
+def block_density_metrics() -> list[str]:
+    """Ordered list of ``block_density_<bs>`` keys."""
+    return [f'block_density_{bs}' for bs in BLOCK_SIZES]
+
+
+# =============================================================================
+# Reordering Algorithms – single source of truth
+# =============================================================================
+
+PERMS = {
+    'SB_amd':          {'display': 'AMD',       'color': PALETTE[0]},
+    'SB_degree':       {'display': 'Degree',    'color': PALETTE[1]},
+    'GROOT_reorder':   {'display': 'GROOT',    'color': PALETTE[2]},
+    'SB_gray':         {'display': 'Gray',     'color': PALETTE[3]},
+    'SB_metis':        {'display': 'Metis',    'color': PALETTE[4]},
+    'SB_patoh':        {'display': 'PaToH',    'color': PALETTE[5]},
+    'SB_rabbit':       {'display': 'Rabbit',   'color': PALETTE[6]},
+    'random1D':        {'display': 'Random',   'color': PALETTE[7]},
+    'SB_rcm':          {'display': 'RCM',      'color': PALETTE[8]},
+    'SB_slashburn':    {'display': 'SlashBurn', 'color': PALETTE[9]},
+    'SPARTA_reorder':  {'display': 'SPARTA',   'color': PALETTE[10]},
+}
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Perm helpers
+# ─────────────────────────────────────────────────────────────────────────
+
+def get_perm_display(perm: str) -> str:
+    """Display name for a raw perm id, or the id itself as fallback."""
+    p = PERMS.get(perm)
+    return p['display'] if p else perm
+
+
+def get_perm_color(perm: str) -> str:
+    """Color for a raw perm id, or dark grey as fallback."""
+    p = PERMS.get(perm)
+    return p['color'] if p else '#333333'
+
 
 # =============================================================================
 # Kernel Display Names
@@ -72,93 +215,13 @@ PERM_NAMES = {
 
 KERNEL_NAMES = {
     'ASPT_SPMM': 'ASPT',
-    'CUSPARSE_SPMM_BSR_bs32': 'cuSP BSR',
-    'CUSPARSE_SPMM_CSR': 'cuSP CSR',
-    'DTC_SPMM': 'DTC',
-    'FLASHSPARSE_SPMM': 'FlashSP',
+    'CUSPARSE_SPMM_BSR_bs32': 'cuSparse BSR',
+    'CUSPARSE_SPMM_CSR': 'cuSparse CSR',
+    'DTC_SPMM': 'DTC-Spmm',
+    'FLASHSPARSE_SPMM': 'FlashSparse',
     'SMAT_SPMM_bs32': 'SMAT',
 }
 
-# =============================================================================
-# All Structural Metrics (correlation_table)
-# ---------------------------------------------------------------------------
-# Set 'enabled' to True/False to include/exclude from correlation tables.
-# 'name' is the short display name for column headers.
-# 'full_name' is the long display name (used in LaTeX captions / legends).
-# 'higher_is_better' indicates the direction of improvement (None = N/A).
-# =============================================================================
 
-ALL_METRICS = {
-    # --- Bandwidth ---
-    'bandwidth_max':                       {'name': 'BW',      'full_name': 'Bandwidth',                          'enabled': False, 'higher_is_better': False},
-    'bandwidth_avg':                       {'name': 'ABW',     'full_name': 'Average Bandwidth',                  'enabled': False, 'higher_is_better': False},
-    'rel_bandwidth':                       {'name': 'RBW',     'full_name': 'Relative Bandwidth',                 'enabled': True,  'higher_is_better': False},
-    # --- Row spread / locality ---
-    'locality_avg_row_spread':             {'name': 'ARS',     'full_name': 'Average Row Spread',                 'enabled': False, 'higher_is_better': False},
-    'locality_max_row_spread':             {'name': 'MRS',     'full_name': 'Maximum Row Spread',                 'enabled': False, 'higher_is_better': False},
-    'rel_row_spread':                      {'name': 'RRS',     'full_name': 'Relative Row Spread',                'enabled': True,  'higher_is_better': False},
-    # --- Column spread ---
-    'locality_avg_col_spread':             {'name': 'ACS',     'full_name': 'Average Column Spread',              'enabled': False, 'higher_is_better': False},
-    'locality_max_col_spread':             {'name': 'MCS',     'full_name': 'Maximum Column Spread',              'enabled': False, 'higher_is_better': False},
-    # --- Vertical adjacency ---
-    'locality_consecutive_vertical_pairs': {'name': 'CVP',     'full_name': 'Consecutive Vertical Pairs',         'enabled': False, 'higher_is_better': True},
-    'locality_vertical_adjacency_ratio':   {'name': 'VAR',     'full_name': 'Vertical Adjacency Ratio',           'enabled': True,  'higher_is_better': True},
-    # --- NNZ distribution ---
-    'locality_avg_nnz_per_row':            {'name': 'ANR',     'full_name': 'Average NNZ per Row',                'enabled': False, 'higher_is_better': None},
-    'locality_max_nnz_per_row':            {'name': 'MNR',     'full_name': 'Maximum NNZ per Row',                'enabled': False, 'higher_is_better': None},
-    'locality_num_empty_rows':             {'name': 'NER',     'full_name': 'Number of Empty Rows',               'enabled': False, 'higher_is_better': None},
-    'locality_num_empty_cols':             {'name': 'NEC',     'full_name': 'Number of Empty Columns',            'enabled': False, 'higher_is_better': None},
-    # --- Profile ---
-    'locality_profile':                    {'name': 'Prof',    'full_name': 'Profile',                            'enabled': False, 'higher_is_better': False},
-    # --- Overall density ---
-    'density':                             {'name': 'Dens',    'full_name': 'Density',                            'enabled': False, 'higher_is_better': None},
-    # --- Block density (per block size) ---
-    'block_density_4':                     {'name': 'BD4',     'full_name': 'Block Density $4{\\times}4$',         'enabled': False, 'higher_is_better': True},
-    'block_density_8':                     {'name': 'BD8',     'full_name': 'Block Density $8{\\times}8$',         'enabled': True,  'higher_is_better': True},
-    'block_density_16':                    {'name': 'BD16',    'full_name': 'Block Density $16{\\times}16$',       'enabled': False, 'higher_is_better': True},
-    'block_density_32':                    {'name': 'BD32',    'full_name': 'Block Density $32{\\times}32$',       'enabled': True,  'higher_is_better': True},
-    'block_density_64':                    {'name': 'BD64',    'full_name': 'Block Density $64{\\times}64$',       'enabled': False, 'higher_is_better': True},
-    'block_density_128':                   {'name': 'BD128',   'full_name': 'Block Density $128{\\times}128$',     'enabled': True,  'higher_is_better': True},
-    # --- Avg blocks per row (per block size) ---
-    'avg_blocks_per_row_4':                {'name': 'ABR4',    'full_name': 'Avg Blocks/Row $4{\\times}4$',        'enabled': False, 'higher_is_better': False},
-    'avg_blocks_per_row_8':                {'name': 'ABR8',    'full_name': 'Avg Blocks/Row $8{\\times}8$',        'enabled': False, 'higher_is_better': False},
-    'avg_blocks_per_row_16':               {'name': 'ABR16',   'full_name': 'Avg Blocks/Row $16{\\times}16$',      'enabled': False, 'higher_is_better': False},
-    'avg_blocks_per_row_32':               {'name': 'ABR32',   'full_name': 'Avg Blocks/Row $32{\\times}32$',      'enabled': False, 'higher_is_better': False},
-    'avg_blocks_per_row_64':               {'name': 'ABR64',   'full_name': 'Avg Blocks/Row $64{\\times}64$',      'enabled': False, 'higher_is_better': False},
-    'avg_blocks_per_row_128':              {'name': 'ABR128',  'full_name': 'Avg Blocks/Row $128{\\times}128$',    'enabled': False, 'higher_is_better': False},
-    # --- Max blocks per row (per block size) ---
-    'max_blocks_per_row_4':                {'name': 'MBR4',    'full_name': 'Max Blocks/Row $4{\\times}4$',        'enabled': False, 'higher_is_better': False},
-    'max_blocks_per_row_8':                {'name': 'MBR8',    'full_name': 'Max Blocks/Row $8{\\times}8$',        'enabled': False, 'higher_is_better': False},
-    'max_blocks_per_row_16':               {'name': 'MBR16',   'full_name': 'Max Blocks/Row $16{\\times}16$',      'enabled': False, 'higher_is_better': False},
-    'max_blocks_per_row_32':               {'name': 'MBR32',   'full_name': 'Max Blocks/Row $32{\\times}32$',      'enabled': False, 'higher_is_better': False},
-    'max_blocks_per_row_64':               {'name': 'MBR64',   'full_name': 'Max Blocks/Row $64{\\times}64$',      'enabled': False, 'higher_is_better': False},
-    'max_blocks_per_row_128':              {'name': 'MBR128',  'full_name': 'Max Blocks/Row $128{\\times}128$',    'enabled': False, 'higher_is_better': False},
-}
 
-# Derived lists from ALL_METRICS (do not edit manually)
-METRICS = [k for k, v in ALL_METRICS.items() if v['enabled']]
-METRIC_NAMES = {k: v['name'] for k, v in ALL_METRICS.items()}
-METRIC_FULL_NAMES = {k: v['full_name'] for k, v in ALL_METRICS.items()}
 
-# Block density metric display names
-BLOCK_DENSITY_METRIC_NAMES = {f'block_density_{bs}': f'${bs}\\times{bs}$' for bs in BLOCK_SIZES}
-
-# Block density metrics in order
-BLOCK_DENSITY_METRICS = [f'block_density_{bs}' for bs in BLOCK_SIZES]
-
-# =============================================================================
-# Filtering Settings
-# =============================================================================
-
-# Families to keep fully (not reduce to one representative).
-# These contain diverse, non-duplicate matrices commonly used in sparse matrix research.
-KEEP_FULL_FAMILIES = [
-    'DIMACS10',    # Graph challenge benchmarks
-    'SNAP',        # Stanford social/web networks
-    'LAW',         # Web graphs (Laboratory for Web Algorithmics)
-    'Newman',      # Network science graphs
-    'Gleich',      # Web and social network graphs
-    'Janna',       # Large-scale FEM problems
-    'Norris',      # Structural engineering benchmarks
-    'vanHeukelum', # Cage graphs, unique structure
-]

@@ -21,6 +21,15 @@ DEFAULT_BLOCK_SIZE = 0
 # Pre-compile regex patterns for performance
 ANSI_ESCAPE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 TIMER_PATTERN = re.compile(r"<Timer>\[(.*?)\]\s+([0-9.]+)\s+ms")
+# GROOT uses a different timing output format
+GROOT_TIMER_PATTERN = re.compile(r"\[KNN_MST_DFS\]\s+Reordering time \(ms\):\s+([0-9.]+)")
+
+# Known perm job tags (not ANALYSIS_ and not SPMM)
+PERM_TAGS = {
+    'SB_amd', 'SB_degree', 'SB_gray', 'SB_rcm', 'SB_metis',
+    'SB_rabbit', 'SB_patoh', 'SB_slashburn',
+    'GROOT_reorder', 'SPARTA_reorder', 'random1D', 'random2D',
+}
 
 def safe_get_var(job, key, default, cast_type=str):
     """Safely extract a variable from job.variables with type casting."""
@@ -130,6 +139,59 @@ def parse_one_analysis_job(job):
         return None
 
 
+def parse_one_perm_job(job):
+    """Parse a single permutation-generation job. Returns a dict row or None."""
+    try:
+        mtx_path = safe_get_var(job, 'mtx', '')
+        matrix_name = get_matrix_name(mtx_path)
+        tag = job.tag
+
+        stdout = job.get_stdout()
+        if stdout is None:
+            return None
+
+        # Clean ANSI codes
+        clean = ANSI_ESCAPE.sub('', stdout) if ('\x1b' in stdout or '\x1B' in stdout) else stdout
+
+        time_reordering_ms = None
+        time_loading_ms = None
+
+        # Try standard <Timer> format (SPARSEBASE tools)
+        for match in TIMER_PATTERN.finditer(clean):
+            label = match.group(1)
+            value = float(match.group(2))
+            if label == 'reordering':
+                time_reordering_ms = value
+            elif label == 'loading':
+                time_loading_ms = value
+
+        # Try GROOT format
+        if time_reordering_ms is None:
+            groot_match = GROOT_TIMER_PATTERN.search(clean)
+            if groot_match:
+                time_reordering_ms = float(groot_match.group(1))
+
+        # Skip jobs that didn't produce any timing data
+        if time_reordering_ms is None:
+            return None
+
+        job_id = getattr(job, 'id', getattr(job, 'job_id', 'unknown'))
+
+        return {
+            'job_id': job_id,
+            'tag': tag,
+            'matrix': matrix_name,
+            'perm': tag,
+            'time_reordering_ms': time_reordering_ms,
+            'time_loading_ms': time_loading_ms,
+        }
+
+    except Exception as e:
+        job_id = getattr(job, 'id', getattr(job, 'job_id', 'unknown'))
+        print(f"Error parsing perm job {job_id}: {e}", file=sys.stderr)
+        return None
+
+
 def parse_one_operation_job(job):
     """Parse a single operation job. Returns a dict row or None."""
     try:
@@ -200,12 +262,15 @@ def main():
     # --- Single-pass job categorization ---
     analysis_jobs = []
     op_jobs = []
+    perm_jobs = []
     for j in all_jobs:
         tag = j.tag or ""
         if tag.startswith("ANALYSIS_"):
             analysis_jobs.append(j)
         elif "SPMM" in tag:
             op_jobs.append(j)
+        elif tag in PERM_TAGS:
+            perm_jobs.append(j)
 
     # --- 1. Process Analysis Jobs (parallel) ---
     print(f"Found {len(analysis_jobs)} analysis jobs.", file=sys.stderr)
@@ -253,8 +318,32 @@ def main():
     else:
         print("No operation results found.")
 
+    # --- 3. Process Permutation Jobs (parallel) ---
+    print(f"Found {len(perm_jobs)} permutation jobs.", file=sys.stderr)
+
+    t0 = time.perf_counter()
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        results = list(tqdm(
+            pool.map(parse_one_perm_job, perm_jobs, chunksize=256),
+            total=len(perm_jobs),
+            desc="Parsing Perm Jobs"
+        ))
+    perm_results = [r for r in results if r is not None]
+    t_perms = time.perf_counter() - t0
+    print(f"Perm parsing: {t_perms:.1f}s", file=sys.stderr)
+
+    # Export Reordering CSV
+    if perm_results:
+        df_perm = pd.DataFrame(perm_results)
+        out_file = out_dir / "results_reordering.csv"
+        df_perm.to_csv(out_file, index=False)
+        print(f"Exported {len(df_perm)} reordering rows to {out_file}")
+    else:
+        print("No permutation timing results found.")
+
     t_total = time.perf_counter() - t_total_start
-    print(f"\nTotal time: {t_total:.1f}s  (fetch: {t_fetch:.1f}s, analysis: {t_analysis:.1f}s, operations: {t_ops:.1f}s)",
+    print(f"\nTotal time: {t_total:.1f}s  (fetch: {t_fetch:.1f}s, analysis: {t_analysis:.1f}s, "
+          f"operations: {t_ops:.1f}s, perms: {t_perms:.1f}s)",
           file=sys.stderr)
 
 if __name__ == "__main__":

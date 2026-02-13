@@ -12,12 +12,17 @@ import numpy as np
 import seaborn as sns
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+from matplotlib.ticker import LogLocator, NullFormatter
 from pathlib import Path
 from scipy import stats
 import re
 import sys
 import yaml
-from settings import PALETTE, METRIC_CONFIG, KEEP_FULL_FAMILIES
+from settings import (
+    PALETTE, PERMS, ALL_METRICS,
+    get_metric_display, get_perm_display, get_perm_color,
+    use_log_scale,
+)
 
 
 # =============================================================================
@@ -34,12 +39,12 @@ def set_professional_style():
     mpl.rcParams.update({
         # Font
         'font.family': 'serif',
-        'font.size': 11,
-        'axes.titlesize': 13,
-        'axes.labelsize': 12,
-        'xtick.labelsize': 10,
-        'ytick.labelsize': 10,
-        'legend.fontsize': 10,
+        'font.size': 12,
+        'axes.titlesize': 17,
+        'axes.labelsize': 15,
+        'xtick.labelsize': 12,
+        'ytick.labelsize': 12,
+        'legend.fontsize': 12,
         # Lines & markers
         'lines.linewidth': 1.5,
         'lines.markersize': 5,
@@ -59,21 +64,47 @@ def set_professional_style():
         'ytick.direction': 'out',
         'xtick.major.width': 0.8,
         'ytick.major.width': 0.8,
+        'xtick.minor.visible': True,
+        'ytick.minor.visible': True,
+        'xtick.minor.width': 0.5,
+        'ytick.minor.width': 0.5,
     })
 
 
 
+def format_log_axes(ax, which='both'):
+    """Format log-scale axes with proper ticks and log-paper grid background.
+
+    Adds major ticks at powers of 10, minor ticks at intermediate values
+    (2, 3, …, 9 within each decade), and subtle minor gridlines to give the
+    characteristic 'log-paper' look.
+
+    Args:
+        ax: Matplotlib Axes object.
+        which: ``'x'``, ``'y'``, or ``'both'`` — which axes to format.
+    """
+    targets = []
+    if which in ('x', 'both') and ax.get_xscale() == 'log':
+        targets.append(ax.xaxis)
+    if which in ('y', 'both') and ax.get_yscale() == 'log':
+        targets.append(ax.yaxis)
+
+    for axis in targets:
+        # Major ticks: powers of 10 AND intermediate values (1, 2, 3, 5)
+        axis.set_major_locator(LogLocator(base=10, subs=[1.0, 2.0, 3.0, 5.0], numticks=30))
+        # Minor ticks: all other values within each decade
+        axis.set_minor_locator(
+            LogLocator(base=10, subs=np.arange(1, 10), numticks=100))
+        axis.set_minor_formatter(NullFormatter())
+
+    # Grid: prominent major lines, subtle minor lines ("log paper")
+    ax.grid(True, which='major', alpha=0.5, linewidth=0.8)
+    ax.grid(True, which='minor', alpha=0.15, linewidth=0.3)
+
+
 def get_display_name(col):
     """Get display name for a column, or format the column name if not configured."""
-    if col in METRIC_CONFIG:
-        return METRIC_CONFIG[col]['display']
-    # Format unknown columns: replace underscores, title case
-    return col.replace('_', ' ').title()
-
-
-def use_log_scale(col):
-    """Check if a column should use log scale."""
-    return METRIC_CONFIG.get(col, {}).get('log_scale', False)
+    return get_metric_display(col)
 
 
 # =============================================================================
@@ -146,8 +177,10 @@ def add_base_metrics(df):
 
     df['kernel_id'] = df.apply(get_kernel_id, axis=1)
     
-    # Strategy label
-    df['strategy'] = df['perm'].apply(lambda x: 'Original' if x == 'None' else str(x))
+    # Strategy label (use display names from settings)
+    df['strategy'] = df['perm'].apply(
+        lambda x: 'Original' if x == 'None' else get_perm_display(x)
+    )
     
     return df
 
@@ -345,7 +378,7 @@ def load_matrix_family_map(matrices_list_path):
 def filter_one_per_family(df, matrices_list_path, keep_full_families=None):
     """Filter DataFrame to keep only one matrix per family."""
     if keep_full_families is None:
-        keep_full_families = KEEP_FULL_FAMILIES
+        keep_full_families = load_filter_config().get('filters', {}).get('keep_full_families', [])
     
     matrix_to_family = load_matrix_family_map(matrices_list_path)
     
@@ -491,6 +524,7 @@ def load_filter_config(config_path=None):
                 'min_bandwidth': None,
                 'max_sparsity_factor': 2,
                 'filter_diagonal': True,
+                'keep_full_families': [],
             }
         }
 
@@ -502,7 +536,8 @@ def load_filter_config(config_path=None):
 def apply_filters(df, df_analysis, matrices_list_path=None,
                   one_per_family=True, square_only=True,
                   min_size=None, min_bandwidth=None,
-                  max_sparsity_factor=None, filter_diagonal=True):
+                  max_sparsity_factor=None, filter_diagonal=True,
+                  keep_full_families=None):
     """Apply all configured filters to both DataFrames.
 
     Args:
@@ -515,8 +550,8 @@ def apply_filters(df, df_analysis, matrices_list_path=None,
         Tuple of (filtered_df, filtered_df_analysis)
     """
     if one_per_family and matrices_list_path:
-        df = filter_one_per_family(df, matrices_list_path)
-        df_analysis = filter_one_per_family(df_analysis, matrices_list_path)
+        df = filter_one_per_family(df, matrices_list_path, keep_full_families)
+        df_analysis = filter_one_per_family(df_analysis, matrices_list_path, keep_full_families)
 
     if min_bandwidth is not None:
         if 'bandwidth_max' in df_analysis.columns:
@@ -609,6 +644,7 @@ def load_and_filter_data(config_path=None, cli_overrides=None):
         min_bandwidth=filt_cfg.get('min_bandwidth'),
         max_sparsity_factor=filt_cfg.get('max_sparsity_factor'),
         filter_diagonal=filt_cfg.get('filter_diagonal', True),
+        keep_full_families=filt_cfg.get('keep_full_families', []),
     )
 
     print(f"After filtering: {len(df)} operation rows, "
@@ -639,7 +675,7 @@ def scatter_with_correlation(df, x_col, y_col, output_path,
                               title=None, hue_col=None,
                               log_x=None, log_y=None,
                               show_correlation=True,
-                              figsize=(10, 8)):
+                              figsize=(12, 9)):
     """Create scatter plot with Kendall's Tau and Pearson correlations.
     
     Args:
@@ -693,8 +729,9 @@ def scatter_with_correlation(df, x_col, y_col, output_path,
     fig, ax = _setup_figure(figsize)
     
     if hue_col and hue_col in plot_df.columns:
+        pal = get_strategy_palette() if hue_col == 'strategy' else "Set2"
         sns.scatterplot(data=plot_df, x=x_col, y=y_col, hue=hue_col, 
-                        alpha=0.7, ax=ax, palette="Set2")
+                        alpha=0.7, ax=ax, palette=pal)
     else:
         sns.scatterplot(data=plot_df, x=x_col, y=y_col, alpha=0.7, ax=ax)
     
@@ -703,6 +740,12 @@ def scatter_with_correlation(df, x_col, y_col, output_path,
         ax.set_xscale('log')
     if log_y:
         ax.set_yscale('log')
+    
+    # Format log axes with proper ticks and grid
+    if log_x or log_y:
+        format_log_axes(ax)
+    else:
+        ax.grid(True, alpha=0.3)
     
     # Labels
     ax.set_xlabel(get_display_name(x_col))
@@ -715,7 +758,6 @@ def scatter_with_correlation(df, x_col, y_col, output_path,
         title += f"\nτ = {tau:.3f}, r = {pearson_r:.3f}"
     ax.set_title(title)
     
-    ax.grid(True, alpha=0.3)
     _save_figure(output_path)
 
 
@@ -724,6 +766,8 @@ def boxplot_by_category(df, x_col, y_col, output_path,
                          baseline=None, show_points=True,
                          clip_percentile=(1, 99),
                          log_y=False,
+                         ylim=None,
+                         palette=None,
                          figsize=(12, 8)):
     """Create boxplot with optional stripplot overlay.
     
@@ -738,6 +782,9 @@ def boxplot_by_category(df, x_col, y_col, output_path,
         show_points: Whether to overlay individual points
         clip_percentile: Tuple of (lower, upper) percentiles for clipping
         log_y: Whether to use log scale on y-axis
+        ylim: Tuple of (ymin, ymax) for y-axis limits (None for auto)
+        palette: Color palette dict {category: color}. When x_col is
+                 'strategy', defaults to ``get_strategy_palette()``.
         figsize: Figure size
     """
     plot_df = df.dropna(subset=[x_col, y_col]).copy()
@@ -761,6 +808,10 @@ def boxplot_by_category(df, x_col, y_col, output_path,
     
     fig, ax = _setup_figure(figsize)
     
+    # Resolve palette: use strategy colors when plotting by strategy
+    if palette is None and x_col == 'strategy':
+        palette = get_strategy_palette(order)
+    
     # Draw stripplot first if requested
     if show_points:
         sns.stripplot(data=plot_df, x=x_col, y=y_col, order=order,
@@ -768,7 +819,7 @@ def boxplot_by_category(df, x_col, y_col, output_path,
     
     # Draw boxplot
     sns.boxplot(data=plot_df, x=x_col, y=y_col, order=order,
-                showfliers=False, palette="Set2", width=0.6,
+                showfliers=False, palette=palette, width=0.6,
                 boxprops={'alpha': 0.6},
                 medianprops={'color': 'red', 'linewidth': 2},
                 ax=ax)
@@ -780,6 +831,16 @@ def boxplot_by_category(df, x_col, y_col, output_path,
     if log_y:
         ax.set_yscale('log')
     
+    # Set y-axis limits if specified
+    if ylim is not None:
+        ax.set_ylim(ylim)
+    
+    # Format axes (must be after scale and limits are set)
+    if log_y:
+        format_log_axes(ax, which='y')
+    else:
+        ax.grid(True, axis='y', alpha=0.3)
+    
     ax.set_xlabel(get_display_name(x_col))
     ax.set_ylabel(get_display_name(y_col))
     
@@ -790,7 +851,6 @@ def boxplot_by_category(df, x_col, y_col, output_path,
     ax.set_title(title)
     
     plt.xticks(rotation=45, ha='right')
-    ax.grid(True, axis='y', alpha=0.3)
     
     _save_figure(output_path)
 
@@ -864,6 +924,96 @@ def binned_bar_chart(df, bin_col, value_col, output_path,
     _save_figure(output_path)
 
 
+def binned_boxplot(df, bin_col, value_col, output_path,
+                    bins=None, labels=None,
+                    title=None, baseline=None,
+                    min_count=5,
+                    show_points=False,
+                    figsize=(10, 6)):
+    """Create boxplot showing distribution of values per bin.
+    
+    Args:
+        df: DataFrame
+        bin_col: Column to bin
+        value_col: Column to plot distribution for
+        output_path: Path to save figure
+        bins: Bin edges (default: [0, 0.5, 1.0, 2.0, 5.0, 10.0, 1000.0])
+        labels: Bin labels (default: ['<0.5x', '0.5-1x', '1-1.5x', '1.5-2x', '2-5x', '5-10x', '>10x'])
+        title: Plot title
+        baseline: Value for horizontal reference line
+        min_count: Minimum samples per bin to include
+        show_points: Whether to overlay individual points with stripplot
+        figsize: Figure size
+    """
+    if bins is None:
+        bins = [0, 0.5, 1.0, 1.5, 2.0, 5.0, 10.0, 1000.0]
+    if labels is None:
+        labels = ['<0.5x', '0.5-1x', '1-1.5x', '1.5-2x', '2-5x', '5-10x', '>10x']
+    
+    plot_df = df.dropna(subset=[bin_col, value_col]).copy()
+    
+    if plot_df.empty:
+        print(f"Skipping {output_path}: no data")
+        return
+    
+    # Create bins
+    plot_df['bin'] = pd.cut(plot_df[bin_col], bins=bins, labels=labels)
+    
+    # Filter bins with insufficient counts
+    bin_counts = plot_df['bin'].value_counts()
+    valid_bins = bin_counts[bin_counts >= min_count].index
+    plot_df = plot_df[plot_df['bin'].isin(valid_bins)]
+    
+    if plot_df.empty:
+        print(f"Skipping {output_path}: insufficient data per bin")
+        return
+    
+    # Get bin order and counts for annotation
+    bin_order = [label for label in labels if label in valid_bins]
+    
+    fig, ax = _setup_figure(figsize)
+    
+    # Draw stripplot first if requested
+    if show_points:
+        sns.stripplot(data=plot_df, x='bin', y=value_col, order=bin_order,
+                      color='black', alpha=0.4, jitter=0.25, size=3, ax=ax)
+    
+    # Draw boxplot
+    sns.boxplot(data=plot_df, x='bin', y=value_col, order=bin_order,
+                showfliers=False, palette="viridis", width=0.6,
+                boxprops={'alpha': 0.6},
+                medianprops={'color': 'red', 'linewidth': 2},
+                ax=ax)
+    
+    # Add count labels positioned above the top whisker of each box
+    for i, label in enumerate(bin_order):
+        count = bin_counts[label]
+        # Calculate the top whisker position (Q3 + 1.5*IQR)
+        bin_data = plot_df[plot_df['bin'] == label][value_col]
+        q1 = bin_data.quantile(0.25)
+        q3 = bin_data.quantile(0.75)
+        iqr = q3 - q1
+        top_whisker = q3 + 1.5 * iqr
+        # Use the maximum of top_whisker and actual max in the data (capped by whisker)
+        y_pos = min(top_whisker, bin_data.max())
+        ax.text(i, y_pos, f"n={int(count)}", 
+                ha='center', va='bottom', fontsize=9)
+    
+    if baseline is not None:
+        ax.axhline(baseline, color='red', linestyle='--', alpha=0.7)
+    
+    ax.set_xlabel(f"{get_display_name(bin_col)} Bin")
+    ax.set_ylabel(f"{get_display_name(value_col)}")
+    
+    if title is None:
+        title = f"{get_display_name(value_col)} Distribution by {get_display_name(bin_col)}"
+    ax.set_title(title)
+    
+    ax.grid(True, axis='y', alpha=0.3)
+    plt.xticks(rotation=45, ha='right')
+    _save_figure(output_path)
+
+
 def cdf_plot(df, value_col, output_path,
               hue_col=None, hue_order=None,
               title=None, baseline=None,
@@ -892,11 +1042,14 @@ def cdf_plot(df, value_col, output_path,
     
     if hue_col and hue_col in plot_df.columns:
         categories = hue_order if hue_order else sorted(plot_df[hue_col].unique())
+        strategy_pal = get_strategy_palette(categories) if hue_col == 'strategy' else {}
         for cat in categories:
             subset = plot_df[plot_df[hue_col] == cat]
             values = subset[value_col].sort_values()
             cdf_y = np.arange(1, len(values) + 1) / len(values)
-            ax.step(values, cdf_y, label=cat, where='post', linewidth=2)
+            color = strategy_pal.get(cat)
+            ax.step(values, cdf_y, label=cat, where='post', linewidth=2,
+                    **({"color": color} if color else {}))
         ax.legend(title=get_display_name(hue_col))
     else:
         values = plot_df[value_col].sort_values()
@@ -908,6 +1061,9 @@ def cdf_plot(df, value_col, output_path,
     
     if log_x:
         ax.set_xscale('log')
+        format_log_axes(ax, which='x')
+    else:
+        ax.grid(True, alpha=0.3)
     
     ax.set_xlabel(get_display_name(value_col))
     ax.set_ylabel('CDF')
@@ -916,7 +1072,6 @@ def cdf_plot(df, value_col, output_path,
         title = f"CDF of {get_display_name(value_col)}"
     ax.set_title(title)
     
-    ax.grid(True, alpha=0.3)
     _save_figure(output_path)
 
 
@@ -1002,12 +1157,33 @@ def correlation_heatmap(df, cols, output_path,
 # =============================================================================
 
 def get_strategy_order(df):
-    """Get standard order for strategies (Original first, then sorted)."""
-    strategies = df['strategy'].unique().tolist()
+    """Get standard order for strategies (Original first, then sorted).
+
+    The order follows ``PERMS`` definition order for known algorithms,
+    with any unknown strategies appended alphabetically.
+    """
+    strategies = set(df['strategy'].unique())
+    # Canonical order from settings
+    canonical = [p['display'] for p in PERMS.values() if p['display'] in strategies]
+    # Unknown strategies not in PERMS
+    extra = sorted(strategies - set(canonical) - {'Original'})
+    result = canonical + extra
     if 'Original' in strategies:
-        strategies.remove('Original')
-        return ['Original'] + sorted(strategies)
-    return sorted(strategies)
+        result = ['Original'] + result
+    return result
+
+
+def get_strategy_palette(strategies=None):
+    """Return a {strategy_display_name: color} dict for seaborn palette kwarg.
+
+    If *strategies* is given (list of display names), only those entries are
+    returned.  'Original' gets a neutral grey.
+    """
+    base = {p['display']: p['color'] for p in PERMS.values()}
+    base['Original'] = '#888888'
+    if strategies is not None:
+        return {s: base.get(s, '#333333') for s in strategies}
+    return base
 
 
 def get_density_columns(df):

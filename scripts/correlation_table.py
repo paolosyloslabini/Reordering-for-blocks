@@ -17,9 +17,9 @@ import argparse
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import plot_utils as pu
 from settings import (
-    PERM_NAMES, KERNEL_NAMES, ALL_METRICS,
-    METRICS, METRIC_NAMES, METRIC_FULL_NAMES,
-    BLOCK_SIZES, BLOCK_DENSITY_METRIC_NAMES, BLOCK_DENSITY_METRICS,
+    KERNEL_NAMES, ALL_METRICS, PERMS, BLOCK_SIZES,
+    get_metric_display, get_metric_short, get_perm_display,
+    enabled_metrics, block_density_metrics,
 )
 
 warnings.filterwarnings('ignore')
@@ -111,9 +111,9 @@ def _multiline_header(name):
     return r'\shortstack{' + r'\\'.join(words) + '}'
 
 
-def correlation_to_latex(corr_df, metrics, kernel_names, metric_names, 
+def correlation_to_latex(corr_df, metrics, kernel_names,
                          corr_type='tau', caption=None, label=None,
-                         metric_full_names=None):
+                         header_name_func=None):
     """Convert correlation DataFrame to LaTeX table string.
     
     Args:
@@ -121,18 +121,17 @@ def correlation_to_latex(corr_df, metrics, kernel_names, metric_names,
                  columns with _tau and _pearson suffixes)
         metrics: List of metric columns in desired order (base names without suffix)
         kernel_names: Dict mapping kernel IDs to display names
-        metric_names: Dict mapping metric columns to display names
         corr_type: 'tau' for Kendall's tau or 'pearson' for Pearson's r
         caption: Table caption (optional)
         label: Table label for referencing (optional)
-        metric_full_names: Dict mapping metric columns to full display names
-                           (used for multiline column headers). Falls back to
-                           metric_names if not provided.
+        header_name_func: Callable(metric_key) -> header string. Defaults
+                          to ``get_metric_display``.
     
     Returns:
         LaTeX table string
     """
-    header_names = metric_full_names if metric_full_names else metric_names
+    if header_name_func is None:
+        header_name_func = get_metric_display
     
     lines = []
     
@@ -147,7 +146,7 @@ def correlation_to_latex(corr_df, metrics, kernel_names, metric_names,
     lines.append(r'\toprule')
     
     # Header row (multiline full names)
-    header_cols = ['Kernel'] + [_multiline_header(header_names.get(m, m)) for m in metrics]
+    header_cols = ['Kernel'] + [_multiline_header(header_name_func(m)) for m in metrics]
     lines.append(' & '.join(header_cols) + r' \\')
     lines.append(r'\midrule')
     
@@ -189,23 +188,23 @@ def correlation_to_latex(corr_df, metrics, kernel_names, metric_names,
     return '\n'.join(lines)
 
 
-def _build_metric_legend(metrics, metric_names, metric_full_names):
+def _build_metric_legend(metrics):
     """Build a LaTeX legend string expanding metric acronyms.
     
     Example output: 'RBW: Relative Bandwidth, RRS: Relative Row Spread, ...'
     """
     parts = []
     for m in metrics:
-        abbr = metric_names.get(m, m)
-        full = metric_full_names.get(m, m)
+        abbr = get_metric_short(m)
+        full = get_metric_display(m)
         parts.append(f"{abbr}: {full}")
     return ', '.join(parts) + '.'
 
 
-def _generate_corr_table_pair(corr_df, metrics, kernel_names, metric_names,
+def _generate_corr_table_pair(corr_df, metrics, kernel_names,
                                output_dir, caption_tpl, label_prefix,
                                filename_prefix, n_cols_int,
-                               metric_full_names=None):
+                               header_name_func=None):
     """Generate Kendall tau and Pearson r LaTeX tables for one n_cols value."""
     for corr_type, corr_name in [('tau', r"Kendall's $\tau$"),
                                   ('pearson', r"Pearson's $r$ (on log values)")]:
@@ -213,9 +212,9 @@ def _generate_corr_table_pair(corr_df, metrics, kernel_names, metric_names,
         label = f"tab:{label_prefix}_{corr_type}_ncols_{n_cols_int}"
 
         latex = correlation_to_latex(
-            corr_df, metrics, kernel_names, metric_names,
+            corr_df, metrics, kernel_names,
             corr_type=corr_type, caption=caption, label=label,
-            metric_full_names=metric_full_names)
+            header_name_func=header_name_func)
 
         out_path = output_dir / f"{filename_prefix}_{corr_type}_ncols_{n_cols_int}.tex"
         with open(out_path, 'w') as f:
@@ -223,15 +222,12 @@ def _generate_corr_table_pair(corr_df, metrics, kernel_names, metric_names,
         print(f"Saved: {out_path}")
 
 
-def generate_all_tables(df, output_dir, metrics=None, kernel_names=None,
-                        metric_names=None):
+def generate_all_tables(df, output_dir, metrics=None, kernel_names=None):
     """Generate LaTeX correlation tables (tau + Pearson) for all n_cols values."""
     if metrics is None:
-        metrics = METRICS
+        metrics = enabled_metrics()
     if kernel_names is None:
         kernel_names = KERNEL_NAMES
-    if metric_names is None:
-        metric_names = METRIC_NAMES
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -250,15 +246,21 @@ def generate_all_tables(df, output_dir, metrics=None, kernel_names=None,
             f"their reorderings, for a total of {n_matrices:,} configurations.")
 
         _generate_corr_table_pair(
-            corr_df, metrics, kernel_names, metric_names,
+            corr_df, metrics, kernel_names,
             output_dir, caption_tpl, 'correlation', 'correlation',
-            n_cols_int, metric_full_names=METRIC_FULL_NAMES)
+            n_cols_int)
 
 
 def generate_blocksize_tables(df, output_dir, kernel_names=None):
     """Generate LaTeX block-density correlation tables (tau + Pearson) for all n_cols."""
     if kernel_names is None:
         kernel_names = KERNEL_NAMES
+
+    bd_metrics = block_density_metrics()
+    # Short header: "4×4", "8×8", …
+    def _bd_header(m):
+        bs = m.split('_')[-1]
+        return f'${bs}\\times{bs}$'
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -268,7 +270,7 @@ def generate_blocksize_tables(df, output_dir, kernel_names=None):
         n_cols_int = int(n_cols)
         df_nc = df[df['n_cols'] == n_cols]
         n_matrices = df_nc[['matrix', 'perm', 'perm_type']].drop_duplicates().shape[0]
-        corr_df = compute_correlations(df, n_cols, BLOCK_DENSITY_METRICS, kernels)
+        corr_df = compute_correlations(df, n_cols, bd_metrics, kernels)
 
         caption_tpl = (
             "{{corr_display}} correlation between block density and SpMM GFLOPS "
@@ -277,9 +279,9 @@ def generate_blocksize_tables(df, output_dir, kernel_names=None):
             f"their reorderings, for a total of {n_matrices:,} configurations.")
 
         _generate_corr_table_pair(
-            corr_df, BLOCK_DENSITY_METRICS, kernel_names, BLOCK_DENSITY_METRIC_NAMES,
+            corr_df, bd_metrics, kernel_names,
             output_dir, caption_tpl, 'blocksize', 'blocksize',
-            n_cols_int, metric_full_names=METRIC_FULL_NAMES)
+            n_cols_int, header_name_func=_bd_header)
 
 
 # =============================================================================
@@ -299,7 +301,7 @@ def compute_improvement_ratios(df_analysis, metrics=None):
         improvement ratio column per metric (named '<metric>_imp').
     """
     if metrics is None:
-        metrics = METRICS
+        metrics = enabled_metrics()
 
     # Only keep metrics that have a direction defined
     metrics = [m for m in metrics
@@ -324,20 +326,17 @@ def compute_improvement_ratios(df_analysis, metrics=None):
     return reordered[keep_cols], metrics
 
 
-def improvement_to_latex(median_df, metrics, perm_names, caption=None, label=None):
+def improvement_to_latex(median_df, metrics, caption=None, label=None):
     """Convert a median-improvement DataFrame to a LaTeX table.
 
     Args:
         median_df: DataFrame with 'perm' column and '<metric>_imp' value columns.
         metrics: ordered list of base metric names.
-        perm_names: dict mapping perm id -> display name.
         caption, label: LaTeX caption / label.
 
     Returns:
         LaTeX table string.
     """
-    header_names = METRIC_FULL_NAMES
-
     lines = []
     lines.append(r'\begin{table}[htbp]')
     lines.append(r'\centering')
@@ -347,13 +346,13 @@ def improvement_to_latex(median_df, metrics, perm_names, caption=None, label=Non
     lines.append(r'\begin{tabular}{' + col_spec + '}')
     lines.append(r'\toprule')
 
-    header_cols = ['Algorithm'] + [_multiline_header(header_names.get(m, m)) for m in metrics]
+    header_cols = ['Algorithm'] + [_multiline_header(get_metric_display(m)) for m in metrics]
     lines.append(' & '.join(header_cols) + r' \\')
     lines.append(r'\midrule')
 
     for _, row in median_df.iterrows():
         perm = row['perm']
-        perm_display = perm_names.get(perm, perm)
+        perm_display = get_perm_display(perm)
 
         values_dict = {}
         for m in metrics:
@@ -388,7 +387,7 @@ def improvement_to_latex(median_df, metrics, perm_names, caption=None, label=Non
     return '\n'.join(lines)
 
 
-def _write_improvement_table(imp_df, imp_cols, used_metrics, perm_names,
+def _write_improvement_table(imp_df, imp_cols, used_metrics,
                               ordered_perms, caption, label, out_path):
     """Compute medians, sort by perm order, and write one improvement table."""
     median_df = imp_df.groupby('perm')[imp_cols].median().reset_index()
@@ -396,23 +395,20 @@ def _write_improvement_table(imp_df, imp_cols, used_metrics, perm_names,
     median_df['_order'] = median_df['perm'].map(perm_order).fillna(999)
     median_df = median_df.sort_values('_order').drop(columns='_order')
 
-    latex = improvement_to_latex(median_df, used_metrics, perm_names,
+    latex = improvement_to_latex(median_df, used_metrics,
                                   caption=caption, label=label)
     with open(out_path, 'w') as f:
         f.write(latex)
     print(f"Saved: {out_path}")
 
 
-def generate_improvement_tables(df_analysis, output_dir, metrics=None,
-                                perm_names=None):
+def generate_improvement_tables(df_analysis, output_dir, metrics=None):
     """Generate LaTeX tables of median structural improvement ratios.
 
     Creates one table per perm_type plus a combined table.
     """
     if metrics is None:
-        metrics = METRICS
-    if perm_names is None:
-        perm_names = PERM_NAMES
+        metrics = enabled_metrics()
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -422,9 +418,9 @@ def generate_improvement_tables(df_analysis, output_dir, metrics=None,
         print("No improvement data to generate tables.")
         return
 
-    # Determine perm order from PERM_NAMES (or alphabetical fallback)
+    # Determine perm order from PERMS (or alphabetical fallback)
     all_perms = sorted(imp_df['perm'].unique())
-    ordered_perms = [p for p in perm_names.keys() if p in all_perms]
+    ordered_perms = [p for p in PERMS if p in all_perms]
     ordered_perms += [p for p in all_perms if p not in ordered_perms]
 
     n_matrices = df_analysis[df_analysis['perm'] == 'None']['matrix'].nunique()
@@ -441,7 +437,7 @@ def generate_improvement_tables(df_analysis, output_dir, metrics=None,
                    f"({ptype_label}, {n_matrices} matrices). "
                    f"Values $>1$ indicate improvement over the original ordering.")
         _write_improvement_table(
-            df_subset, imp_cols, used_metrics, perm_names, ordered_perms,
+            df_subset, imp_cols, used_metrics, ordered_perms,
             caption=caption, label=f"tab:improvement_{tag.lower()}",
             out_path=output_dir / f"improvement_{tag.lower()}.tex")
 

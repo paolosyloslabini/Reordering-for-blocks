@@ -2,6 +2,7 @@ operators/ASpT/
 
 # Claude Code local settings
 .claude/
+CLAUDE.md
 
 # Generated plots
 plots/

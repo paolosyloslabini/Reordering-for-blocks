@@ -15,6 +15,7 @@ import pandas as pd
 import numpy as np
 from scipy import stats
 import plot_utils as pu
+from settings import get_perm_display
 
 
 def parse_args():
@@ -134,6 +135,27 @@ def generate_kernel_plots(df, out_dir, args):
                     log_y=False
                 )
             
+            # GFLOPS vs bandwidth (linear scale)
+            if 'rel_bandwidth' in df_k.columns:
+                pu.scatter_with_correlation(
+                    df_k, 'rel_bandwidth', 'gflops',
+                    linear_dir / f"gflops_vs_rel_bandwidth_linear.png",
+                    title=f"GFLOPS vs Relative Bandwidth [Linear Scale]\n{kernel}",
+                    log_x=False,
+                    log_y=False
+                )
+            
+            # GFLOPS vs locality (linear scale)
+            for loc_col in ['rel_row_spread', 'locality_vertical_adjacency_ratio']:
+                if loc_col in df_k.columns:
+                    pu.scatter_with_correlation(
+                        df_k, loc_col, 'gflops',
+                        linear_dir / f"gflops_vs_{loc_col}_linear.png",
+                        title=f"GFLOPS vs {pu.get_display_name(loc_col)} [Linear Scale]\n{kernel}",
+                        log_x=False,
+                        log_y=False
+                    )
+            
             # -----------------------------------------------------------------
             # 2. Speedup Distribution (by perm_type)
             # -----------------------------------------------------------------
@@ -153,7 +175,8 @@ def generate_kernel_plots(df, out_dir, args):
                     title=f"Speedup Distribution - {perm_type}\n{kernel}",
                     order=strategies,
                     baseline=1.0,
-                    log_y=True
+                    log_y=True,
+                    ylim=(0.5, 5)
                 )
             
             # -----------------------------------------------------------------
@@ -165,19 +188,19 @@ def generate_kernel_plots(df, out_dir, args):
             for bs in [4, 8, 16, 32, 64, 128]:
                 imp_col = f'density_improvement_{bs}'
                 if imp_col in df_reordered.columns:
-                    pu.binned_bar_chart(
+                    pu.binned_boxplot(
                         df_reordered, imp_col, 'speedup',
                         binned_dir / f"speedup_by_density_imp_bs{bs}.png",
-                        title=f"Median Speedup by Density Improvement (BS {bs})\n{kernel}",
+                        title=f"Speedup Distribution by Density Improvement (BS {bs})\n{kernel}",
                         baseline=1.0
                     )
             
             for imp_col in ['row_spread_improvement', 'vertical_adjacency_improvement','bandwidth_improvement',]:
                 if imp_col in df_reordered.columns:
-                    pu.binned_bar_chart(
+                    pu.binned_boxplot(
                         df_reordered, imp_col, 'speedup',
                         binned_dir / f"speedup_by_{imp_col}.png",
-                        title=f"Median Speedup by {pu.get_display_name(imp_col)}\n{kernel}",
+                        title=f"Speedup Distribution by {pu.get_display_name(imp_col)}\n{kernel}",
                         baseline=1.0
                     )
 
@@ -293,7 +316,7 @@ def generate_reorderability_plots(df_analysis, out_dir):
         clip_note = f'\n(99th percentile, {n_outliers} outliers removed)' if n_outliers > 0 else ''
         
         # 1. Histogram of improvement ratios
-        fig, ax = plt.subplots(figsize=(10, 6))
+        fig, ax = plt.subplots(figsize=(12, 7))
         ax.hist(df_metric_clipped['improvement_ratio'].dropna(), bins=30, edgecolor='black', alpha=0.7)
         ax.axvline(x=1.0, color='red', linestyle='--', linewidth=2, label='No improvement')
         ax.set_xlabel(y_label)
@@ -307,7 +330,7 @@ def generate_reorderability_plots(df_analysis, out_dir):
         print(f"  Saved: improvement_hist_{metric_safe}.png")
         
         # 2. Baseline value vs Improvement (can we predict from original structure?)
-        fig, ax = plt.subplots(figsize=(10, 6))
+        fig, ax = plt.subplots(figsize=(11, 8))
         ax.scatter(df_metric_clipped['baseline_value'], df_metric_clipped['improvement_ratio'], alpha=0.5)
         
         # Add correlation (use full data for correlation)
@@ -326,17 +349,18 @@ def generate_reorderability_plots(df_analysis, out_dir):
         ax.axhline(y=1.0, color='red', linestyle='--', alpha=0.7, label='No improvement')
         ax.set_xscale('log')
         ax.set_yscale('log')
+        pu.format_log_axes(ax)
         ax.legend()
-        ax.grid(True, alpha=0.3)
         plt.tight_layout()
         plt.savefig(reorder_dir / f"baseline_vs_improvement_{metric_safe}.png", dpi=150)
         plt.close()
         print(f"  Saved: baseline_vs_improvement_{metric_safe}.png")
         
-        # 3-5. Baseline features vs Improvement
+        # 3-6. Baseline features vs Improvement
         feature_scatter_specs = [
             ('baseline_density', 'Matrix Density', 'density_vs_improvement'),
             ('baseline_rows', 'Matrix Size (rows)', 'size_vs_improvement'),
+            ('baseline_nnz', 'Nonzeros', 'nnz_vs_improvement'),
             ('baseline_locality_avg_nnz_per_row', 'Avg Nonzeros per Row', 'nnz_per_row_vs_improvement'),
         ]
         for x_col, x_label, filename_prefix in feature_scatter_specs:
@@ -353,7 +377,7 @@ def _reorderability_scatter(df_full, df_clipped, x_col, x_label, y_label,
     """Scatter plot: x_col vs improvement_ratio with Kendall/Pearson annotation."""
     if x_col not in df_clipped.columns:
         return
-    fig, ax = plt.subplots(figsize=(10, 6))
+    fig, ax = plt.subplots(figsize=(11, 8))
     ax.scatter(df_clipped[x_col], df_clipped['improvement_ratio'], alpha=0.5)
 
     valid = df_full[[x_col, 'improvement_ratio']].dropna()
@@ -372,11 +396,161 @@ def _reorderability_scatter(df_full, df_clipped, x_col, x_label, y_label,
     ax.axhline(y=1.0, color='red', linestyle='--', alpha=0.7)
     ax.set_xscale('log')
     ax.set_yscale('log')
-    ax.grid(True, alpha=0.3)
+    pu.format_log_axes(ax)
     plt.tight_layout()
     plt.savefig(output_path, dpi=150)
     plt.close()
     print(f"  Saved: {output_path.name}")
+
+
+def generate_per_matrix_study(df_analysis, out_dir):
+    """Per-matrix difficulty study.
+
+    For each structural metric, compute the improvement ratio of every
+    reordering relative to the original.  Then, per matrix, summarise
+    across all reorderings:
+        * geometric mean of improvement ratios  (= exp(mean(log(ratio))))
+        * max improvement ratio                 (best single reordering)
+        * variance of log-improvement           (spread across reorderings)
+
+    Produces scatter plots in (geomean, variance) and (max, variance)
+    space so that easy/hard matrices can be identified visually.
+    """
+    print("\n=== Per-Matrix Difficulty Study ===")
+
+    study_dir = out_dir / "reorder_analysis" / "per_matrix_study"
+    study_dir.mkdir(parents=True, exist_ok=True)
+
+    df = df_analysis.copy()
+    df['perm'] = df['perm'].fillna('None').astype(str)
+
+    # Metrics to study: (column, higher_is_better, display_name)
+    metrics_to_study = [
+        ('block_density_32',  True,  'Block Density (32×32)'),
+        ('block_density_64',  True,  'Block Density (64×64)'),
+        ('locality_vertical_adjacency_ratio', True,  'Vertical Adjacency Ratio'),
+        ('bandwidth_max',     False, 'Bandwidth'),
+        ('locality_avg_row_spread', False, 'Avg Row Spread'),
+    ]
+
+    for metric, higher_is_better, metric_display in metrics_to_study:
+        if metric not in df.columns:
+            print(f"  Skipping {metric}: not in data")
+            continue
+
+        print(f"  Processing: {metric}")
+
+        rows = []
+        for matrix in df['matrix'].unique():
+            df_m = df[df['matrix'] == matrix]
+            baseline = df_m[df_m['perm'] == 'None']
+            reordered = df_m[df_m['perm'] != 'None']
+
+            if baseline.empty or reordered.empty:
+                continue
+
+            baseline_val = baseline[metric].iloc[0]
+            if pd.isna(baseline_val) or baseline_val == 0:
+                continue
+
+            # Compute improvement ratio for every reordering
+            if higher_is_better:
+                ratios = reordered[metric] / baseline_val
+            else:
+                ratios = baseline_val / reordered[metric]
+
+            ratios = ratios.replace([np.inf, -np.inf], np.nan).dropna()
+            ratios = ratios[ratios > 0]
+
+            if len(ratios) < 2:
+                continue
+
+            log_ratios = np.log(ratios)
+            geomean = np.exp(log_ratios.mean())
+            max_improvement = ratios.max()
+            variance = log_ratios.var()
+
+            rows.append({
+                'matrix': matrix,
+                'geomean_improvement': geomean,
+                'max_improvement': max_improvement,
+                'log_variance': variance,
+                'n_reorderings': len(ratios),
+            })
+
+        if not rows:
+            print(f"    No data for {metric}")
+            continue
+
+        res = pd.DataFrame(rows)
+
+        # Save CSV
+        metric_safe = pu.safe_filename(metric)
+        res.to_csv(study_dir / f"per_matrix_{metric_safe}.csv", index=False)
+
+        # ── Scatter plot ─────────────────────────────────────────────
+        fig, ax = plt.subplots(figsize=(11, 8))
+
+        ax.scatter(res['geomean_improvement'], res['log_variance'],
+                   alpha=0.55, edgecolors='k', linewidths=0.3, s=36)
+
+        # Reference line at geomean = 1 (no average improvement)
+        ax.axvline(x=1.0, color='red', linestyle='--', linewidth=1.2,
+                   label='No avg. improvement')
+
+        ax.set_xlabel('Geometric Mean of Improvement Ratio')
+        ax.set_ylabel('Variance of log(Improvement Ratio)')
+        ax.set_title(f'Per-Matrix Difficulty — {metric_display}\n'
+                     f'({len(res)} matrices, improvement > 1 = beneficial)')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        # Log scale on x if range is large
+        if res['geomean_improvement'].max() / max(res['geomean_improvement'].min(), 1e-9) > 20:
+            ax.set_xscale('log')
+            pu.format_log_axes(ax)
+
+        plt.tight_layout()
+        plt.savefig(study_dir / f"geomean_vs_variance_{metric_safe}.png", dpi=150)
+        plt.close()
+        print(f"    Saved: geomean_vs_variance_{metric_safe}.png")
+
+        # ── Max improvement vs variance scatter ──────────────────────
+        fig, ax = plt.subplots(figsize=(11, 8))
+
+        ax.scatter(res['max_improvement'], res['log_variance'],
+                   alpha=0.55, edgecolors='k', linewidths=0.3, s=36)
+
+        ax.axvline(x=1.0, color='red', linestyle='--', linewidth=1.2,
+                   label='No improvement')
+
+        ax.set_xlabel('Max Improvement Ratio (Best Reordering)')
+        ax.set_ylabel('Variance of log(Improvement Ratio)')
+        ax.set_title(f'Per-Matrix Difficulty (Max) — {metric_display}\n'
+                     f'({len(res)} matrices, improvement > 1 = beneficial)')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+
+        if res['max_improvement'].max() / max(res['max_improvement'].min(), 1e-9) > 20:
+            ax.set_xscale('log')
+            pu.format_log_axes(ax)
+
+        plt.tight_layout()
+        plt.savefig(study_dir / f"max_vs_variance_{metric_safe}.png", dpi=150)
+        plt.close()
+        print(f"    Saved: max_vs_variance_{metric_safe}.png")
+
+        # ── Annotate extreme matrices (optional info) ────────────────
+        top_easy = res.nlargest(5, 'geomean_improvement')[['matrix', 'geomean_improvement', 'log_variance']]
+        top_hard = res.nsmallest(5, 'geomean_improvement')[['matrix', 'geomean_improvement', 'log_variance']]
+        top_max  = res.nlargest(5, 'max_improvement')[['matrix', 'max_improvement', 'log_variance']]
+        top_variable = res.nlargest(5, 'log_variance')[['matrix', 'geomean_improvement', 'log_variance']]
+        print(f"    Top-5 easiest (highest geomean): {top_easy['matrix'].tolist()}")
+        print(f"    Top-5 hardest (lowest geomean):  {top_hard['matrix'].tolist()}")
+        print(f"    Top-5 best max improvement:      {top_max['matrix'].tolist()}")
+        print(f"    Top-5 most variable:             {top_variable['matrix'].tolist()}")
+
+    print(f"\n  Per-matrix study saved to {study_dir}")
 
 
 def _boxplot_for_perm_types(df_reordered, strategies, imp_col, title_template,
@@ -392,8 +566,95 @@ def _boxplot_for_perm_types(df_reordered, strategies, imp_col, title_template,
             title=title_template.format(perm_type=perm_type),
             order=[s for s in strategies if s in df_pt['strategy'].unique()],
             baseline=1.0,
-            log_y=True
+            log_y=True,
+            ylim=(0.1, 10)
         )
+
+
+def generate_reorder_timing_plots(df_analysis, out_dir, reordering_csv='results/results_reordering.csv'):
+    """Generate reordering timing analysis plots (nnz vs reordering time).
+
+    Loads ``results_reordering.csv`` (produced by ``parse_results.py``) and
+    joins it with the analysis DataFrame to get nnz per matrix. Then creates
+    scatter plots of nnz vs reordering time, coloured by algorithm.
+    """
+    print("\n=== Reordering Timing Analysis ===")
+
+    reorder_csv_path = Path(reordering_csv)
+    if not reorder_csv_path.exists():
+        print(f"  Reordering CSV not found at {reorder_csv_path} — skipping timing plots. "
+              "Run  python scripts/parse_results.py  first to generate it.")
+        return
+
+    df_time = pd.read_csv(reorder_csv_path)
+    print(f"  Loaded {len(df_time)} reordering timing rows")
+
+    if df_time.empty or 'time_reordering_ms' not in df_time.columns:
+        print("  No reordering timing data available — skipping.")
+        return
+
+    # Get nnz from analysis data (use the Original / baseline row for each matrix)
+    df_base = df_analysis[df_analysis['perm'] == 'None'][['matrix', 'nnz', 'rows']].drop_duplicates('matrix')
+    df_time = df_time.merge(df_base, on='matrix', how='inner')
+
+    if df_time.empty:
+        print("  No matching matrices between timing and analysis data — skipping.")
+        return
+
+    # Map perm tag to display name
+    df_time['strategy'] = df_time['perm'].apply(
+        lambda x: get_perm_display(x) if x != 'None' else 'Original'
+    )
+    # Drop any Original rows (shouldn't be any, but just in case)
+    df_time = df_time[df_time['strategy'] != 'Original']
+
+    timing_dir = out_dir / "reorder_analysis" / "timing"
+    timing_dir.mkdir(parents=True, exist_ok=True)
+
+    strategies = sorted(df_time['strategy'].unique())
+    palette = pu.get_strategy_palette(strategies)
+
+    # --- Scatter: nnz vs reordering time (all algorithms, coloured) ---
+    pu.scatter_with_correlation(
+        df_time, 'nnz', 'time_reordering_ms',
+        timing_dir / "nnz_vs_reordering_time.png",
+        title="Reordering Time vs Matrix NNZ",
+        hue_col='strategy',
+        log_x=True, log_y=True,
+    )
+
+    # --- Per-algorithm scatter: nnz vs reordering time ---
+    for strat in strategies:
+        df_s = df_time[df_time['strategy'] == strat]
+        if len(df_s) < 2:
+            continue
+        pu.scatter_with_correlation(
+            df_s, 'nnz', 'time_reordering_ms',
+            timing_dir / f"nnz_vs_time_{pu.safe_filename(strat)}.png",
+            title=f"Reordering Time vs NNZ — {strat}",
+            log_x=True, log_y=True,
+        )
+
+    # --- Boxplot: reordering time by algorithm ---
+    pu.boxplot_by_category(
+        df_time, 'strategy', 'time_reordering_ms',
+        timing_dir / "reordering_time_boxplot.png",
+        title="Reordering Time by Algorithm",
+        order=strategies,
+        log_y=True,
+        palette=palette,
+    )
+
+    # --- Scatter: rows vs reordering time ---
+    pu.scatter_with_correlation(
+        df_time, 'rows', 'time_reordering_ms',
+        timing_dir / "rows_vs_reordering_time.png",
+        title="Reordering Time vs Matrix Rows",
+        hue_col='strategy',
+        log_x=True, log_y=True,
+    )
+
+    print(f"  Timing plots saved to {timing_dir}")
 
 
 def generate_reorder_analysis_plots(df_analysis, out_dir):
@@ -405,7 +666,9 @@ def generate_reorder_analysis_plots(df_analysis, out_dir):
 
     # Process analysis data
     df = df_analysis.copy()
-    df['strategy'] = df['perm'].apply(lambda x: 'Original' if x == 'None' else str(x))
+    df['strategy'] = df['perm'].apply(
+        lambda x: 'Original' if x == 'None' else get_perm_display(x)
+    )
 
     # Calculate improvements using the shared utility (extended mode includes
     # bandwidth_avg, max spreads, and blocks-per-row metrics)
@@ -531,6 +794,19 @@ def main():
         print("Generating reorderability analysis plots...")
         print("="*60)
         generate_reorderability_plots(df_analysis, out_dir)
+
+        print("\n" + "="*60)
+        print("Generating per-matrix difficulty study...")
+        print("="*60)
+        generate_per_matrix_study(df_analysis, out_dir)
+
+        print("\n" + "="*60)
+        print("Generating reordering timing analysis...")
+        print("="*60)
+        reordering_csv = _cfg.get('data', {}).get('reordering_csv',
+                                                   'results/results_reordering.csv')
+        generate_reorder_timing_plots(df_analysis, out_dir,
+                                      reordering_csv=reordering_csv)
     
     print(f"\nAll plots saved to {out_dir}")
 
