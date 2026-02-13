@@ -1,0 +1,12 @@
+variables:
+  mtx: 'datasets/matrices_list_mtx.txt'
+
+preprocess: |
+  source ~/.venv/bin/activate
+  mtx_name=$(basename {mtx} .mtx)
+
+jobs:
+  - config: "perm"
+    config_jobs:
+      - tag: "ANALYSIS_RANDOM_NO_REORDER"
+        command: "python3 MtxPerm/ANALYSIS/analyze.py {mtx} --perm perms/random1D/$mtx_name.perm --perm-type SYMMETRIC --block-sizes 4 8 16 32 64 128"
