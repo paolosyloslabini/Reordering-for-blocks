@@ -325,11 +325,16 @@ def generate_reorderability_plots(df_analysis, out_dir):
         metric_safe = pu.safe_filename(metric)
         y_label = f'Max {metric_display} Improvement Ratio'
         
-        # Apply 99th percentile clipping to remove outliers
-        upper_bound = df_metric['improvement_ratio'].quantile(0.99)
-        df_metric_clipped = df_metric[df_metric['improvement_ratio'] <= upper_bound].copy()
-        n_outliers = len(df_metric) - len(df_metric_clipped)
-        clip_note = f'\n(99th percentile, {n_outliers} outliers removed)' if n_outliers > 0 else ''
+        # No clipping by default (can be enabled by setting apply_clipping=True)
+        apply_clipping = False
+        if apply_clipping:
+            upper_bound = df_metric['improvement_ratio'].quantile(0.99)
+            df_metric_clipped = df_metric[df_metric['improvement_ratio'] <= upper_bound].copy()
+            n_outliers = len(df_metric) - len(df_metric_clipped)
+            clip_note = f'\n(99th percentile, {n_outliers} outliers removed)' if n_outliers > 0 else ''
+        else:
+            df_metric_clipped = df_metric.copy()
+            clip_note = ''
         
         # 1. Histogram of improvement ratios
         fig, ax = plt.subplots(figsize=(12, 7))
