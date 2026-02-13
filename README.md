@@ -22,6 +22,7 @@ This repository systematically:
 | [`datasets/`](datasets/README.md) | Sparse matrices from SuiteSparse collection |
 | [`results/`](results/README.md) | Aggregated CSV results from experiments |
 | [`perms/`](perms/README.md) | Generated permutation files organized by algorithm |
+| [`perms_random/`](perms_random/) | Permutations computed on random-scrambled matrices |
 | [`plots/`](plots/) | Generated visualization plots |
 | [`ccutils/`](ccutils/) | Header-only C++/CUDA utility library |
 | [`distributed_mmio/`](distributed_mmio/) | Matrix Market I/O library |
@@ -37,6 +38,8 @@ This repository systematically:
 - **[yamls/matrices.yaml](yamls/matrices.yaml)** - Matrix download criteria
 - **[yamls/operations_*.yaml](yamls/)** - SpMM benchmark configurations
 - **[yamls/analysis_*.yaml](yamls/)** - Matrix analysis configurations
+- **[yamls/perms_random.yaml](yamls/perms_random.yaml)** - Permutation generation on random-scrambled matrices
+- **[yamls/analysis_random_*.yaml](yamls/)** - Random-base analysis configurations
 
 ### Core Scripts
 - **[scripts/parse_results.py](scripts/parse_results.py)** - Aggregates job outputs into CSVs
@@ -59,6 +62,7 @@ This repository systematically:
 - **[MtxPerm/SPARTA/](MtxPerm/SPARTA/)** - SPARTA blocking algorithm
 - **[MtxPerm/GROOT/](MtxPerm/GROOT/)** - Groot graph-centric row reordering (EuroSys'25)
 - **[MtxPerm/ANALYSIS/](MtxPerm/ANALYSIS/)** - Matrix structure analysis
+- **[MtxPerm/pre_permute.py](MtxPerm/pre_permute.py)** - Pre-permute a matrix and write new `.mtx` (used by random-base experiments)
 
 ## Reordering Algorithms
 
@@ -119,6 +123,32 @@ Three modes for applying permutations:
 ```
 
 Indices are **1-based**.
+
+## Random-Base Reordering Experiments
+
+Tests whether reordering algorithms can **recover structure from a randomized starting point**. The pipeline:
+
+1. **Scramble**: Apply `random1D` permutation symmetrically (`P_rand * A * P_rand^T`) to destroy existing structure
+2. **Re-order**: Run all 10 non-random reordering algorithms on the scrambled matrix
+3. **Analyze**: Compare structural metrics of re-ordered-random matrices against the originals
+
+### How it works
+
+- **[MtxPerm/pre_permute.py](MtxPerm/pre_permute.py)** loads a matrix, applies a permutation, and writes a new `.mtx` file
+- **[yamls/perms_random.yaml](yamls/perms_random.yaml)** generates permutations on pre-scrambled matrices (uses `mktemp` for race-free temp files in parallel SLURM jobs)
+- **[MtxPerm/ANALYSIS/analyze.py](MtxPerm/ANALYSIS/analyze.py)** supports dual permutations via `--base-perm` / `--base-perm-type` (base applied first, then `--perm` on top)
+
+### Analysis YAMLs
+
+| YAML | Description |
+|------|-------------|
+| [`analysis_random_no_reorder.yaml`](yamls/analysis_random_no_reorder.yaml) | Baseline: random-symmetric-permuted matrix (no further reordering) |
+| [`analysis_random_row.yaml`](yamls/analysis_random_row.yaml) | Random-sym base + ROW reordering on top |
+| [`analysis_random_symmetric.yaml`](yamls/analysis_random_symmetric.yaml) | Random-sym base + SYMMETRIC reordering on top |
+
+### Output
+
+Permutations are stored in `perms_random/<algorithm>/<matrix_name>.perm`.
 
 ## Typical Workflow
 
