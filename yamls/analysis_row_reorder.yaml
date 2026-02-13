@@ -1,9 +1,16 @@
 variables:
   mtx: 'datasets/matrices_list_mtx.txt'
-  perm: 
-    - random1D
-    - SB_degree
+  perm:
     - SB_gray
+    - random1D
+    - SB_amd
+    - SB_degree
+    - SB_metis
+    - SB_rcm
+    - SB_rabbit
+    - SB_patoh
+    - SB_slashburn
+    - GROOT_reorder
     - SPARTA_reorder
 
 preprocess: |
