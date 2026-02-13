@@ -779,7 +779,7 @@ def scatter_with_correlation(df, x_col, y_col, output_path,
 def boxplot_by_category(df, x_col, y_col, output_path,
                          title=None, order=None,
                          baseline=None, show_points=True,
-                         clip_percentile=(1, 99),
+                         clip_percentile=None,
                          log_y=False,
                          ylim=None,
                          palette=None,
@@ -795,7 +795,7 @@ def boxplot_by_category(df, x_col, y_col, output_path,
         order: Order of categories
         baseline: Value for horizontal reference line
         show_points: Whether to overlay individual points
-        clip_percentile: Tuple of (lower, upper) percentiles for clipping
+        clip_percentile: Tuple of (lower, upper) percentiles for clipping (default: None, no clipping)
         log_y: Whether to use log scale on y-axis
         ylim: Tuple of (ymin, ymax) for y-axis limits (None for auto)
         palette: Color palette dict {category: color}. When x_col is
@@ -873,16 +873,17 @@ def boxplot_by_category(df, x_col, y_col, output_path,
 def breakeven_boxplot(df_valid, df_harmful, x_col, y_col, output_path,
                        title=None, order=None,
                        cap_value=None,
-                       clip_percentile=(1, 99),
+                       clip_percentile=None,
                        palette=None,
-                       figsize=(12, 8)):
-    """Create boxplot of break-even counts with harmful reorderings shown separately.
+                       figsize=(12, 9)):
+    """Create breakeven plot with two aligned subplots.
 
-    ``df_valid`` contains rows where reordering is beneficial (finite
-    break-even count).  ``df_harmful`` contains rows where the
-    reordering never pays off (time_saved ≤ 0); these are plotted as
-    '×' markers at a cap line placed above the highest valid data point
-    and excluded from the box statistics.
+    **Top subplot**: boxplot of break-even iteration counts (valid data only,
+    log-scale y-axis).
+
+    **Bottom subplot**: stacked percentage bar for each strategy — green
+    (beneficial, breaks even) on top, red (harmful, never breaks even) on
+    the bottom — giving an immediate read on how often a reordering helps.
 
     Args:
         df_valid: DataFrame with valid (positive) break-even counts.
@@ -892,11 +893,8 @@ def breakeven_boxplot(df_valid, df_harmful, x_col, y_col, output_path,
         output_path: Path to save figure.
         title: Plot title.
         order: Category order for x-axis.
-        cap_value: Y-value at which harmful markers are drawn.  If *None*
-            (default) it is computed automatically as the next power-of-ten
-            above the highest valid data point so that the cap line sits
-            clearly above all boxes.
-        clip_percentile: Percentile range to clip valid data (lower, upper).
+        cap_value: Unused (kept for API compatibility).
+        clip_percentile: Percentile range to clip valid data (lower, upper). Default: None (no clipping).
         palette: Color palette dict {category: color}.
         figsize: Figure size.
     """
@@ -916,13 +914,11 @@ def breakeven_boxplot(df_valid, df_harmful, x_col, y_col, output_path,
         upper = plot_df[y_col].quantile(clip_percentile[1] / 100)
         plot_df = plot_df[(plot_df[y_col] >= lower) & (plot_df[y_col] <= upper)]
 
-    fig, ax = _setup_figure(figsize)
-
     # Resolve palette
     if palette is None and x_col == 'strategy':
         palette = get_strategy_palette(order)
 
-    # Pre-compute category → x-position mapping (needed for both valid & harmful)
+    # Determine category list and mapping
     if order is not None:
         cats = list(order)
     elif has_valid:
@@ -931,189 +927,93 @@ def breakeven_boxplot(df_valid, df_harmful, x_col, y_col, output_path,
         cats = sorted(df_harmful[x_col].unique())
     else:
         cats = []
-    cat_to_x = {c: i for i, c in enumerate(cats)}
+    positions = list(range(len(cats)))
 
-    # --- Compute per-strategy valid/harmful counts early (needed for
-    #     box widths and percentage annotations) ---
-    strat_total = {}
-    strat_harm = {}
-    strat_valid_pct = {}
+    # --- Compute per-strategy valid / harmful counts ---
+    valid_pcts = []
+    harm_pcts = []
     for cat in cats:
         n_v = int((plot_df[x_col] == cat).sum()) if has_valid else 0
         n_h = int((df_harmful[x_col] == cat).sum()) if has_harmful else 0
-        strat_total[cat] = n_v + n_h
-        strat_harm[cat] = n_h
-        strat_valid_pct[cat] = (100.0 * n_v / (n_v + n_h)) if (n_v + n_h) > 0 else 100.0
+        tot = n_v + n_h
+        valid_pcts.append(100.0 * n_v / tot if tot > 0 else 100.0)
+        harm_pcts.append(100.0 * n_h / tot if tot > 0 else 0.0)
 
-    # Scale box widths proportionally to the valid percentage
-    BASE_WIDTH = 0.7
-    MIN_WIDTH = 0.15
-    box_widths = [MIN_WIDTH + (BASE_WIDTH - MIN_WIDTH) * (strat_valid_pct[c] / 100.0)
-                  for c in cats]
+    # --- Create two-row figure: boxplot on top (tall), bar chart on bottom ---
+    fig, (ax_box, ax_bar) = plt.subplots(
+        2, 1, figsize=figsize, sharex=True,
+        gridspec_kw={'height_ratios': [3, 1], 'hspace': 0.08},
+    )
 
-    # --- valid data: fast scatter + boxplot ---
-    bp = None
+    BOX_WIDTH = 0.6
+
+    # ===== Top subplot: breakeven boxplot =====
     if has_valid:
-        # Use a direct scatter instead of sns.stripplot (orders of magnitude
-        # faster for large datasets because stripplot creates one artist per
-        # point).
         rng = np.random.default_rng(0)
         for i, cat in enumerate(cats):
             cat_data = plot_df[plot_df[x_col] == cat]
             if cat_data.empty:
                 continue
-            half_w = box_widths[i] / 2 * 0.8
+            half_w = BOX_WIDTH / 2 * 0.8
             x_jitter = rng.uniform(-half_w, half_w, size=len(cat_data))
-            ax.scatter(i + x_jitter, cat_data[y_col].values,
-                       color='black', alpha=0.4, s=9, zorder=2,
-                       edgecolors='none', rasterized=True)
+            ax_box.scatter(i + x_jitter, cat_data[y_col].values,
+                           color='black', alpha=0.4, s=9, zorder=2,
+                           edgecolors='none', rasterized=True)
 
-        # Matplotlib boxplot with per-box widths
         box_data = [plot_df[plot_df[x_col] == cat][y_col].dropna().values
                     for cat in cats]
-        bp = ax.boxplot(box_data, positions=list(range(len(cats))),
-                        widths=box_widths, showfliers=False, patch_artist=True,
-                        medianprops={'color': 'red', 'linewidth': 2},
-                        zorder=3)
+        bp = ax_box.boxplot(box_data, positions=positions,
+                            widths=BOX_WIDTH, showfliers=False,
+                            patch_artist=True,
+                            medianprops={'color': 'red', 'linewidth': 2},
+                            zorder=3)
 
-        # Color boxes from palette
         for patch, cat in zip(bp['boxes'], cats):
             color = palette.get(cat, '#4c72b0') if palette else '#4c72b0'
             patch.set_facecolor(color)
             patch.set_alpha(0.6)
 
-        # Set x-axis tick labels (matplotlib boxplot doesn't set them)
-        ax.set_xticks(range(len(cats)))
-        ax.set_xticklabels(cats)
-
-    # --- harmful bars at cap line ---
-    if has_harmful:
-        # Auto-compute cap_value: next power-of-ten above the highest valid
-        # data point (with a small multiplier so the line is clearly above).
-        if cap_value is None:
-            if has_valid and not plot_df.empty:
-                max_valid = plot_df[y_col].max()
-                # Next full power of ten above 3× the max data value
-                cap_value = 10 ** np.ceil(np.log10(max_valid * 3))
-            else:
-                cap_value = 1e5  # fallback when no valid data
-
-        ax.axhline(cap_value, color='grey', linestyle='--', alpha=0.6,
-                   linewidth=1.5)
-
-        # Draw a filled bar at the cap line whose width scales with the
-        # harmful percentage — visually the "opposite" of the valid box.
-        from matplotlib.patches import FancyBboxPatch
-        BAR_HEIGHT_FACTOR = 0.25  # fraction of a decade (log scale)
-        any_harmful_drawn = False
-        for strat in cats:
-            n_h = strat_harm.get(strat, 0)
-            if n_h == 0:
-                continue
-            any_harmful_drawn = True
-            tot = strat_total[strat]
-            harm_pct = n_h / tot if tot > 0 else 0.0
-            # Bar width proportional to harmful %
-            bar_w = MIN_WIDTH + (BASE_WIDTH - MIN_WIDTH) * harm_pct
-            x_center = cat_to_x[strat]
-            # Bar spans a small region in log-space centred on cap_value
-            bar_bottom = cap_value * 10 ** (-BAR_HEIGHT_FACTOR / 2)
-            bar_top = cap_value * 10 ** (BAR_HEIGHT_FACTOR / 2)
-            rect = plt.Rectangle(
-                (x_center - bar_w / 2, bar_bottom),
-                bar_w, bar_top - bar_bottom,
-                facecolor='red', alpha=0.35, edgecolor='red',
-                linewidth=1.2, zorder=5,
-            )
-            ax.add_patch(rect)
-        # Single legend entry for harmful bars handled below via explicit handles
-
-        # Percentage annotations
-        PCT_FONTSIZE = 11
-        for strat in cats:
-            n_h = strat_harm.get(strat, 0)
-            tot = strat_total[strat]
-            valid_pct = strat_valid_pct[strat]
-
-            # Harmful % above the cap bar in red
-            if n_h > 0:
-                harm_pct = 100.0 * n_h / tot if tot > 0 else 0.0
-                bar_top = cap_value * 10 ** (BAR_HEIGHT_FACTOR / 2)
-                ax.annotate(
-                    f"{harm_pct:.0f}%",
-                    xy=(cat_to_x[strat], bar_top),
-                    xytext=(0, 6), textcoords='offset points',
-                    fontsize=PCT_FONTSIZE, color='red', ha='center',
-                    va='bottom', fontweight='bold',
-                )
-
-            # Valid % below the box in green
-            if bp is not None:
-                idx = cats.index(strat)
-                whisker_low = bp['whiskers'][idx * 2].get_ydata().min()
-                ax.annotate(
-                    f"{valid_pct:.0f}%",
-                    xy=(cat_to_x[strat], whisker_low),
-                    xytext=(0, -10), textcoords='offset points',
-                    fontsize=PCT_FONTSIZE, color='green', ha='center',
-                    va='top', fontweight='bold',
-                )
-
-        # Legend entries for percentage annotations
-        from matplotlib.lines import Line2D
-        legend_handles = [
-            plt.Rectangle((0, 0), 1, 1, facecolor='red', alpha=0.35,
-                           edgecolor='red', linewidth=1.2,
-                           label='Never breaks even'),
-            Line2D([], [], marker='s', color='red', markersize=8,
-                   linestyle='None', label='% harmful'),
-            Line2D([], [], marker='s', color='green', markersize=8,
-                   linestyle='None', label='% beneficial'),
-        ]
-        ax.legend(handles=legend_handles, loc='lower right', fontsize=9)
-
-    # --- axes formatting ---
-    ax.set_yscale('log')
-    # Only major ticks at powers of 10 for breakeven plot
-    ax.yaxis.set_major_locator(LogLocator(base=10, subs=[1.0], numticks=15))
-    ax.yaxis.set_minor_locator(NullLocator())
-    ax.yaxis.set_minor_formatter(NullFormatter())
-    # Grid: only major lines
-    ax.grid(True, which='major', alpha=0.5, linewidth=0.8)
-    ax.grid(False, which='minor')
-
-    # If we drew a cap line, make sure the y-axis extends above it and add a
-    # dedicated tick labelled "+∞" so the reader can locate it on the axis.
-    if has_harmful and cap_value is not None:
-        from matplotlib.ticker import FixedLocator, FuncFormatter, LogFormatterSciNotation
-        # Extend y-axis a bit above the cap line
-        ax.set_ylim(top=cap_value * 3)
-        # Inject the cap value into the existing tick set
-        existing_major = [t for t in ax.yaxis.get_majorticklocs()
-                          if ax.get_ylim()[0] <= t <= ax.get_ylim()[1]]
-        new_ticks = sorted(set(existing_major) | {cap_value})
-        ax.yaxis.set_major_locator(FixedLocator(new_ticks))
-        # Use the default log formatter but override the cap tick with "+∞"
-        base_fmt = LogFormatterSciNotation()
-        base_fmt.set_axis(ax.yaxis)
-
-        _cap = cap_value  # capture for closure
-
-        def _fmt(val, pos):
-            if np.isclose(val, _cap):
-                return r'$+\infty$'
-            return base_fmt(val, pos)
-
-        ax.yaxis.set_major_formatter(FuncFormatter(_fmt))
-
-    ax.set_xlabel(get_display_name(x_col))
-    ax.set_ylabel('Break-even Number of Operations')
+    ax_box.set_yscale('log')
+    ax_box.yaxis.set_major_locator(LogLocator(base=10, subs=[1.0], numticks=15))
+    ax_box.yaxis.set_minor_locator(NullLocator())
+    ax_box.yaxis.set_minor_formatter(NullFormatter())
+    ax_box.grid(True, which='major', alpha=0.5, linewidth=0.8)
+    ax_box.grid(False, which='minor')
+    ax_box.set_ylabel('# of Operations to Break Even')
 
     if title is None:
         title = f"Break-even Operations by {get_display_name(x_col)}"
-    ax.set_title(title)
+    ax_box.set_title(title)
 
-    plt.xticks(rotation=45, ha='right')
+    # ===== Bottom subplot: success / failure percentage bars =====
+    bar_w = 0.6
+    # Red (harmful) on bottom, green (beneficial) on top
+    ax_bar.bar(positions, harm_pcts, width=bar_w,
+               color='#d9534f', edgecolor='white', linewidth=0.5,
+               label='Harmful (never breaks even)')
+    ax_bar.bar(positions, valid_pcts, width=bar_w, bottom=harm_pcts,
+               color='#5cb85c', edgecolor='white', linewidth=0.5,
+               label='Beneficial (finite break-even)')
+
+    # Annotate percentages inside the bars
+    for i, (vp, hp) in enumerate(zip(valid_pcts, harm_pcts)):
+        if hp >= 8:
+            ax_bar.text(i, hp / 2, f"{hp:.0f}%", ha='center', va='center',
+                        fontsize=9, fontweight='bold', color='white')
+        if vp >= 8:
+            ax_bar.text(i, hp + vp / 2, f"{vp:.0f}%", ha='center', va='center',
+                        fontsize=9, fontweight='bold', color='white')
+
+    ax_bar.set_ylim(0, 100)
+    ax_bar.set_yticks([0, 25, 50, 75, 100])
+    ax_bar.set_ylabel('Success (%)')
+    ax_bar.set_xlabel(get_display_name(x_col))
+    ax_bar.legend(loc='lower right', fontsize=8, ncol=2)
+
+    # Shared x-axis labels
+    ax_bar.set_xticks(positions)
+    ax_bar.set_xticklabels(cats, rotation=45, ha='right')
+
     _save_figure(output_path)
 
 

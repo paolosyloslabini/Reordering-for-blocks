@@ -1,17 +1,23 @@
 # ReorderingSurvey-2026
 
 
-Think again on binned speedups plots.
+XXX Think again on binned speedups plots.
+
+Add versioning to jobs, so you can know which version of a script you ran on. 
 
 For each reorder, how many matrices get improved, and how many damaged? in terms of speedup, block density, etc.
 
 Random scrambling experiments (IN PROGRESS)
 
-Reordering-time analysis and break-even analysis. 
+XXX Reordering-time analysis and break-even analysis. 
+
+Re-run slashburn
 
 Re-run GROOT
 
 Re-run SPARTA
+
+Re-run BSR.
 
 run geometric mean.
 
