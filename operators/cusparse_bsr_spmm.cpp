@@ -179,10 +179,15 @@ int main(int argc, char** argv) {
     CHECK_CUSPARSE(cusparseSetMatType(descrC, CUSPARSE_MATRIX_TYPE_GENERAL));
     CHECK_CUSPARSE(cusparseSetMatIndexBase(descrC, CUSPARSE_INDEX_BASE_ZERO));
 
-    // Convert CSR to BSR on device
+    // Convert CSR to BSR on device — timed as preprocessing
     int nnzb = 0;
     int *d_bsrRowPtr;
     CHECK_CUDA(cudaMalloc(&d_bsrRowPtr, (mb + 1) * sizeof(int)));
+
+    cudaEvent_t prepStart, prepStop;
+    CHECK_CUDA(cudaEventCreate(&prepStart));
+    CHECK_CUDA(cudaEventCreate(&prepStop));
+    CHECK_CUDA(cudaEventRecord(prepStart));
     
     // Get nnzb (using legacy API - no modern replacement available)
     #pragma GCC diagnostic push
@@ -213,8 +218,14 @@ int main(int argc, char** argv) {
         descrC,
         d_bsrVal, d_bsrRowPtr, d_bsrColInd));
     #pragma GCC diagnostic pop
+
+    CHECK_CUDA(cudaEventRecord(prepStop));
+    CHECK_CUDA(cudaEventSynchronize(prepStop));
+    float preprocessingMs = 0;
+    CHECK_CUDA(cudaEventElapsedTime(&preprocessingMs, prepStart, prepStop));
+    CHECK_CUDA(cudaEventDestroy(prepStart));
+    CHECK_CUDA(cudaEventDestroy(prepStop));
     
-    CHECK_CUDA(cudaDeviceSynchronize());
     std::cerr << "BSR conversion complete: nnzb=" << nnzb << std::endl;
     
     // Verify BSR data on host
@@ -296,6 +307,7 @@ int main(int argc, char** argv) {
     // Print results
     printTimer("loading", loadingMs);
     printTimer("transfer", transferMs);
+    printTimer("preprocessing", preprocessingMs);
     printTimer("operation", avgMs);
     
     return 0;

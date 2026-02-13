@@ -24,7 +24,11 @@ filters:
   square_only: true
 
   # Minimum number of rows. Set to null to disable.
-  min_size: null
+  min_size: 10000
+
+  # Maximum number of rows or columns. Matrices exceeding this in
+  # either dimension are removed. Set to null to disable.
+  max_size: 1000000
 
   # Remove matrices whose original bandwidth is below this threshold
   # (trivially banded). Set to null to disable.

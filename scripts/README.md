@@ -38,6 +38,8 @@ python scripts/plot.py [--one-per-family] [--n-cols N] [--kernel KERNEL]
 
 **Outputs to:** `plots/n_cols_{N}/{kernel}/`
 
+Break-even analysis plots (minimum SpMM operations for reordering to pay for itself) are generated per kernel under `plots/n_cols_{N}/{kernel}/breakeven/`. Cases where reordering is harmful are shown as × markers at a cap line.
+
 ### plot_utils.py
 
 Shared plotting utilities and style configurations.
@@ -71,6 +73,7 @@ SbatchMan/experiments/*/jobs/*/output.txt
             ▼
        plot.py
             │
-            ▼
-      plots/*/
+            ├──> plots/n_cols_{N}/{kernel}/breakeven/   (break-even boxplots)
+            ├──> plots/n_cols_{N}/{kernel}/speedup/      (speedup boxplots)
+            └──> plots/reorder_analysis/                 (structural analysis)
 ```

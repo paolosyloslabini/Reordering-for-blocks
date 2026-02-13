@@ -491,6 +491,17 @@ def parse_args():
         action="store_true",
         help="Generate only median improvement ratio tables"
     )
+
+    # Fine-grained section selection (used by run_plots.py wrapper)
+    SECTION_CHOICES = ['correlations', 'blocksize', 'improvement']
+    parser.add_argument(
+        "--sections", nargs="+", choices=SECTION_CHOICES, default=None,
+        help=(
+            "Run only the listed table sections. "
+            "Overrides --blocksize-only / --improvement-only. "
+            f"Choices: {', '.join(SECTION_CHOICES)}"
+        ),
+    )
     return parser.parse_args()
 
 
@@ -522,13 +533,22 @@ def main():
     # Generate tables
     # ------------------------------------------------------------------
     print("\nGenerating LaTeX tables...")
-    if args.improvement_only:
-        generate_improvement_tables(df_analysis, args.output)
+
+    # --sections takes priority over legacy --*-only flags
+    if args.sections is not None:
+        sections = set(args.sections)
+    elif args.improvement_only:
+        sections = {'improvement'}
     elif args.blocksize_only:
-        generate_blocksize_tables(df, args.output)
+        sections = {'blocksize'}
     else:
+        sections = {'correlations', 'blocksize', 'improvement'}
+
+    if 'correlations' in sections:
         generate_all_tables(df, args.output)
+    if 'blocksize' in sections:
         generate_blocksize_tables(df, args.output)
+    if 'improvement' in sections:
         generate_improvement_tables(df_analysis, args.output)
 
     print("\nDone!")

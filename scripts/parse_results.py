@@ -23,6 +23,8 @@ ANSI_ESCAPE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 TIMER_PATTERN = re.compile(r"<Timer>\[(.*?)\]\s+([0-9.]+)\s+ms")
 # GROOT uses a different timing output format
 GROOT_TIMER_PATTERN = re.compile(r"\[KNN_MST_DFS\]\s+Reordering time \(ms\):\s+([0-9.]+)")
+# Fallback: SPARTA binary prints "timer: VALUE" in microseconds
+SPARTA_TIMER_PATTERN = re.compile(r"^timer:\s+([0-9.eE+\-]+)", re.MULTILINE)
 
 # Known perm job tags (not ANALYSIS_ and not SPMM)
 PERM_TAGS = {
@@ -48,6 +50,13 @@ def get_matrix_name(path):
     """Extract matrix filename from path."""
     return Path(path).name
 
+# Canonical label aliases: map non-standard timer labels to standard ones.
+# e.g. DTC prints <Timer>[SpMM] instead of <Timer>[operation].
+TIMER_LABEL_ALIASES = {
+    "spmm": "operation",
+}
+
+
 def parse_timers(stdout):
     """Extract all timers from stdout."""
     if not stdout:
@@ -60,7 +69,8 @@ def parse_timers(stdout):
     
     # Look for lines like: <Timer>[label] 123.456 ms
     for match in TIMER_PATTERN.finditer(clean_stdout):
-        label = match.group(1)
+        label = match.group(1).lower()
+        label = TIMER_LABEL_ALIASES.get(label, label)
         value = float(match.group(2))
         timers[f"time_{label}_ms"] = value
     return timers
@@ -170,6 +180,14 @@ def parse_one_perm_job(job):
             groot_match = GROOT_TIMER_PATTERN.search(clean)
             if groot_match:
                 time_reordering_ms = float(groot_match.group(1))
+
+        # Fallback: SPARTA binary raw timer (microseconds)
+        # The binary prints "timer: VALUE" (us); reorder.py forwards it to stdout.
+        # Can be removed once all SPARTA jobs use an updated reorder.py.
+        if time_reordering_ms is None:
+            sparta_match = SPARTA_TIMER_PATTERN.search(clean)
+            if sparta_match:
+                time_reordering_ms = float(sparta_match.group(1)) / 1000.0
 
         # Skip jobs that didn't produce any timing data
         if time_reordering_ms is None:

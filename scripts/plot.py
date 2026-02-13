@@ -42,12 +42,28 @@ def parse_args():
                         help="Override: include rectangular matrices")
     parser.add_argument("--min-size", type=int, default=None,
                         help="Override: minimum matrix size (rows)")
+    parser.add_argument("--max-size", type=int, default=None,
+                        help="Override: maximum matrix size (rows or cols)")
     
     # Plot selection
     parser.add_argument("--only-reorder-analysis", action="store_true")
     parser.add_argument("--only-kernels", action="store_true")
     parser.add_argument("--n-cols", type=int, default=None, help="Filter to specific n_cols")
     parser.add_argument("--kernel", type=str, default=None, help="Filter to specific kernel")
+    
+    # Fine-grained section selection (used by run_plots.py wrapper)
+    SECTION_CHOICES = [
+        'kernels', 'breakeven',
+        'reorder-analysis', 'reorderability', 'per-matrix', 'timing',
+    ]
+    parser.add_argument(
+        "--sections", nargs="+", choices=SECTION_CHOICES, default=None,
+        help=(
+            "Run only the listed plot sections. "
+            "Overrides --only-kernels / --only-reorder-analysis. "
+            f"Choices: {', '.join(SECTION_CHOICES)}"
+        ),
+    )
     
     return parser.parse_args()
 
@@ -657,6 +673,125 @@ def generate_reorder_timing_plots(df_analysis, out_dir, reordering_csv='results/
     print(f"  Timing plots saved to {timing_dir}")
 
 
+def generate_breakeven_plots(df, out_dir, reordering_csv='results/results_reordering.csv', args=None):
+    """Compute and plot break-even number of operations for each reordering.
+
+    For every (matrix, perm, kernel_id, n_cols) tuple the break-even count is:
+
+        breakeven_n = time_reordering_ms / (time_baseline_ms - time_reordered_ms)
+
+    Cases where reordering is harmful (denominator ≤ 0) are shown as '×'
+    markers at a cap line and excluded from boxplot statistics.
+
+    Outputs one boxplot per (kernel, n_cols, perm_type) to
+    ``plots/n_cols_{N}/{kernel}/breakeven/``.
+    """
+    print("\n=== Break-even Analysis ===")
+
+    # --- Load reordering times ---
+    reorder_csv_path = Path(reordering_csv)
+    if not reorder_csv_path.exists():
+        print(f"  Reordering CSV not found at {reorder_csv_path} — skipping break-even plots. "
+              "Run  python scripts/parse_results.py  first to generate it.")
+        return
+
+    df_time = pd.read_csv(reorder_csv_path)
+    if df_time.empty or 'time_reordering_ms' not in df_time.columns:
+        print("  No reordering timing data available — skipping.")
+        return
+
+    # Keep only timing columns we need
+    df_time = df_time[['matrix', 'perm', 'time_reordering_ms']].copy()
+    # Average over duplicate runs for the same (matrix, perm)
+    df_time = df_time.groupby(['matrix', 'perm'], as_index=False)['time_reordering_ms'].mean()
+    print(f"  Loaded {len(df_time)} reordering timing entries")
+
+    # --- Baseline operation times ---
+    df_baseline = (
+        df[df['strategy'] == 'Original']
+        .groupby(['matrix', 'kernel_id', 'n_cols'])['time_operation_ms']
+        .mean()
+        .reset_index()
+        .rename(columns={'time_operation_ms': 'time_baseline_ms'})
+    )
+
+    # --- Reordered rows only ---
+    df_reord = df[df['strategy'] != 'Original'].copy()
+    if df_reord.empty:
+        print("  No reordered operation data — skipping.")
+        return
+
+    # Merge baseline time
+    df_reord = df_reord.merge(df_baseline, on=['matrix', 'kernel_id', 'n_cols'], how='inner')
+
+    # Merge reordering time
+    df_reord = df_reord.merge(df_time, on=['matrix', 'perm'], how='inner')
+
+    if df_reord.empty:
+        print("  No overlapping data between operations and reordering timing — skipping.")
+        return
+
+    # --- Compute break-even ---
+    df_reord['time_saved_ms'] = df_reord['time_baseline_ms'] - df_reord['time_operation_ms']
+    df_reord['breakeven_n'] = np.where(
+        df_reord['time_saved_ms'] > 0,
+        df_reord['time_reordering_ms'] / df_reord['time_saved_ms'],
+        np.nan,
+    )
+    df_reord['harmful'] = df_reord['time_saved_ms'] <= 0
+
+    n_valid = int((~df_reord['harmful']).sum())
+    n_harmful = int(df_reord['harmful'].sum())
+    print(f"  Break-even computed: {n_valid} valid, {n_harmful} harmful (never breaks even)")
+
+    # --- Apply CLI filters ---
+    n_cols_values = sorted(df_reord['n_cols'].unique())
+    if args is not None and args.n_cols is not None:
+        if args.n_cols in n_cols_values:
+            n_cols_values = [args.n_cols]
+        else:
+            print(f"  Warning: n_cols={args.n_cols} not in data; available: {n_cols_values}")
+            return
+
+    kernel_filter = args.kernel if args is not None else None
+
+    # --- Generate plots ---
+    for n_cols in n_cols_values:
+        df_nc = df_reord[df_reord['n_cols'] == n_cols]
+
+        kernels = sorted(df_nc['kernel_id'].unique())
+        if kernel_filter:
+            kernels = [k for k in kernels if kernel_filter.lower() in k.lower()]
+            if not kernels:
+                continue
+
+        for kernel in kernels:
+            df_k = df_nc[df_nc['kernel_id'] == kernel]
+            kernel_safe = pu.safe_filename(kernel)
+            breakeven_dir = out_dir / f"n_cols_{int(n_cols)}" / kernel_safe / "breakeven"
+            breakeven_dir.mkdir(parents=True, exist_ok=True)
+
+            for perm_type in sorted(df_k['perm_type'].unique()):
+                df_pt = df_k[df_k['perm_type'] == perm_type]
+                strategies = sorted(df_pt['strategy'].unique())
+                palette = pu.get_strategy_palette(strategies)
+
+                df_valid = df_pt[~df_pt['harmful']]
+                df_harm = df_pt[df_pt['harmful']]
+
+                pu.breakeven_boxplot(
+                    df_valid, df_harm,
+                    'strategy', 'breakeven_n',
+                    breakeven_dir / f"breakeven_{perm_type}.png",
+                    title=f"Break-even Operations — {perm_type}\n{kernel}  (n_cols={int(n_cols)})",
+                    order=[s for s in strategies if s in df_valid['strategy'].unique()
+                           or s in df_harm['strategy'].unique()],
+                    palette=palette,
+                )
+
+    print(f"  Break-even plots saved under {out_dir}/n_cols_*/*/breakeven/")
+
+
 def generate_reorder_analysis_plots(df_analysis, out_dir):
     """Generate reordering analysis plots (independent of kernel performance)."""
 
@@ -729,11 +864,28 @@ def generate_reorder_analysis_plots(df_analysis, out_dir):
             title_template, output_dir, filename_template)
 
 
+def _should_run(section: str, args) -> bool:
+    """Decide whether *section* should run given CLI flags.
+
+    Priority: --sections (fine-grained) > --only-* (coarse) > default (all).
+    """
+    if args.sections is not None:
+        return section in args.sections
+    # Legacy coarse flags
+    kernel_sections = {'kernels', 'breakeven'}
+    reorder_sections = {'reorder-analysis', 'reorderability', 'per-matrix', 'timing'}
+    if args.only_kernels:
+        return section in kernel_sections
+    if args.only_reorder_analysis:
+        return section in reorder_sections
+    return True  # no filter → run everything
+
+
 def main():
     args = parse_args()
     
-    # Validate mutually exclusive options
-    if args.only_reorder_analysis and args.only_kernels:
+    # Validate mutually exclusive options (only matters for legacy flags)
+    if args.sections is None and args.only_reorder_analysis and args.only_kernels:
         print("Error: --only-reorder-analysis and --only-kernels are mutually exclusive.")
         return
     
@@ -753,6 +905,7 @@ def main():
         'matrices_list': args.matrices_list,
         'one_per_family': args.one_per_family,
         'min_size': args.min_size,
+        'max_size': args.max_size,
     }
     # --include-rectangular means square_only=False
     if args.include_rectangular is not None:
@@ -772,41 +925,52 @@ def main():
     print(f"Unique kernels: {df['kernel_id'].unique().tolist()}")
     print(f"Unique n_cols: {sorted(df['n_cols'].unique())}")
     
+    # Helper for reordering CSV path (shared by breakeven & timing)
+    def _reordering_csv():
+        return _cfg.get('data', {}).get('reordering_csv',
+                                        'results/results_reordering.csv')
+    
     # -----------------------------------------------------------------
-    # 3. Generate Plots
+    # 3. Generate Plots  (each guarded by _should_run)
     # -----------------------------------------------------------------
     
-    # Kernel performance plots
-    if not args.only_reorder_analysis:
+    if _should_run('kernels', args):
         print("\n" + "="*60)
         print("Generating kernel performance plots...")
         print("="*60)
         generate_kernel_plots(df, out_dir, args)
+
+    if _should_run('breakeven', args):
+        print("\n" + "="*60)
+        print("Generating break-even analysis plots...")
+        print("="*60)
+        generate_breakeven_plots(df, out_dir, reordering_csv=_reordering_csv(),
+                                 args=args)
     
-    # Reordering analysis plots
-    if not args.only_kernels:
+    if _should_run('reorder-analysis', args):
         print("\n" + "="*60)
         print("Generating reordering analysis plots...")
         print("="*60)
         generate_reorder_analysis_plots(df_analysis, out_dir)
         
+    if _should_run('reorderability', args):
         print("\n" + "="*60)
         print("Generating reorderability analysis plots...")
         print("="*60)
         generate_reorderability_plots(df_analysis, out_dir)
 
+    if _should_run('per-matrix', args):
         print("\n" + "="*60)
         print("Generating per-matrix difficulty study...")
         print("="*60)
         generate_per_matrix_study(df_analysis, out_dir)
 
+    if _should_run('timing', args):
         print("\n" + "="*60)
         print("Generating reordering timing analysis...")
         print("="*60)
-        reordering_csv = _cfg.get('data', {}).get('reordering_csv',
-                                                   'results/results_reordering.csv')
         generate_reorder_timing_plots(df_analysis, out_dir,
-                                      reordering_csv=reordering_csv)
+                                      reordering_csv=_reordering_csv())
     
     print(f"\nAll plots saved to {out_dir}")
 

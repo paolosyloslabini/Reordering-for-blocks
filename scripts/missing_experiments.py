@@ -92,6 +92,7 @@ def main():
             one_per_family=filt.get('one_per_family', True),
             square_only=filt.get('square_only', True),
             min_size=filt.get('min_size'),
+            max_size=filt.get('max_size'),
             min_bandwidth=filt.get('min_bandwidth'),
             max_sparsity_factor=filt.get('max_sparsity_factor'),
             filter_diagonal=filt.get('filter_diagonal', True),
