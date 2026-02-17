@@ -90,4 +90,4 @@ jobs:
           mtx_name=$(basename {mtx} .mtx)
           mkdir -p perms/SB_slashburn
           perm_path=perms/SB_slashburn/$mtx_name.perm
-        command: "./MtxPerm/SPARSEBASE/build/slashburn_perm {mtx} $perm_path --k 1"
+        command: "./MtxPerm/SPARSEBASE/build/slashburn_perm {mtx} $perm_path"

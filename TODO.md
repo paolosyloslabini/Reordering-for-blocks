@@ -17,7 +17,7 @@ Re-run GROOT
 
 Re-run SPARTA
 
-Re-run BSR.
+Re-run BSR, DTC?
 
 run geometric mean.
 
@@ -30,6 +30,10 @@ Note on the breakeven analysis:
             - SMaT, ASpT: Their external binaries hide internal preprocessing. You can't currently correct the breakeven for these without modifying the binaries.
 
     - Ignoring cost of applying permutation. 
+
+Check wiskers in boxplots.
+
+fig. 4.7 which are the most promising ones. 
 
 # STYLE
 

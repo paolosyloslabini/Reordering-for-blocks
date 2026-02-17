@@ -9,7 +9,6 @@ Experiment configuration files for SbatchMan job management.
 SLURM job configurations defining resource requirements:
 - `gpu`: GPU partition settings (A100, time limits, memory)
 - `cpu`: CPU-only partition settings
-- `bigmem`: High-memory configurations
 
 ### matrices.yaml
 
