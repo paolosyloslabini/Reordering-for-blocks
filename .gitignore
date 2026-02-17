@@ -9,3 +9,26 @@ plots/
 /plots
 *.pyc
 test/groot_test.perm
+
+# External operator libraries
+operators/DTC-SpMM/
+operators/FlashSparse/
+operators/smat/
+operators/cusparse_bsr_spmm
+
+# External dependencies
+ccutils
+
+# Data and results
+datasets/
+*.csv
+*.log
+PaToH.log.*
+
+# Experiment outputs
+SbatchMan/archive/
+SbatchMan/experiments/
+
+# Permutation data
+perms/
+perms_random/
