@@ -82,20 +82,24 @@ def main():
         
     torch.cuda.synchronize()
     
-    # Benchmark
-    t0 = time.perf_counter()
+    # Benchmark with CUDA events
+    timings = []
     for _ in range(args.n_iterations):
+        start_event = torch.cuda.Event(enable_timing=True)
+        end_event = torch.cuda.Event(enable_timing=True)
+        start_event.record()
         if not args.balance:
             DTCSpMM.run_DTCSpMM(X, RowWindowOffset, TCblocktileId, TCblockoffset, SparseAToXindex, num_rows, nnz, args.exeplan)
         else:
             DTCSpMM.run_DTCSpMM_balance(X, TCblockRowid, TCblocktileId, TCblockoffset, SparseAToXindex, num_rows, args.exeplan)
-    torch.cuda.synchronize()
-    total_ms = (time.perf_counter() - t0) * 1000
-    avg_ms = total_ms / args.n_iterations
-    
-    print_timer("Loading", loading_ms)
-    print_timer("Preprocessing", preprocessing_ms)
-    print_timer("SpMM", avg_ms)
+        end_event.record()
+        torch.cuda.synchronize()
+        timings.append(start_event.elapsed_time(end_event))
+    avg_ms = sum(timings) / len(timings)
+
+    print_timer("loading", loading_ms)
+    print_timer("preprocessing", preprocessing_ms)
+    print_timer("operation", avg_ms)
     
     # Calculate GFLOPs
     gflops = (2 * nnz * args.n_cols) / (avg_ms * 1e6)
