@@ -41,7 +41,7 @@ jobs:
           temp_mtx=$(mktemp /tmp/pre_perm_XXXXXX.mtx) &&
           python3 MtxPerm/pre_permute.py {mtx} $temp_mtx
           --perm perms/random1D/$mtx_name.perm --perm-type SYMMETRIC &&
-          python3 MtxPerm/SPARTA/reorder.py $temp_mtx $perm_path --block-size 32 --tau 0.1;
+          python3 MtxPerm/SPARTA/reorder.py $temp_mtx $perm_path --block-size 32 --tau 0.5;
           rm -f $temp_mtx
 
       - tag: "SB_degree_RANDOM"
