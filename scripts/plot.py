@@ -199,6 +199,8 @@ def generate_kernel_plots(df, out_dir, args):
             binned_dir = base_dir / "binned_speedup"
             binned_dir.mkdir(parents=True, exist_ok=True)
             
+            density_bins = [0, 1.5, 2.0, 3.0, 1000.0]
+            density_labels = ['<1.5x', '1.5-2x', '2-3x', '>3x']
             for bs in [4, 8, 16, 32, 64, 128]:
                 imp_col = f'density_improvement_{bs}'
                 if imp_col in df_reordered.columns:
@@ -206,7 +208,9 @@ def generate_kernel_plots(df, out_dir, args):
                         df_reordered, imp_col, 'speedup',
                         binned_dir / f"speedup_by_density_imp_bs{bs}.png",
                         title=f"Speedup Distribution by Density Improvement (BS {bs})\n{kernel}",
-                        baseline=1.0
+                        baseline=1.0,
+                        bins=density_bins,
+                        labels=density_labels
                     )
             
             for imp_col in ['row_spread_improvement', 'vertical_adjacency_improvement','bandwidth_improvement',]:
@@ -276,6 +280,34 @@ def generate_kernel_plots(df, out_dir, args):
                 pu.grouped_scatter_publication(
                     df_nc, loc_col, 'gflops', 'kernel_id', kernels,
                     grouped_linear_dir / f"gflops_vs_{loc_col}_linear.png",
+                    group_labels=kernel_labels,
+                    log_x=False, log_y=False,
+                )
+
+        # -----------------------------------------------------------------
+        # 5. Grouped Scatter: Improvement vs Speedup (reordered only)
+        # -----------------------------------------------------------------
+        df_nc_reordered = df_nc[df_nc['strategy'] != 'Original']
+
+        grouped_imp_dir = out_dir / f"n_cols_{int(n_cols)}" / "grouped_improvement_vs_speedup"
+        grouped_imp_dir.mkdir(parents=True, exist_ok=True)
+
+        for bs in [4, 8, 16, 32, 64, 128]:
+            imp_col = f'density_improvement_{bs}'
+            if imp_col in df_nc_reordered.columns:
+                pu.grouped_scatter_publication(
+                    df_nc_reordered, imp_col, 'speedup', 'kernel_id', kernels,
+                    grouped_imp_dir / f"speedup_vs_density_imp_bs{bs}.png",
+                    group_labels=kernel_labels,
+                    log_x=False, log_y=False,
+                )
+
+        for imp_col in ['bandwidth_improvement', 'row_spread_improvement',
+                        'vertical_adjacency_improvement']:
+            if imp_col in df_nc_reordered.columns:
+                pu.grouped_scatter_publication(
+                    df_nc_reordered, imp_col, 'speedup', 'kernel_id', kernels,
+                    grouped_imp_dir / f"speedup_vs_{imp_col}.png",
                     group_labels=kernel_labels,
                     log_x=False, log_y=False,
                 )

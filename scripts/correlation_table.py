@@ -125,7 +125,7 @@ def correlation_to_latex(corr_df, metrics, kernel_names,
     lines = []
 
     # Table header
-    lines.append(r'\begin{table}[htbp]')
+    lines.append(r'\begin{table}[htb!]')
     lines.append(r'\centering')
     lines.append(r'\footnotesize')
 
@@ -226,7 +226,7 @@ def generate_all_tables(df, output_dir, metrics=None, kernel_names=None):
         corr_df = compute_correlations(df, n_cols, metrics, kernels)
 
         caption_tpl = (
-            "{{corr_display}} correlation between metrics and SpMM GFLOPS "
+            "{corr_display} correlation between metrics and SpMM GFLOPS "
             f"($n_{{{{cols}}}} = {n_cols_int}$). "
             f"Correlation is calculated across matrices in SuiteSparse and all "
             f"their reorderings, for a total of {n_matrices:,} configurations.")
@@ -259,7 +259,7 @@ def generate_blocksize_tables(df, output_dir, kernel_names=None):
         corr_df = compute_correlations(df, n_cols, bd_metrics, kernels)
 
         caption_tpl = (
-            "{{corr_display}} correlation between block density and SpMM GFLOPS "
+            "{corr_display} correlation between block density and SpMM GFLOPS "
             f"across block sizes ($n_{{{{cols}}}} = {n_cols_int}$). "
             f"Correlation is calculated across matrices in SuiteSparse and all "
             f"their reorderings, for a total of {n_matrices:,} configurations.")
@@ -317,7 +317,7 @@ def generate_per_metric_tables(df, output_dir, metrics=None, kernel_names=None):
 
         # Build LaTeX table
         lines = []
-        lines.append(r'\begin{table}[htbp]')
+        lines.append(r'\begin{table}[htb!]')
         lines.append(r'\centering')
         lines.append(r'\footnotesize')
         col_spec = 'l' + 'c' * len(n_cols_ints)
@@ -408,7 +408,7 @@ def improvement_to_latex(median_df, metrics, caption=None, label=None):
         LaTeX table string.
     """
     lines = []
-    lines.append(r'\begin{table}[htbp]')
+    lines.append(r'\begin{table}[htb!]')
     lines.append(r'\centering')
     lines.append(r'\footnotesize')
 

@@ -12,8 +12,11 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib as mpl
 from scipy.io import mmread
 from scipy.sparse import csr_matrix
+from settings import PERMS, get_perm_display, get_perm_color
+from plot_utils import set_professional_style
 
 
 def load_permutation_file(perm_path, perm_type='SYMMETRIC'):
@@ -60,44 +63,81 @@ def apply_permutation(A, row_perm, col_perm):
     return A
 
 
+def _get_canonical_order(labels):
+    """Return *labels* sorted in canonical PERMS order (Original first).
+
+    Unknown labels are appended alphabetically at the end.
+    """
+    canonical = ['Original'] + [p['display'] for p in PERMS.values()]
+    order = [l for l in canonical if l in labels]
+    extra = sorted(set(labels) - set(order))
+    return order + extra
+
+
+def _label_color(label):
+    """Return the PERMS color for a display-name label, grey for Original."""
+    if label == 'Original':
+        return '#888888'
+    # Reverse-lookup: display name -> color
+    for p in PERMS.values():
+        if p['display'] == label:
+            return p['color']
+    return '#333333'
+
+
 def create_spy_plot(matrices_dict, output_path, matrix_name, figsize=None, markersize=0.5):
     """
     Create a multi-panel spy plot showing original and reordered matrices.
-    
+
     Args:
-        matrices_dict: Dict of {label: sparse_matrix}
+        matrices_dict: Dict of {label: sparse_matrix}  (labels are display names)
         output_path: Path to save the figure
         matrix_name: Name of the matrix for the title
         figsize: Figure size (auto-calculated if None)
         markersize: Size of markers in spy plot
     """
-    n_plots = len(matrices_dict)
+    # Sort panels in canonical order
+    ordered_labels = _get_canonical_order(list(matrices_dict.keys()))
+
+    n_plots = len(ordered_labels)
     n_cols = min(4, n_plots)
     n_rows = (n_plots + n_cols - 1) // n_cols
-    
+
     if figsize is None:
-        figsize = (4 * n_cols, 4 * n_rows)
-    
+        figsize = (3.5 * n_cols, 3.5 * n_rows + 0.6)
+
     fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize)
     if n_plots == 1:
         axes = np.array([axes])
     axes = axes.flatten()
-    
-    for idx, (label, A) in enumerate(matrices_dict.items()):
+
+    first_A = matrices_dict[ordered_labels[0]]
+    for idx, label in enumerate(ordered_labels):
+        A = matrices_dict[label]
         ax = axes[idx]
-        ax.spy(A, markersize=markersize, aspect='equal')
-        ax.set_title(label, fontsize=10)
-        ax.set_xlabel(f'{A.shape[1]} cols')
-        ax.set_ylabel(f'{A.shape[0]} rows')
-    
+        color = _label_color(label)
+        ax.spy(A, markersize=markersize, aspect='equal', color=color)
+        ax.set_title(label, fontsize=11, fontweight='bold', color=color)
+        # Only show dimension labels on edge subplots
+        row_idx, col_idx = divmod(idx, n_cols)
+        if row_idx == n_rows - 1:
+            ax.set_xlabel(f'{A.shape[1]:,} cols', fontsize=9)
+        else:
+            ax.set_xlabel('')
+        if col_idx == 0:
+            ax.set_ylabel(f'{A.shape[0]:,} rows', fontsize=9)
+        else:
+            ax.set_ylabel('')
+
     # Hide unused subplots
     for idx in range(n_plots, len(axes)):
         axes[idx].set_visible(False)
-    
-    fig.suptitle(f'Spy Plot: {matrix_name}\n(nnz={list(matrices_dict.values())[0].nnz:,})', 
-                 fontsize=12, fontweight='bold')
+
+    matrix_stem = Path(matrix_name).stem
+    fig.suptitle(f'{matrix_stem}  ({first_A.shape[0]:,} $\\times$ {first_A.shape[1]:,},  nnz = {first_A.nnz:,})',
+                 fontsize=13, fontweight='bold', y=1.01)
     plt.tight_layout()
-    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    plt.savefig(output_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
     plt.close()
 
 
@@ -213,6 +253,9 @@ def main():
     perms_dir = Path(args.perms_dir)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Use publication-quality style from the plotting pipeline
+    set_professional_style()
     
     # Load analysis data
     print(f"Loading analysis data from {args.analysis_csv}...")
@@ -354,12 +397,12 @@ def main():
             print(f"  Skipping: matrix too large (>{args.max_size})")
             continue
         
-        # Collect reordered versions
+        # Collect reordered versions (keyed by display name)
         matrices_dict = {"Original": A_original}
-        
+
         for algo in algorithms:
             perm_file = find_permutation_file(perms_dir, matrix_name, algo)
-            
+
             if perm_file is None:
                 # Try with algorithm name variations
                 algo_variations = [
@@ -372,22 +415,23 @@ def main():
                     perm_file = find_permutation_file(perms_dir, matrix_name, var)
                     if perm_file:
                         break
-            
+
             if perm_file is None:
                 print(f"  No permutation found for algorithm: {algo}")
                 continue
-            
+
             print(f"  Found permutation: {perm_file}")
-            
+
             # Get permutation type
             perm_type = get_perm_type_for_algorithm(algo, df, matrix_name)
             print(f"    Perm type: {perm_type}")
-            
+
             try:
                 row_perm, col_perm = load_permutation_file(perm_file, perm_type)
                 A_reordered = apply_permutation(A_original.copy(), row_perm, col_perm)
-                matrices_dict[algo] = A_reordered
-                print(f"    Successfully applied {algo} permutation")
+                display_name = get_perm_display(algo)
+                matrices_dict[display_name] = A_reordered
+                print(f"    Successfully applied {algo} ({display_name}) permutation")
             except Exception as e:
                 print(f"    Error applying permutation: {e}")
         
