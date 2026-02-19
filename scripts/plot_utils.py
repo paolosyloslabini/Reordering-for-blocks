@@ -722,21 +722,12 @@ def scatter_with_correlation(df, x_col, y_col, output_path,
     # Calculate Kendall's tau correlation
     tau, tau_p = stats.kendalltau(plot_df[x_col], plot_df[y_col])
     
-    # Calculate Pearson correlation (on log values if using log scale)
+    # Calculate Pearson correlation (raw linear values)
     x_vals = plot_df[x_col]
     y_vals = plot_df[y_col]
-    
-    # For Pearson on log scale, use log-transformed values (filter out non-positive)
-    if log_x or log_y:
-        valid_mask = (x_vals > 0) & (y_vals > 0)
-        x_for_pearson = np.log10(x_vals[valid_mask]) if log_x else x_vals[valid_mask]
-        y_for_pearson = np.log10(y_vals[valid_mask]) if log_y else y_vals[valid_mask]
-    else:
-        x_for_pearson = x_vals
-        y_for_pearson = y_vals
-    
-    if len(x_for_pearson) >= 2:
-        pearson_r, pearson_p = stats.pearsonr(x_for_pearson, y_for_pearson)
+
+    if len(x_vals) >= 2:
+        pearson_r, pearson_p = stats.pearsonr(x_vals, y_vals)
     else:
         pearson_r, pearson_p = np.nan, np.nan
     
@@ -1361,14 +1352,10 @@ def safe_filename(name):
 # Publication-Ready Scatter Plots
 # =============================================================================
 
-def _pearson_for_scatter(x_vals, y_vals, log_x, log_y):
-    """Compute Pearson r, optionally on log-transformed values."""
-    if log_x or log_y:
-        mask = (x_vals > 0) & (y_vals > 0)
-        xp = np.log10(x_vals[mask]) if log_x else x_vals[mask]
-        yp = np.log10(y_vals[mask]) if log_y else y_vals[mask]
-    else:
-        xp, yp = x_vals, y_vals
+def _pearson_for_scatter(x_vals, y_vals):
+    """Compute Pearson r on raw (linear) values."""
+    valid = x_vals.notna() & y_vals.notna()
+    xp, yp = x_vals[valid], y_vals[valid]
     if len(xp) >= 2:
         r, _ = stats.pearsonr(xp, yp)
         return r
@@ -1417,8 +1404,7 @@ def scatter_publication(df, x_col, y_col, output_path,
     ax.tick_params(axis='both', labelsize=11, which='major')
 
     if show_correlation:
-        pearson_r = _pearson_for_scatter(plot_df[x_col], plot_df[y_col],
-                                         log_x, log_y)
+        pearson_r = _pearson_for_scatter(plot_df[x_col], plot_df[y_col])
         ax.text(0.03, 0.97, f"r={pearson_r:.2f}",
                 transform=ax.transAxes, fontsize=10, va='top',
                 bbox=dict(boxstyle='round,pad=0.3', fc='white', alpha=0.8))
@@ -1479,8 +1465,7 @@ def grouped_scatter_publication(df, x_col, y_col, group_col, group_order,
                                 alpha=0.7, ax=ax, s=10)
 
             if show_correlation:
-                pr = _pearson_for_scatter(df_g[x_col], df_g[y_col],
-                                          log_x, log_y)
+                pr = _pearson_for_scatter(df_g[x_col], df_g[y_col])
                 ax.text(0.03, 0.97, f"r={pr:.2f}",
                         transform=ax.transAxes, fontsize=7, va='top',
                         bbox=dict(boxstyle='round,pad=0.2', fc='white',

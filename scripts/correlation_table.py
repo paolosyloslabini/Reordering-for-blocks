@@ -64,10 +64,9 @@ def compute_correlations(df, n_cols, metrics, kernels=None):
                 continue
 
             valid = df_k[[metric, 'gflops']].dropna()
-            valid_pos = valid[(valid[metric] > 0) & (valid['gflops'] > 0)]
 
-            if len(valid_pos) >= 10:
-                pearson_r, _ = stats.pearsonr(np.log10(valid_pos[metric]), np.log10(valid_pos['gflops']))
+            if len(valid) >= 10:
+                pearson_r, _ = stats.pearsonr(valid[metric], valid['gflops'])
                 row_data[f'{metric}_pearson'] = pearson_r
             else:
                 row_data[f'{metric}_pearson'] = np.nan
@@ -195,7 +194,7 @@ def _generate_corr_table(corr_df, metrics, kernel_names,
                           filename_prefix, n_cols_int,
                           header_name_func=None):
     """Generate Pearson r LaTeX table for one n_cols value."""
-    caption = caption_tpl.format(corr_display=r"Pearson's $r$ (on log values)")
+    caption = caption_tpl.format(corr_display=r"Pearson's $r$")
     label = f"tab:{label_prefix}_pearson_ncols_{n_cols_int}"
 
     latex = correlation_to_latex(
@@ -271,11 +270,11 @@ def generate_blocksize_tables(df, output_dir, kernel_names=None):
             n_cols_int, header_name_func=_bd_header)
 
 
-def generate_per_kernel_tables(df, output_dir, metrics=None, kernel_names=None):
-    """Generate per-kernel LaTeX tables: metrics (rows) x n_cols (columns).
+def generate_per_metric_tables(df, output_dir, metrics=None, kernel_names=None):
+    """Generate per-metric LaTeX tables: kernels (rows) x n_cols (columns).
 
-    For each kernel, produces a table where rows are structural metrics
-    and columns are n_cols values. Each cell shows Pearson r.
+    For each structural metric, produces a table where rows are kernels
+    and columns are n_cols values. Each cell shows Pearson r (raw linear).
     """
     if metrics is None:
         metrics = enabled_metrics()
@@ -288,36 +287,35 @@ def generate_per_kernel_tables(df, output_dir, metrics=None, kernel_names=None):
     n_cols_values = sorted(df['n_cols'].unique())
     kernels = _ordered_kernels(df, kernel_names)
 
-    for kernel in kernels:
-        df_k = df[df['kernel_id'] == kernel]
-        kernel_label = kernel_names.get(kernel, kernel)
-        kernel_safe = pu.safe_filename(kernel)
+    for mc in metrics:
+        if mc not in df.columns:
+            continue
 
-        # Build table: rows = metrics, columns = n_cols
-        table_data = {}
-        for n_cols in n_cols_values:
-            df_kn = df_k[df_k['n_cols'] == n_cols]
-            col_corrs = {}
-            for mc in metrics:
-                if mc not in df_kn.columns:
-                    col_corrs[mc] = np.nan
-                    continue
+        metric_display = get_metric_display(mc)
+        metric_safe = pu.safe_filename(mc)
+
+        # Build table: rows = kernels, columns = n_cols
+        rows = []
+        for kernel in kernels:
+            df_k = df[df['kernel_id'] == kernel]
+            row_data = {'kernel': kernel}
+            for n_cols in n_cols_values:
+                df_kn = df_k[df_k['n_cols'] == n_cols]
                 valid = df_kn[[mc, 'gflops']].dropna()
-                valid = valid[(valid[mc] > 0) & (valid['gflops'] > 0)]
                 if len(valid) < 5:
-                    col_corrs[mc] = np.nan
+                    row_data[int(n_cols)] = np.nan
                     continue
-                pearson_r, _ = stats.pearsonr(
-                    np.log10(valid[mc]), np.log10(valid['gflops']))
-                col_corrs[mc] = pearson_r
-            table_data[int(n_cols)] = col_corrs
+                pearson_r, _ = stats.pearsonr(valid[mc], valid['gflops'])
+                row_data[int(n_cols)] = pearson_r
+            rows.append(row_data)
 
-        corr_df = pd.DataFrame(table_data)
-        if corr_df.empty or corr_df.isna().all().all():
+        corr_df = pd.DataFrame(rows)
+        n_cols_ints = [int(nc) for nc in n_cols_values]
+
+        if corr_df[n_cols_ints].isna().all().all():
             continue
 
         # Build LaTeX table
-        n_cols_ints = list(corr_df.columns)
         lines = []
         lines.append(r'\begin{table}[htbp]')
         lines.append(r'\centering')
@@ -326,24 +324,18 @@ def generate_per_kernel_tables(df, output_dir, metrics=None, kernel_names=None):
         lines.append(r'\begin{tabular}{' + col_spec + '}')
         lines.append(r'\toprule')
 
-        header_cols = ['Metric'] + [f'$n_{{cols}} = {nc}$' for nc in n_cols_ints]
+        header_cols = ['Kernel'] + [f'$n_{{cols}} = {nc}$' for nc in n_cols_ints]
         lines.append(' & '.join(header_cols) + r' \\')
         lines.append(r'\midrule')
 
-        for mc in metrics:
-            if mc not in corr_df.index:
-                continue
-            row_vals = {nc: corr_df.loc[mc, nc] for nc in n_cols_ints}
-            valid_vals = {nc: v for nc, v in row_vals.items() if not pd.isna(v)}
-            best_nc = max(valid_vals, key=lambda nc: abs(valid_vals[nc])) if valid_vals else None
+        for _, row in corr_df.iterrows():
+            kernel_label = kernel_names.get(row['kernel'], row['kernel'])
 
-            cells = [get_metric_display(mc)]
+            cells = [kernel_label]
             for nc in n_cols_ints:
-                val = row_vals[nc]
+                val = row[nc]
                 if pd.isna(val):
                     cells.append('--')
-                elif nc == best_nc:
-                    cells.append(r'\textbf{' + f'{val:.3f}' + '}')
                 else:
                     cells.append(f'{val:.3f}')
             lines.append(' & '.join(cells) + r' \\')
@@ -351,12 +343,12 @@ def generate_per_kernel_tables(df, output_dir, metrics=None, kernel_names=None):
         lines.append(r'\bottomrule')
         lines.append(r'\end{tabular}')
         lines.append(
-            r'\caption{Pearson\'s $r$ (on log values) between metrics and '
-            f'SpMM GFLOPS for {kernel_label} across $n_{{cols}}$ values.}}')
-        lines.append(r'\label{tab:per_kernel_' + kernel_safe + '}')
+            r"\caption{Pearson's $r$ between " + metric_display +
+            r' and SpMM GFLOPS across $n_{cols}$ values.}')
+        lines.append(r'\label{tab:per_metric_' + metric_safe + '}')
         lines.append(r'\end{table}')
 
-        out_path = output_dir / f"per_kernel_pearson_{kernel_safe}.tex"
+        out_path = output_dir / f"per_metric_pearson_{metric_safe}.tex"
         with open(out_path, 'w') as f:
             f.write('\n'.join(lines))
         print(f"Saved: {out_path}")
@@ -571,7 +563,7 @@ def parse_args():
     )
 
     # Fine-grained section selection (used by run_plots.py wrapper)
-    SECTION_CHOICES = ['correlations', 'blocksize', 'per-kernel', 'improvement']
+    SECTION_CHOICES = ['correlations', 'blocksize', 'per-metric', 'improvement']
     parser.add_argument(
         "--sections", nargs="+", choices=SECTION_CHOICES, default=None,
         help=(
@@ -620,14 +612,14 @@ def main():
     elif args.blocksize_only:
         sections = {'blocksize'}
     else:
-        sections = {'correlations', 'blocksize', 'per-kernel', 'improvement'}
+        sections = {'correlations', 'blocksize', 'per-metric', 'improvement'}
 
     if 'correlations' in sections:
         generate_all_tables(df, args.output)
     if 'blocksize' in sections:
         generate_blocksize_tables(df, args.output)
-    if 'per-kernel' in sections:
-        generate_per_kernel_tables(df, args.output)
+    if 'per-metric' in sections:
+        generate_per_metric_tables(df, args.output)
     if 'improvement' in sections:
         generate_improvement_tables(df_analysis, args.output)
 

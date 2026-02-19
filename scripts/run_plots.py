@@ -35,7 +35,7 @@ PLOT_GROUPS = [
 CORR_GROUPS = [
     ("Metric-kernel correlation tables", "correlations"),
     ("Block-size correlation tables",    "blocksize"),
-    ("Per-kernel correlation tables",    "per-kernel"),
+    ("Per-metric correlation tables",    "per-metric"),
     ("Median improvement tables",        "improvement"),
     ("ALL correlation tables",           None),
 ]

@@ -416,11 +416,9 @@ def generate_reorderability_plots(df_analysis, out_dir):
         
         # Add correlation (use full data for correlation)
         valid = df_metric[['baseline_value', 'improvement_ratio']].dropna()
-        valid = valid[(valid['baseline_value'] > 0) & (valid['improvement_ratio'] > 0)]
         if len(valid) > 10:
             tau, p = stats.kendalltau(valid['baseline_value'], valid['improvement_ratio'])
-            # Pearson on log values since we use log scale
-            pearson_r, _ = stats.pearsonr(np.log10(valid['baseline_value']), np.log10(valid['improvement_ratio']))
+            pearson_r, _ = stats.pearsonr(valid['baseline_value'], valid['improvement_ratio'])
             ax.set_title(f'Improvement vs {metric_display}\nτ = {tau:.3f}, r = {pearson_r:.3f}{clip_note}')
         else:
             ax.set_title(f'Improvement vs {metric_display}{clip_note}')
@@ -462,11 +460,9 @@ def _reorderability_scatter(df_full, df_clipped, x_col, x_label, y_label,
     ax.scatter(df_clipped[x_col], df_clipped['improvement_ratio'], alpha=0.5)
 
     valid = df_full[[x_col, 'improvement_ratio']].dropna()
-    valid = valid[(valid[x_col] > 0) & (valid['improvement_ratio'] > 0)]
     if len(valid) > 10:
         tau, _ = stats.kendalltau(valid[x_col], valid['improvement_ratio'])
-        pearson_r, _ = stats.pearsonr(np.log10(valid[x_col]),
-                                       np.log10(valid['improvement_ratio']))
+        pearson_r, _ = stats.pearsonr(valid[x_col], valid['improvement_ratio'])
         ax.set_title(f'{metric_display} Improvement vs {x_label}\n'
                      f'\u03c4 = {tau:.3f}, r = {pearson_r:.3f}{clip_note}')
     else:
