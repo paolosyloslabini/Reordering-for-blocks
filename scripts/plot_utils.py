@@ -1355,3 +1355,170 @@ def get_improvement_columns(df):
 def safe_filename(name):
     """Convert string to safe filename."""
     return name.replace('/', '_').replace(' ', '_').replace('\\', '_')
+
+
+# =============================================================================
+# Publication-Ready Scatter Plots
+# =============================================================================
+
+def _pearson_for_scatter(x_vals, y_vals, log_x, log_y):
+    """Compute Pearson r, optionally on log-transformed values."""
+    if log_x or log_y:
+        mask = (x_vals > 0) & (y_vals > 0)
+        xp = np.log10(x_vals[mask]) if log_x else x_vals[mask]
+        yp = np.log10(y_vals[mask]) if log_y else y_vals[mask]
+    else:
+        xp, yp = x_vals, y_vals
+    if len(xp) >= 2:
+        r, _ = stats.pearsonr(xp, yp)
+        return r
+    return np.nan
+
+
+def scatter_publication(df, x_col, y_col, output_path,
+                        hue_col=None, log_x=None, log_y=None,
+                        show_correlation=True, label=None,
+                        figsize=(3.5, 3.0)):
+    """Publication-ready scatter plot sized for 6-per-half-page layout.
+
+    No title.  Large ticks and axis labels for readability at small print
+    size.  Correlation shown as in-plot annotation.
+    """
+    plot_df = df.dropna(subset=[x_col, y_col])
+    if len(plot_df) < 2:
+        print(f"Skipping {output_path}: insufficient data")
+        return
+
+    if log_x is None:
+        log_x = use_log_scale(x_col)
+    if log_y is None:
+        log_y = use_log_scale(y_col)
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    if hue_col and hue_col in plot_df.columns:
+        pal = get_strategy_palette() if hue_col == 'strategy' else "Set2"
+        sns.scatterplot(data=plot_df, x=x_col, y=y_col, hue=hue_col,
+                        alpha=0.7, ax=ax, palette=pal, s=15)
+    else:
+        sns.scatterplot(data=plot_df, x=x_col, y=y_col, alpha=0.7, ax=ax, s=15)
+
+    if log_x:
+        ax.set_xscale('log')
+    if log_y:
+        ax.set_yscale('log')
+    if log_x or log_y:
+        format_log_axes(ax)
+    else:
+        ax.grid(True, alpha=0.3)
+
+    ax.set_xlabel(get_display_name(x_col), fontsize=13)
+    ax.set_ylabel(get_display_name(y_col), fontsize=13)
+    ax.tick_params(axis='both', labelsize=11, which='major')
+
+    if show_correlation:
+        pearson_r = _pearson_for_scatter(plot_df[x_col], plot_df[y_col],
+                                         log_x, log_y)
+        ax.text(0.03, 0.97, f"r={pearson_r:.2f}",
+                transform=ax.transAxes, fontsize=10, va='top',
+                bbox=dict(boxstyle='round,pad=0.3', fc='white', alpha=0.8))
+
+    if label:
+        ax.text(0.97, 0.03, label, transform=ax.transAxes, fontsize=10,
+                ha='right', va='bottom',
+                bbox=dict(boxstyle='round,pad=0.3', fc='wheat', alpha=0.8))
+
+    _save_figure(output_path)
+
+
+def grouped_scatter_publication(df, x_col, y_col, group_col, group_order,
+                                output_path, group_labels=None,
+                                hue_col=None, log_x=None, log_y=None,
+                                show_correlation=True,
+                                figsize=(7.0, 4.5)):
+    """2x3 grouped scatter with shared axes.  One subplot per group.
+
+    Designed for 6 kernels on half a page: y-labels only on the left
+    column, x-labels only on the bottom row.
+    """
+    plot_df = df.dropna(subset=[x_col, y_col])
+    if len(plot_df) < 2:
+        print(f"Skipping {output_path}: insufficient data")
+        return
+
+    if log_x is None:
+        log_x = use_log_scale(x_col)
+    if log_y is None:
+        log_y = use_log_scale(y_col)
+    if group_labels is None:
+        group_labels = {}
+
+    nrows, ncols = 2, 3
+    n_groups = min(len(group_order), nrows * ncols)
+
+    fig, axes = plt.subplots(nrows, ncols, figsize=figsize,
+                             sharex=True, sharey=True, squeeze=False)
+
+    for idx in range(n_groups):
+        group = group_order[idx]
+        r, c = divmod(idx, ncols)
+        ax = axes[r][c]
+        df_g = plot_df[plot_df[group_col] == group]
+
+        if len(df_g) < 2:
+            ax.text(0.5, 0.5, 'No data', transform=ax.transAxes,
+                    ha='center', fontsize=8)
+        else:
+            if hue_col and hue_col in df_g.columns:
+                pal = get_strategy_palette() if hue_col == 'strategy' else "Set2"
+                sns.scatterplot(data=df_g, x=x_col, y=y_col, hue=hue_col,
+                                alpha=0.7, ax=ax, palette=pal, s=10,
+                                legend=(idx == 0))
+            else:
+                sns.scatterplot(data=df_g, x=x_col, y=y_col,
+                                alpha=0.7, ax=ax, s=10)
+
+            if show_correlation:
+                pr = _pearson_for_scatter(df_g[x_col], df_g[y_col],
+                                          log_x, log_y)
+                ax.text(0.03, 0.97, f"r={pr:.2f}",
+                        transform=ax.transAxes, fontsize=7, va='top',
+                        bbox=dict(boxstyle='round,pad=0.2', fc='white',
+                                  alpha=0.8))
+
+        if log_x:
+            ax.set_xscale('log')
+        if log_y:
+            ax.set_yscale('log')
+
+        # Group label (kernel name)
+        ax.text(0.97, 0.03, group_labels.get(group, group),
+                transform=ax.transAxes, fontsize=8, ha='right', va='bottom',
+                fontweight='bold')
+
+        # Edge labels only
+        if c == 0:
+            ax.set_ylabel(get_display_name(y_col), fontsize=10)
+        else:
+            ax.set_ylabel('')
+        if r == nrows - 1:
+            ax.set_xlabel(get_display_name(x_col), fontsize=10)
+        else:
+            ax.set_xlabel('')
+
+        ax.tick_params(axis='both', labelsize=8)
+
+        if log_x or log_y:
+            format_log_axes(ax)
+        else:
+            ax.grid(True, alpha=0.3)
+
+    # Hide unused subplots
+    for idx in range(n_groups, nrows * ncols):
+        r, c = divmod(idx, ncols)
+        axes[r][c].set_visible(False)
+
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
+    plt.close(fig)
+    print(f"Saved: {Path(output_path).name}")
