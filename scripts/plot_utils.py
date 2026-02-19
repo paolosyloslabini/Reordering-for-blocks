@@ -832,9 +832,9 @@ def boxplot_by_category(df, x_col, y_col, output_path,
         sns.stripplot(data=plot_df, x=x_col, y=y_col, order=order,
                       color='black', alpha=0.4, jitter=0.25, size=3, ax=ax)
     
-    # Draw boxplot
+    # Draw boxplot with whiskers at 5th–95th percentiles
     sns.boxplot(data=plot_df, x=x_col, y=y_col, order=order,
-                showfliers=False, palette=palette, width=0.6,
+                showfliers=False, whis=(5, 95), palette=palette, width=0.6,
                 boxprops={'alpha': 0.6},
                 medianprops={'color': 'red', 'linewidth': 2},
                 ax=ax)
@@ -1140,25 +1140,19 @@ def binned_boxplot(df, bin_col, value_col, output_path,
         sns.stripplot(data=plot_df, x='bin', y=value_col, order=bin_order,
                       color='black', alpha=0.4, jitter=0.25, size=3, ax=ax)
     
-    # Draw boxplot
+    # Draw boxplot with whiskers at 5th–95th percentiles
     sns.boxplot(data=plot_df, x='bin', y=value_col, order=bin_order,
-                showfliers=False, palette="viridis", width=0.6,
+                showfliers=False, whis=(5, 95), palette="viridis", width=0.6,
                 boxprops={'alpha': 0.6},
                 medianprops={'color': 'red', 'linewidth': 2},
                 ax=ax)
-    
-    # Add count labels positioned above the top whisker of each box
+
+    # Add count labels positioned just above the top whisker (95th percentile)
     for i, label in enumerate(bin_order):
         count = bin_counts[label]
-        # Calculate the top whisker position (Q3 + 1.5*IQR)
         bin_data = plot_df[plot_df['bin'] == label][value_col]
-        q1 = bin_data.quantile(0.25)
-        q3 = bin_data.quantile(0.75)
-        iqr = q3 - q1
-        top_whisker = q3 + 1.5 * iqr
-        # Use the maximum of top_whisker and actual max in the data (capped by whisker)
-        y_pos = min(top_whisker, bin_data.max())
-        ax.text(i, y_pos, f"n={int(count)}", 
+        y_pos = bin_data.quantile(0.95)
+        ax.text(i, y_pos, f"n={int(count)}",
                 ha='center', va='bottom', fontsize=9)
     
     if baseline is not None:
