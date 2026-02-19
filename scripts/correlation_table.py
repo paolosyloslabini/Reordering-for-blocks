@@ -37,52 +37,42 @@ def _ordered_kernels(df, kernel_names):
 
 
 def compute_correlations(df, n_cols, metrics, kernels=None):
-    """Compute Kendall's tau and Pearson correlations between metrics and GFLOPS.
-    
+    """Compute Pearson correlations between metrics and GFLOPS.
+
     Args:
         df: DataFrame with merged data
         n_cols: Filter to this n_cols value
         metrics: List of metric columns to compute correlations for
         kernels: List of kernels to include (None = all)
-    
+
     Returns:
-        DataFrame with correlations (rows=kernels, cols=metrics with _tau and _pearson suffixes)
+        DataFrame with correlations (rows=kernels, cols=metrics with _pearson suffix)
     """
     df_nc = df[df['n_cols'] == n_cols]
-    
+
     if kernels is None:
         kernels = sorted(df_nc['kernel_id'].unique())
-    
+
     results = []
     for kernel in kernels:
         df_k = df_nc[df_nc['kernel_id'] == kernel]
         row_data = {'kernel': kernel}
-        
+
         for metric in metrics:
             if metric not in df_k.columns:
-                row_data[f'{metric}_tau'] = np.nan
                 row_data[f'{metric}_pearson'] = np.nan
                 continue
-                
+
             valid = df_k[[metric, 'gflops']].dropna()
-            # Filter positive values for log-based Pearson
-            valid_pos = valid[(valid[metric] > 0) & (valid['gflops'] > 0)]
-            
+
             if len(valid) >= 10:
-                tau, _ = stats.kendalltau(valid[metric], valid['gflops'])
-                row_data[f'{metric}_tau'] = tau
-            else:
-                row_data[f'{metric}_tau'] = np.nan
-            
-            if len(valid_pos) >= 10:
-                # Pearson on log values (both metric and gflops typically benefit from log scale)
-                pearson_r, _ = stats.pearsonr(np.log10(valid_pos[metric]), np.log10(valid_pos['gflops']))
+                pearson_r, _ = stats.pearsonr(valid[metric], valid['gflops'])
                 row_data[f'{metric}_pearson'] = pearson_r
             else:
                 row_data[f'{metric}_pearson'] = np.nan
-        
+
         results.append(row_data)
-    
+
     return pd.DataFrame(results)
 
 
@@ -112,79 +102,77 @@ def _multiline_header(name):
 
 
 def correlation_to_latex(corr_df, metrics, kernel_names,
-                         corr_type='tau', caption=None, label=None,
+                         caption=None, label=None,
                          header_name_func=None):
     """Convert correlation DataFrame to LaTeX table string.
-    
+
     Args:
-        corr_df: DataFrame with correlations (must have 'kernel' column and 
-                 columns with _tau and _pearson suffixes)
+        corr_df: DataFrame with correlations (must have 'kernel' column and
+                 columns with _pearson suffix)
         metrics: List of metric columns in desired order (base names without suffix)
         kernel_names: Dict mapping kernel IDs to display names
-        corr_type: 'tau' for Kendall's tau or 'pearson' for Pearson's r
         caption: Table caption (optional)
         label: Table label for referencing (optional)
         header_name_func: Callable(metric_key) -> header string. Defaults
                           to ``get_metric_display``.
-    
+
     Returns:
         LaTeX table string
     """
     if header_name_func is None:
         header_name_func = get_metric_display
-    
+
     lines = []
-    
+
     # Table header
     lines.append(r'\begin{table}[htbp]')
     lines.append(r'\centering')
     lines.append(r'\footnotesize')
-    
+
     # Column specification: first column left-aligned, rest centered
     col_spec = 'l' + 'c' * len(metrics)
     lines.append(r'\begin{tabular}{' + col_spec + '}')
     lines.append(r'\toprule')
-    
+
     # Header row (multiline full names)
     header_cols = ['Kernel'] + [_multiline_header(header_name_func(m)) for m in metrics]
     lines.append(' & '.join(header_cols) + r' \\')
     lines.append(r'\midrule')
-    
+
     # Data rows
-    suffix = f'_{corr_type}'
     for _, row in corr_df.iterrows():
         kernel = row['kernel']
         kernel_display = kernel_names.get(kernel, kernel)
-        
+
         # Find the maximum value in this row (for bolding)
-        metric_values = {m: row.get(f'{m}{suffix}', np.nan) for m in metrics}
+        metric_values = {m: row.get(f'{m}_pearson', np.nan) for m in metrics}
         valid_values = {m: v for m, v in metric_values.items() if not pd.isna(v)}
         max_metric = max(valid_values, key=lambda m: abs(valid_values[m])) if valid_values else None
-        
+
         values = [kernel_display]
         for metric in metrics:
-            val = row.get(f'{metric}{suffix}', np.nan)
-            
+            val = row.get(f'{metric}_pearson', np.nan)
+
             if pd.isna(val):
                 values.append('--')
             elif metric == max_metric:
                 values.append(r'\textbf{' + f'{val:.3f}' + '}')
             else:
                 values.append(f'{val:.3f}')
-        
+
         lines.append(' & '.join(values) + r' \\')
-    
+
     # Table footer
     lines.append(r'\bottomrule')
     lines.append(r'\end{tabular}')
-    
+
     if caption:
         lines.append(r'\caption{' + caption + '}')
     if label:
         lines.append(r'\label{' + label + '}')
-    
+
     lines.append(r'\end{table}')
-    
+
     return '\n'.join(lines)
 
 
@@ -201,29 +189,27 @@ def _build_metric_legend(metrics):
     return ', '.join(parts) + '.'
 
 
-def _generate_corr_table_pair(corr_df, metrics, kernel_names,
-                               output_dir, caption_tpl, label_prefix,
-                               filename_prefix, n_cols_int,
-                               header_name_func=None):
-    """Generate Kendall tau and Pearson r LaTeX tables for one n_cols value."""
-    for corr_type, corr_name in [('tau', r"Kendall's $\tau$"),
-                                  ('pearson', r"Pearson's $r$ (on log values)")]:
-        caption = caption_tpl.format(corr_display=corr_name)
-        label = f"tab:{label_prefix}_{corr_type}_ncols_{n_cols_int}"
+def _generate_corr_table(corr_df, metrics, kernel_names,
+                          output_dir, caption_tpl, label_prefix,
+                          filename_prefix, n_cols_int,
+                          header_name_func=None):
+    """Generate Pearson r LaTeX table for one n_cols value."""
+    caption = caption_tpl.format(corr_display=r"Pearson's $r$")
+    label = f"tab:{label_prefix}_pearson_ncols_{n_cols_int}"
 
-        latex = correlation_to_latex(
-            corr_df, metrics, kernel_names,
-            corr_type=corr_type, caption=caption, label=label,
-            header_name_func=header_name_func)
+    latex = correlation_to_latex(
+        corr_df, metrics, kernel_names,
+        caption=caption, label=label,
+        header_name_func=header_name_func)
 
-        out_path = output_dir / f"{filename_prefix}_{corr_type}_ncols_{n_cols_int}.tex"
-        with open(out_path, 'w') as f:
-            f.write(latex)
-        print(f"Saved: {out_path}")
+    out_path = output_dir / f"{filename_prefix}_pearson_ncols_{n_cols_int}.tex"
+    with open(out_path, 'w') as f:
+        f.write(latex)
+    print(f"Saved: {out_path}")
 
 
 def generate_all_tables(df, output_dir, metrics=None, kernel_names=None):
-    """Generate LaTeX correlation tables (tau + Pearson) for all n_cols values."""
+    """Generate LaTeX Pearson correlation tables for all n_cols values."""
     if metrics is None:
         metrics = enabled_metrics()
     if kernel_names is None:
@@ -245,14 +231,14 @@ def generate_all_tables(df, output_dir, metrics=None, kernel_names=None):
             f"Correlation is calculated across matrices in SuiteSparse and all "
             f"their reorderings, for a total of {n_matrices:,} configurations.")
 
-        _generate_corr_table_pair(
+        _generate_corr_table(
             corr_df, metrics, kernel_names,
             output_dir, caption_tpl, 'correlation', 'correlation',
             n_cols_int)
 
 
 def generate_blocksize_tables(df, output_dir, kernel_names=None):
-    """Generate LaTeX block-density correlation tables (tau + Pearson) for all n_cols."""
+    """Generate LaTeX block-density Pearson correlation tables for all n_cols."""
     if kernel_names is None:
         kernel_names = KERNEL_NAMES
 
@@ -278,10 +264,94 @@ def generate_blocksize_tables(df, output_dir, kernel_names=None):
             f"Correlation is calculated across matrices in SuiteSparse and all "
             f"their reorderings, for a total of {n_matrices:,} configurations.")
 
-        _generate_corr_table_pair(
+        _generate_corr_table(
             corr_df, bd_metrics, kernel_names,
             output_dir, caption_tpl, 'blocksize', 'blocksize',
             n_cols_int, header_name_func=_bd_header)
+
+
+def generate_per_metric_tables(df, output_dir, metrics=None, kernel_names=None):
+    """Generate per-metric LaTeX tables: kernels (rows) x n_cols (columns).
+
+    For each structural metric, produces a table where rows are kernels
+    and columns are n_cols values. Each cell shows Pearson r (raw linear).
+    """
+    if metrics is None:
+        metrics = enabled_metrics()
+    if kernel_names is None:
+        kernel_names = KERNEL_NAMES
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    n_cols_values = sorted(df['n_cols'].unique())
+    kernels = _ordered_kernels(df, kernel_names)
+
+    for mc in metrics:
+        if mc not in df.columns:
+            continue
+
+        metric_display = get_metric_display(mc)
+        metric_safe = pu.safe_filename(mc)
+
+        # Build table: rows = kernels, columns = n_cols
+        rows = []
+        for kernel in kernels:
+            df_k = df[df['kernel_id'] == kernel]
+            row_data = {'kernel': kernel}
+            for n_cols in n_cols_values:
+                df_kn = df_k[df_k['n_cols'] == n_cols]
+                valid = df_kn[[mc, 'gflops']].dropna()
+                if len(valid) < 5:
+                    row_data[int(n_cols)] = np.nan
+                    continue
+                pearson_r, _ = stats.pearsonr(valid[mc], valid['gflops'])
+                row_data[int(n_cols)] = pearson_r
+            rows.append(row_data)
+
+        corr_df = pd.DataFrame(rows)
+        n_cols_ints = [int(nc) for nc in n_cols_values]
+
+        if corr_df[n_cols_ints].isna().all().all():
+            continue
+
+        # Build LaTeX table
+        lines = []
+        lines.append(r'\begin{table}[htbp]')
+        lines.append(r'\centering')
+        lines.append(r'\footnotesize')
+        col_spec = 'l' + 'c' * len(n_cols_ints)
+        lines.append(r'\begin{tabular}{' + col_spec + '}')
+        lines.append(r'\toprule')
+
+        header_cols = ['Kernel'] + [f'$n_{{cols}} = {nc}$' for nc in n_cols_ints]
+        lines.append(' & '.join(header_cols) + r' \\')
+        lines.append(r'\midrule')
+
+        for _, row in corr_df.iterrows():
+            kernel_label = kernel_names.get(row['kernel'], row['kernel'])
+
+            cells = [kernel_label]
+            for nc in n_cols_ints:
+                val = row[nc]
+                if pd.isna(val):
+                    cells.append('--')
+                else:
+                    cells.append(f'{val:.3f}')
+            lines.append(' & '.join(cells) + r' \\')
+
+        lines.append(r'\bottomrule')
+        lines.append(r'\end{tabular}')
+        lines.append(
+            r"\caption{Pearson's $r$ between " + metric_display +
+            r' and SpMM GFLOPS across $n_{cols}$ values.}')
+        lines.append(r'\label{tab:per_metric_' + metric_safe + '}')
+        lines.append(r'\end{table}')
+
+        out_path = output_dir / f"per_metric_pearson_{metric_safe}.tex"
+        with open(out_path, 'w') as f:
+            f.write('\n'.join(lines))
+        print(f"Saved: {out_path}")
 
 
 # =============================================================================
@@ -493,7 +563,7 @@ def parse_args():
     )
 
     # Fine-grained section selection (used by run_plots.py wrapper)
-    SECTION_CHOICES = ['correlations', 'blocksize', 'improvement']
+    SECTION_CHOICES = ['correlations', 'blocksize', 'per-metric', 'improvement']
     parser.add_argument(
         "--sections", nargs="+", choices=SECTION_CHOICES, default=None,
         help=(
@@ -542,12 +612,14 @@ def main():
     elif args.blocksize_only:
         sections = {'blocksize'}
     else:
-        sections = {'correlations', 'blocksize', 'improvement'}
+        sections = {'correlations', 'blocksize', 'per-metric', 'improvement'}
 
     if 'correlations' in sections:
         generate_all_tables(df, args.output)
     if 'blocksize' in sections:
         generate_blocksize_tables(df, args.output)
+    if 'per-metric' in sections:
+        generate_per_metric_tables(df, args.output)
     if 'improvement' in sections:
         generate_improvement_tables(df_analysis, args.output)
 

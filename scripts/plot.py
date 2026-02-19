@@ -9,13 +9,12 @@ Simple iteration-based plotting script that:
 
 import argparse
 from pathlib import Path
-import seaborn as sns
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 from scipy import stats
 import plot_utils as pu
-from settings import get_perm_display
+from settings import get_perm_display, KERNEL_NAMES
 
 
 def parse_args():
@@ -108,30 +107,32 @@ def generate_kernel_plots(df, out_dir, args):
             gflops_dir = base_dir / "gflops_correlations"
             gflops_dir.mkdir(parents=True, exist_ok=True)
             
+            kernel_label = KERNEL_NAMES.get(kernel, kernel)
+
             # GFLOPS vs each density column
             for dens_col in density_cols:
                 bs = dens_col.split('_')[-1]
-                pu.scatter_with_correlation(
+                pu.scatter_publication(
                     df_k, dens_col, 'gflops',
                     gflops_dir / f"gflops_vs_density_bs{bs}.png",
-                    title=f"GFLOPS vs Block Density (BS {bs})\n{kernel}"
+                    label=kernel_label
                 )
-            
+
             # GFLOPS vs bandwidth
             if 'rel_bandwidth' in df_k.columns:
-                pu.scatter_with_correlation(
+                pu.scatter_publication(
                     df_k, 'rel_bandwidth', 'gflops',
                     gflops_dir / f"gflops_vs_rel_bandwidth.png",
-                    title=f"GFLOPS vs Relative Bandwidth\n{kernel}"
+                    label=kernel_label
                 )
-            
+
             # GFLOPS vs locality
             for loc_col in ['rel_row_spread', 'locality_vertical_adjacency_ratio']:
                 if loc_col in df_k.columns:
-                    pu.scatter_with_correlation(
+                    pu.scatter_publication(
                         df_k, loc_col, 'gflops',
                         gflops_dir / f"gflops_vs_{loc_col}.png",
-                        title=f"GFLOPS vs {pu.get_display_name(loc_col)}\n{kernel}"
+                        label=kernel_label
                     )
             
             # -----------------------------------------------------------------
@@ -143,33 +144,30 @@ def generate_kernel_plots(df, out_dir, args):
             # GFLOPS vs each density column in linear-linear scale
             for dens_col in density_cols:
                 bs = dens_col.split('_')[-1]
-                pu.scatter_with_correlation(
+                pu.scatter_publication(
                     df_k, dens_col, 'gflops',
                     linear_dir / f"gflops_vs_density_bs{bs}_linear.png",
-                    title=f"GFLOPS vs Block Density (BS {bs}) [Linear Scale]\n{kernel}",
-                    log_x=False,
-                    log_y=False
+                    log_x=False, log_y=False,
+                    label=kernel_label
                 )
-            
+
             # GFLOPS vs bandwidth (linear scale)
             if 'rel_bandwidth' in df_k.columns:
-                pu.scatter_with_correlation(
+                pu.scatter_publication(
                     df_k, 'rel_bandwidth', 'gflops',
                     linear_dir / f"gflops_vs_rel_bandwidth_linear.png",
-                    title=f"GFLOPS vs Relative Bandwidth [Linear Scale]\n{kernel}",
-                    log_x=False,
-                    log_y=False
+                    log_x=False, log_y=False,
+                    label=kernel_label
                 )
-            
+
             # GFLOPS vs locality (linear scale)
             for loc_col in ['rel_row_spread', 'locality_vertical_adjacency_ratio']:
                 if loc_col in df_k.columns:
-                    pu.scatter_with_correlation(
+                    pu.scatter_publication(
                         df_k, loc_col, 'gflops',
                         linear_dir / f"gflops_vs_{loc_col}_linear.png",
-                        title=f"GFLOPS vs {pu.get_display_name(loc_col)} [Linear Scale]\n{kernel}",
-                        log_x=False,
-                        log_y=False
+                        log_x=False, log_y=False,
+                        label=kernel_label
                     )
             
             # -----------------------------------------------------------------
@@ -219,6 +217,68 @@ def generate_kernel_plots(df, out_dir, args):
                         title=f"Speedup Distribution by {pu.get_display_name(imp_col)}\n{kernel}",
                         baseline=1.0
                     )
+
+        # -----------------------------------------------------------------
+        # 4. Grouped Scatter Plots (all kernels in 2x3 grid)
+        # -----------------------------------------------------------------
+        kernel_labels = {k: KERNEL_NAMES.get(k, k) for k in kernels}
+
+        # Log-log grouped scatter
+        grouped_dir = out_dir / f"n_cols_{int(n_cols)}" / "grouped_scatter"
+        grouped_dir.mkdir(parents=True, exist_ok=True)
+
+        for dens_col in density_cols:
+            bs = dens_col.split('_')[-1]
+            pu.grouped_scatter_publication(
+                df_nc, dens_col, 'gflops', 'kernel_id', kernels,
+                grouped_dir / f"gflops_vs_density_bs{bs}.png",
+                group_labels=kernel_labels,
+            )
+
+        if 'rel_bandwidth' in df_nc.columns:
+            pu.grouped_scatter_publication(
+                df_nc, 'rel_bandwidth', 'gflops', 'kernel_id', kernels,
+                grouped_dir / f"gflops_vs_rel_bandwidth.png",
+                group_labels=kernel_labels,
+            )
+
+        for loc_col in ['rel_row_spread', 'locality_vertical_adjacency_ratio']:
+            if loc_col in df_nc.columns:
+                pu.grouped_scatter_publication(
+                    df_nc, loc_col, 'gflops', 'kernel_id', kernels,
+                    grouped_dir / f"gflops_vs_{loc_col}.png",
+                    group_labels=kernel_labels,
+                )
+
+        # Linear grouped scatter
+        grouped_linear_dir = out_dir / f"n_cols_{int(n_cols)}" / "grouped_scatter_linear"
+        grouped_linear_dir.mkdir(parents=True, exist_ok=True)
+
+        for dens_col in density_cols:
+            bs = dens_col.split('_')[-1]
+            pu.grouped_scatter_publication(
+                df_nc, dens_col, 'gflops', 'kernel_id', kernels,
+                grouped_linear_dir / f"gflops_vs_density_bs{bs}_linear.png",
+                group_labels=kernel_labels,
+                log_x=False, log_y=False,
+            )
+
+        if 'rel_bandwidth' in df_nc.columns:
+            pu.grouped_scatter_publication(
+                df_nc, 'rel_bandwidth', 'gflops', 'kernel_id', kernels,
+                grouped_linear_dir / f"gflops_vs_rel_bandwidth_linear.png",
+                group_labels=kernel_labels,
+                log_x=False, log_y=False,
+            )
+
+        for loc_col in ['rel_row_spread', 'locality_vertical_adjacency_ratio']:
+            if loc_col in df_nc.columns:
+                pu.grouped_scatter_publication(
+                    df_nc, loc_col, 'gflops', 'kernel_id', kernels,
+                    grouped_linear_dir / f"gflops_vs_{loc_col}_linear.png",
+                    group_labels=kernel_labels,
+                    log_x=False, log_y=False,
+                )
 
 
 def generate_reorderability_plots(df_analysis, out_dir):
@@ -356,11 +416,9 @@ def generate_reorderability_plots(df_analysis, out_dir):
         
         # Add correlation (use full data for correlation)
         valid = df_metric[['baseline_value', 'improvement_ratio']].dropna()
-        valid = valid[(valid['baseline_value'] > 0) & (valid['improvement_ratio'] > 0)]
         if len(valid) > 10:
             tau, p = stats.kendalltau(valid['baseline_value'], valid['improvement_ratio'])
-            # Pearson on log values since we use log scale
-            pearson_r, _ = stats.pearsonr(np.log10(valid['baseline_value']), np.log10(valid['improvement_ratio']))
+            pearson_r, _ = stats.pearsonr(valid['baseline_value'], valid['improvement_ratio'])
             ax.set_title(f'Improvement vs {metric_display}\nτ = {tau:.3f}, r = {pearson_r:.3f}{clip_note}')
         else:
             ax.set_title(f'Improvement vs {metric_display}{clip_note}')
@@ -402,11 +460,9 @@ def _reorderability_scatter(df_full, df_clipped, x_col, x_label, y_label,
     ax.scatter(df_clipped[x_col], df_clipped['improvement_ratio'], alpha=0.5)
 
     valid = df_full[[x_col, 'improvement_ratio']].dropna()
-    valid = valid[(valid[x_col] > 0) & (valid['improvement_ratio'] > 0)]
     if len(valid) > 10:
         tau, _ = stats.kendalltau(valid[x_col], valid['improvement_ratio'])
-        pearson_r, _ = stats.pearsonr(np.log10(valid[x_col]),
-                                       np.log10(valid['improvement_ratio']))
+        pearson_r, _ = stats.pearsonr(valid[x_col], valid['improvement_ratio'])
         ax.set_title(f'{metric_display} Improvement vs {x_label}\n'
                      f'\u03c4 = {tau:.3f}, r = {pearson_r:.3f}{clip_note}')
     else:
@@ -951,7 +1007,7 @@ def main():
         print("="*60)
         generate_breakeven_plots(df, out_dir, reordering_csv=_reordering_csv(),
                                  args=args)
-    
+
     if _should_run('reorder-analysis', args):
         print("\n" + "="*60)
         print("Generating reordering analysis plots...")

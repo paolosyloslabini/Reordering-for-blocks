@@ -722,21 +722,12 @@ def scatter_with_correlation(df, x_col, y_col, output_path,
     # Calculate Kendall's tau correlation
     tau, tau_p = stats.kendalltau(plot_df[x_col], plot_df[y_col])
     
-    # Calculate Pearson correlation (on log values if using log scale)
+    # Calculate Pearson correlation (raw linear values)
     x_vals = plot_df[x_col]
     y_vals = plot_df[y_col]
-    
-    # For Pearson on log scale, use log-transformed values (filter out non-positive)
-    if log_x or log_y:
-        valid_mask = (x_vals > 0) & (y_vals > 0)
-        x_for_pearson = np.log10(x_vals[valid_mask]) if log_x else x_vals[valid_mask]
-        y_for_pearson = np.log10(y_vals[valid_mask]) if log_y else y_vals[valid_mask]
-    else:
-        x_for_pearson = x_vals
-        y_for_pearson = y_vals
-    
-    if len(x_for_pearson) >= 2:
-        pearson_r, pearson_p = stats.pearsonr(x_for_pearson, y_for_pearson)
+
+    if len(x_vals) >= 2:
+        pearson_r, pearson_p = stats.pearsonr(x_vals, y_vals)
     else:
         pearson_r, pearson_p = np.nan, np.nan
     
@@ -832,9 +823,9 @@ def boxplot_by_category(df, x_col, y_col, output_path,
         sns.stripplot(data=plot_df, x=x_col, y=y_col, order=order,
                       color='black', alpha=0.4, jitter=0.25, size=3, ax=ax)
     
-    # Draw boxplot
+    # Draw boxplot with whiskers at 5th–95th percentiles
     sns.boxplot(data=plot_df, x=x_col, y=y_col, order=order,
-                showfliers=False, palette=palette, width=0.6,
+                showfliers=False, whis=(5, 95), palette=palette, width=0.6,
                 boxprops={'alpha': 0.6},
                 medianprops={'color': 'red', 'linewidth': 2},
                 ax=ax)
@@ -1140,25 +1131,19 @@ def binned_boxplot(df, bin_col, value_col, output_path,
         sns.stripplot(data=plot_df, x='bin', y=value_col, order=bin_order,
                       color='black', alpha=0.4, jitter=0.25, size=3, ax=ax)
     
-    # Draw boxplot
+    # Draw boxplot with whiskers at 5th–95th percentiles
     sns.boxplot(data=plot_df, x='bin', y=value_col, order=bin_order,
-                showfliers=False, palette="viridis", width=0.6,
+                showfliers=False, whis=(5, 95), palette="viridis", width=0.6,
                 boxprops={'alpha': 0.6},
                 medianprops={'color': 'red', 'linewidth': 2},
                 ax=ax)
-    
-    # Add count labels positioned above the top whisker of each box
+
+    # Add count labels positioned just above the top whisker (95th percentile)
     for i, label in enumerate(bin_order):
         count = bin_counts[label]
-        # Calculate the top whisker position (Q3 + 1.5*IQR)
         bin_data = plot_df[plot_df['bin'] == label][value_col]
-        q1 = bin_data.quantile(0.25)
-        q3 = bin_data.quantile(0.75)
-        iqr = q3 - q1
-        top_whisker = q3 + 1.5 * iqr
-        # Use the maximum of top_whisker and actual max in the data (capped by whisker)
-        y_pos = min(top_whisker, bin_data.max())
-        ax.text(i, y_pos, f"n={int(count)}", 
+        y_pos = bin_data.quantile(0.95)
+        ax.text(i, y_pos, f"n={int(count)}",
                 ha='center', va='bottom', fontsize=9)
     
     if baseline is not None:
@@ -1361,3 +1346,164 @@ def get_improvement_columns(df):
 def safe_filename(name):
     """Convert string to safe filename."""
     return name.replace('/', '_').replace(' ', '_').replace('\\', '_')
+
+
+# =============================================================================
+# Publication-Ready Scatter Plots
+# =============================================================================
+
+def _pearson_for_scatter(x_vals, y_vals):
+    """Compute Pearson r on raw (linear) values."""
+    valid = x_vals.notna() & y_vals.notna()
+    xp, yp = x_vals[valid], y_vals[valid]
+    if len(xp) >= 2:
+        r, _ = stats.pearsonr(xp, yp)
+        return r
+    return np.nan
+
+
+def scatter_publication(df, x_col, y_col, output_path,
+                        hue_col=None, log_x=None, log_y=None,
+                        show_correlation=True, label=None,
+                        figsize=(3.5, 3.0)):
+    """Publication-ready scatter plot sized for 6-per-half-page layout.
+
+    No title.  Large ticks and axis labels for readability at small print
+    size.  Correlation shown as in-plot annotation.
+    """
+    plot_df = df.dropna(subset=[x_col, y_col])
+    if len(plot_df) < 2:
+        print(f"Skipping {output_path}: insufficient data")
+        return
+
+    if log_x is None:
+        log_x = use_log_scale(x_col)
+    if log_y is None:
+        log_y = use_log_scale(y_col)
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    if hue_col and hue_col in plot_df.columns:
+        pal = get_strategy_palette() if hue_col == 'strategy' else "Set2"
+        sns.scatterplot(data=plot_df, x=x_col, y=y_col, hue=hue_col,
+                        alpha=0.7, ax=ax, palette=pal, s=15)
+    else:
+        sns.scatterplot(data=plot_df, x=x_col, y=y_col, alpha=0.7, ax=ax, s=15)
+
+    if log_x:
+        ax.set_xscale('log')
+    if log_y:
+        ax.set_yscale('log')
+    if log_x or log_y:
+        format_log_axes(ax)
+    else:
+        ax.grid(True, alpha=0.3)
+
+    ax.set_xlabel(get_display_name(x_col), fontsize=13)
+    ax.set_ylabel(get_display_name(y_col), fontsize=13)
+    ax.tick_params(axis='both', labelsize=11, which='major')
+
+    if show_correlation:
+        pearson_r = _pearson_for_scatter(plot_df[x_col], plot_df[y_col])
+        ax.text(0.03, 0.97, f"r={pearson_r:.2f}",
+                transform=ax.transAxes, fontsize=10, va='top',
+                bbox=dict(boxstyle='round,pad=0.3', fc='white', alpha=0.8))
+
+    if label:
+        ax.text(0.97, 0.03, label, transform=ax.transAxes, fontsize=10,
+                ha='right', va='bottom',
+                bbox=dict(boxstyle='round,pad=0.3', fc='wheat', alpha=0.8))
+
+    _save_figure(output_path)
+
+
+def grouped_scatter_publication(df, x_col, y_col, group_col, group_order,
+                                output_path, group_labels=None,
+                                hue_col=None, log_x=None, log_y=None,
+                                show_correlation=True,
+                                figsize=(7.0, 4.5)):
+    """2x3 grouped scatter with shared axes.  One subplot per group.
+
+    Designed for 6 kernels on half a page: y-labels only on the left
+    column, x-labels only on the bottom row.
+    """
+    plot_df = df.dropna(subset=[x_col, y_col])
+    if len(plot_df) < 2:
+        print(f"Skipping {output_path}: insufficient data")
+        return
+
+    if log_x is None:
+        log_x = use_log_scale(x_col)
+    if log_y is None:
+        log_y = use_log_scale(y_col)
+    if group_labels is None:
+        group_labels = {}
+
+    nrows, ncols = 2, 3
+    n_groups = min(len(group_order), nrows * ncols)
+
+    fig, axes = plt.subplots(nrows, ncols, figsize=figsize,
+                             sharex=True, sharey=True, squeeze=False)
+
+    for idx in range(n_groups):
+        group = group_order[idx]
+        r, c = divmod(idx, ncols)
+        ax = axes[r][c]
+        df_g = plot_df[plot_df[group_col] == group]
+
+        if len(df_g) < 2:
+            ax.text(0.5, 0.5, 'No data', transform=ax.transAxes,
+                    ha='center', fontsize=8)
+        else:
+            if hue_col and hue_col in df_g.columns:
+                pal = get_strategy_palette() if hue_col == 'strategy' else "Set2"
+                sns.scatterplot(data=df_g, x=x_col, y=y_col, hue=hue_col,
+                                alpha=0.7, ax=ax, palette=pal, s=10,
+                                legend=(idx == 0))
+            else:
+                sns.scatterplot(data=df_g, x=x_col, y=y_col,
+                                alpha=0.7, ax=ax, s=10)
+
+            if show_correlation:
+                pr = _pearson_for_scatter(df_g[x_col], df_g[y_col])
+                ax.text(0.03, 0.97, f"r={pr:.2f}",
+                        transform=ax.transAxes, fontsize=7, va='top',
+                        bbox=dict(boxstyle='round,pad=0.2', fc='white',
+                                  alpha=0.8))
+
+        if log_x:
+            ax.set_xscale('log')
+        if log_y:
+            ax.set_yscale('log')
+
+        # Group label (kernel name)
+        ax.text(0.97, 0.03, group_labels.get(group, group),
+                transform=ax.transAxes, fontsize=8, ha='right', va='bottom',
+                fontweight='bold')
+
+        # Edge labels only
+        if c == 0:
+            ax.set_ylabel(get_display_name(y_col), fontsize=10)
+        else:
+            ax.set_ylabel('')
+        if r == nrows - 1:
+            ax.set_xlabel(get_display_name(x_col), fontsize=10)
+        else:
+            ax.set_xlabel('')
+
+        ax.tick_params(axis='both', labelsize=8)
+
+        if log_x or log_y:
+            format_log_axes(ax)
+        else:
+            ax.grid(True, alpha=0.3)
+
+    # Hide unused subplots
+    for idx in range(n_groups, nrows * ncols):
+        r, c = divmod(idx, ncols)
+        axes[r][c].set_visible(False)
+
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
+    plt.close(fig)
+    print(f"Saved: {Path(output_path).name}")
