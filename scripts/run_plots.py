@@ -33,11 +33,13 @@ PLOT_GROUPS = [
 
 # ── Correlation table groups (correlation_table.py --sections <key>) ─────────
 CORR_GROUPS = [
-    ("Metric-kernel correlation tables", "correlations"),
-    ("Block-size correlation tables",    "blocksize"),
-    ("Per-metric correlation tables",    "per-metric"),
-    ("Median improvement tables",        "improvement"),
-    ("ALL correlation tables",           None),
+    ("Metric-kernel correlation tables",              "correlations"),
+    ("Block-size correlation tables",                 "blocksize"),
+    ("Per-metric correlation tables",                 "per-metric"),
+    ("Median improvement tables",                     "improvement"),
+    ("Improvement-speedup correlation tables",        "imp-correlations"),
+    ("Improvement-speedup block-size tables",         "imp-blocksize"),
+    ("ALL correlation tables",                        None),
 ]
 
 # ── Spy plot (spy_plots.py) ──────────────────────────────────────────────────

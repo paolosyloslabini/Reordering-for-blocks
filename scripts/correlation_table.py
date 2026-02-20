@@ -472,6 +472,132 @@ def _write_improvement_table(imp_df, imp_cols, used_metrics,
     print(f"Saved: {out_path}")
 
 
+# =============================================================================
+# Improvement ↔ Speedup Correlation Tables
+# =============================================================================
+
+def _enabled_improvement_metrics():
+    """Return improvement column names matching the enabled correlation metrics."""
+    return [
+        'bandwidth_improvement',
+        'row_spread_improvement',
+        'vertical_adjacency_improvement',
+        'density_improvement_8',
+        'density_improvement_32',
+        'density_improvement_128',
+    ]
+
+
+def _density_improvement_metrics():
+    """Return density improvement columns for all block sizes."""
+    return [f'density_improvement_{bs}' for bs in BLOCK_SIZES]
+
+
+def compute_imp_correlations(df, n_cols, imp_metrics, kernels=None):
+    """Compute Pearson correlations between improvement metrics and speedup.
+
+    Only considers reordered rows (strategy != 'Original').
+    """
+    df_nc = df[(df['n_cols'] == n_cols) & (df['strategy'] != 'Original')]
+
+    if kernels is None:
+        kernels = sorted(df_nc['kernel_id'].unique())
+
+    results = []
+    for kernel in kernels:
+        df_k = df_nc[df_nc['kernel_id'] == kernel]
+        row_data = {'kernel': kernel}
+
+        for metric in imp_metrics:
+            if metric not in df_k.columns:
+                row_data[f'{metric}_pearson'] = np.nan
+                continue
+
+            valid = df_k[[metric, 'speedup']].dropna()
+            valid = valid[np.isfinite(valid[metric]) & np.isfinite(valid['speedup'])]
+
+            if len(valid) >= 10:
+                pearson_r, _ = stats.pearsonr(valid[metric], valid['speedup'])
+                row_data[f'{metric}_pearson'] = pearson_r
+            else:
+                row_data[f'{metric}_pearson'] = np.nan
+
+        results.append(row_data)
+
+    return pd.DataFrame(results)
+
+
+def generate_imp_correlation_tables(df, output_dir, kernel_names=None):
+    """Generate LaTeX tables correlating improvement metrics with speedup."""
+    if kernel_names is None:
+        kernel_names = KERNEL_NAMES
+
+    imp_metrics = _enabled_improvement_metrics()
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    kernels = _ordered_kernels(df, kernel_names)
+
+    for n_cols in sorted(df['n_cols'].unique()):
+        n_cols_int = int(n_cols)
+        df_nc = df[(df['n_cols'] == n_cols) & (df['strategy'] != 'Original')]
+        n_configs = df_nc[['matrix', 'perm', 'perm_type']].drop_duplicates().shape[0]
+        corr_df = compute_imp_correlations(df, n_cols, imp_metrics, kernels)
+
+        caption = (
+            r"Pearson's $r$ correlation between structural improvement and speedup "
+            f"($n_{{{{cols}}}} = {n_cols_int}$). "
+            f"Only reordered configurations are included ({n_configs:,} total).")
+        label = f"tab:imp_correlation_pearson_ncols_{n_cols_int}"
+
+        latex = correlation_to_latex(
+            corr_df, imp_metrics, kernel_names,
+            caption=caption, label=label)
+
+        out_path = output_dir / f"imp_correlation_pearson_ncols_{n_cols_int}.tex"
+        with open(out_path, 'w') as f:
+            f.write(latex)
+        print(f"Saved: {out_path}")
+
+
+def generate_imp_blocksize_tables(df, output_dir, kernel_names=None):
+    """Generate LaTeX tables correlating density improvement with speedup across block sizes."""
+    if kernel_names is None:
+        kernel_names = KERNEL_NAMES
+
+    bd_imp_metrics = _density_improvement_metrics()
+
+    def _bd_imp_header(m):
+        bs = m.split('_')[-1]
+        return f'${bs}\\times{bs}$'
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    kernels = _ordered_kernels(df, kernel_names)
+
+    for n_cols in sorted(df['n_cols'].unique()):
+        n_cols_int = int(n_cols)
+        df_nc = df[(df['n_cols'] == n_cols) & (df['strategy'] != 'Original')]
+        n_configs = df_nc[['matrix', 'perm', 'perm_type']].drop_duplicates().shape[0]
+        corr_df = compute_imp_correlations(df, n_cols, bd_imp_metrics, kernels)
+
+        caption = (
+            r"Pearson's $r$ correlation between block density improvement and speedup "
+            f"across block sizes ($n_{{{{cols}}}} = {n_cols_int}$). "
+            f"Only reordered configurations are included ({n_configs:,} total).")
+        label = f"tab:imp_blocksize_pearson_ncols_{n_cols_int}"
+
+        latex = correlation_to_latex(
+            corr_df, bd_imp_metrics, kernel_names,
+            caption=caption, label=label,
+            header_name_func=_bd_imp_header)
+
+        out_path = output_dir / f"imp_blocksize_pearson_ncols_{n_cols_int}.tex"
+        with open(out_path, 'w') as f:
+            f.write(latex)
+        print(f"Saved: {out_path}")
+
+
 def generate_improvement_tables(df_analysis, output_dir, metrics=None):
     """Generate LaTeX tables of median structural improvement ratios.
 
@@ -563,7 +689,8 @@ def parse_args():
     )
 
     # Fine-grained section selection (used by run_plots.py wrapper)
-    SECTION_CHOICES = ['correlations', 'blocksize', 'per-metric', 'improvement']
+    SECTION_CHOICES = ['correlations', 'blocksize', 'per-metric', 'improvement',
+                       'imp-correlations', 'imp-blocksize']
     parser.add_argument(
         "--sections", nargs="+", choices=SECTION_CHOICES, default=None,
         help=(
@@ -599,6 +726,10 @@ def main():
     # Add relative metrics to analysis df for improvement tables
     df_analysis = pu.add_relative_metrics(df_analysis)
 
+    # Add speedup and improvement columns for imp-correlation tables
+    df = pu.add_speedup(df)
+    df = pu.add_improvement_columns(df)
+
     # ------------------------------------------------------------------
     # Generate tables
     # ------------------------------------------------------------------
@@ -612,7 +743,8 @@ def main():
     elif args.blocksize_only:
         sections = {'blocksize'}
     else:
-        sections = {'correlations', 'blocksize', 'per-metric', 'improvement'}
+        sections = {'correlations', 'blocksize', 'per-metric', 'improvement',
+                     'imp-correlations', 'imp-blocksize'}
 
     if 'correlations' in sections:
         generate_all_tables(df, args.output)
@@ -622,6 +754,10 @@ def main():
         generate_per_metric_tables(df, args.output)
     if 'improvement' in sections:
         generate_improvement_tables(df_analysis, args.output)
+    if 'imp-correlations' in sections:
+        generate_imp_correlation_tables(df, args.output)
+    if 'imp-blocksize' in sections:
+        generate_imp_blocksize_tables(df, args.output)
 
     print("\nDone!")
 

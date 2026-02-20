@@ -48,7 +48,7 @@ ALL_METRICS = {
         'log_scale': True, 'enabled': True, 'higher_is_better': False,
     },
     'bandwidth_improvement': {
-        'display': 'Bandwidth Reduction',
+        'display': 'Bandwidth Reduction', 'short': 'BWR',
     },
 
     # ── Row spread / locality ────────────────────────────────────────────
@@ -64,8 +64,8 @@ ALL_METRICS = {
         'display': 'Relative Row Spread', 'short': 'RRS',
         'log_scale': True, 'enabled': True, 'higher_is_better': False,
     },
-    'row_spread_improvement':  {'display': 'Row Spread Reduction'},
-    'col_spread_improvement':  {'display': 'Col Spread Reduction'},
+    'row_spread_improvement':  {'display': 'Row Spread Reduction', 'short': 'RSR'},
+    'col_spread_improvement':  {'display': 'Col Spread Reduction', 'short': 'CSR'},
 
     # ── Column spread ────────────────────────────────────────────────────
     'locality_avg_col_spread': {
@@ -87,7 +87,7 @@ ALL_METRICS = {
         'enabled': True, 'higher_is_better': True,
     },
     'vertical_adjacency_improvement': {
-        'display': 'Vertical Adjacency Improvement',
+        'display': 'Vertical Adjacency Improvement', 'short': 'VAI',
     },
 
     # ── NNZ distribution ─────────────────────────────────────────────────
@@ -129,7 +129,8 @@ for _bs in BLOCK_SIZES:
         'higher_is_better': True,
     }
     ALL_METRICS[f'density_improvement_{_bs}'] = {
-        'display': f'Density Improvement (BS {_bs})',
+        'display': f'Density Improvement ${_bs}{{\\times}}{_bs}$',
+        'short': f'DI{_bs}',
     }
     for _pfx, _nm in [('avg', 'Avg'), ('max', 'Max')]:
         ALL_METRICS[f'{_pfx}_blocks_per_row_{_bs}'] = {
