@@ -6,7 +6,6 @@ Outputs LaTeX tables.
 
 import pandas as pd
 import numpy as np
-from scipy import stats
 import re
 import sys
 import warnings
@@ -36,8 +35,16 @@ def _ordered_kernels(df, kernel_names):
     return kernels if kernels else all_kernels
 
 
+def _corr_method_tag():
+    """Return a short tag for filenames, e.g. 'pearson', 'spearman'."""
+    return pu.get_correlation_method()
+
+
 def compute_correlations(df, n_cols, metrics, kernels=None):
-    """Compute Pearson correlations between metrics and GFLOPS.
+    """Compute correlations between metrics and GFLOPS.
+
+    The correlation method is read from ``filter_config.yaml``
+    (``display.correlation_method``).
 
     Args:
         df: DataFrame with merged data
@@ -46,12 +53,14 @@ def compute_correlations(df, n_cols, metrics, kernels=None):
         kernels: List of kernels to include (None = all)
 
     Returns:
-        DataFrame with correlations (rows=kernels, cols=metrics with _pearson suffix)
+        DataFrame with correlations (rows=kernels, cols=metrics with _corr suffix)
     """
     df_nc = df[df['n_cols'] == n_cols]
 
     if kernels is None:
         kernels = sorted(df_nc['kernel_id'].unique())
+
+    method = pu.get_correlation_method()
 
     results = []
     for kernel in kernels:
@@ -60,16 +69,16 @@ def compute_correlations(df, n_cols, metrics, kernels=None):
 
         for metric in metrics:
             if metric not in df_k.columns:
-                row_data[f'{metric}_pearson'] = np.nan
+                row_data[f'{metric}_corr'] = np.nan
                 continue
 
             valid = df_k[[metric, 'gflops']].dropna()
 
             if len(valid) >= 10:
-                pearson_r, _ = stats.pearsonr(valid[metric], valid['gflops'])
-                row_data[f'{metric}_pearson'] = pearson_r
+                r, _ = pu.compute_correlation(valid[metric], valid['gflops'], method)
+                row_data[f'{metric}_corr'] = r
             else:
-                row_data[f'{metric}_pearson'] = np.nan
+                row_data[f'{metric}_corr'] = np.nan
 
         results.append(row_data)
 
@@ -108,7 +117,7 @@ def correlation_to_latex(corr_df, metrics, kernel_names,
 
     Args:
         corr_df: DataFrame with correlations (must have 'kernel' column and
-                 columns with _pearson suffix)
+                 columns with _corr suffix)
         metrics: List of metric columns in desired order (base names without suffix)
         kernel_names: Dict mapping kernel IDs to display names
         caption: Table caption (optional)
@@ -145,13 +154,13 @@ def correlation_to_latex(corr_df, metrics, kernel_names,
         kernel_display = kernel_names.get(kernel, kernel)
 
         # Find the maximum value in this row (for bolding)
-        metric_values = {m: row.get(f'{m}_pearson', np.nan) for m in metrics}
+        metric_values = {m: row.get(f'{m}_corr', np.nan) for m in metrics}
         valid_values = {m: v for m, v in metric_values.items() if not pd.isna(v)}
         max_metric = max(valid_values, key=lambda m: abs(valid_values[m])) if valid_values else None
 
         values = [kernel_display]
         for metric in metrics:
-            val = row.get(f'{metric}_pearson', np.nan)
+            val = row.get(f'{metric}_corr', np.nan)
 
             if pd.isna(val):
                 values.append('--')
@@ -178,7 +187,7 @@ def correlation_to_latex(corr_df, metrics, kernel_names,
 
 def _build_metric_legend(metrics):
     """Build a LaTeX legend string expanding metric acronyms.
-    
+
     Example output: 'RBW: Relative Bandwidth, RRS: Relative Row Spread, ...'
     """
     parts = []
@@ -193,23 +202,25 @@ def _generate_corr_table(corr_df, metrics, kernel_names,
                           output_dir, caption_tpl, label_prefix,
                           filename_prefix, n_cols_int,
                           header_name_func=None):
-    """Generate Pearson r LaTeX table for one n_cols value."""
-    caption = caption_tpl.format(corr_display=r"Pearson's $r$")
-    label = f"tab:{label_prefix}_pearson_ncols_{n_cols_int}"
+    """Generate a correlation LaTeX table for one n_cols value."""
+    tag = _corr_method_tag()
+    corr_display = pu.correlation_display_name()
+    caption = caption_tpl.format(corr_display=corr_display)
+    label = f"tab:{label_prefix}_{tag}_ncols_{n_cols_int}"
 
     latex = correlation_to_latex(
         corr_df, metrics, kernel_names,
         caption=caption, label=label,
         header_name_func=header_name_func)
 
-    out_path = output_dir / f"{filename_prefix}_pearson_ncols_{n_cols_int}.tex"
+    out_path = output_dir / f"{filename_prefix}_{tag}_ncols_{n_cols_int}.tex"
     with open(out_path, 'w') as f:
         f.write(latex)
     print(f"Saved: {out_path}")
 
 
 def generate_all_tables(df, output_dir, metrics=None, kernel_names=None):
-    """Generate LaTeX Pearson correlation tables for all n_cols values."""
+    """Generate LaTeX correlation tables for all n_cols values."""
     if metrics is None:
         metrics = enabled_metrics()
     if kernel_names is None:
@@ -238,7 +249,7 @@ def generate_all_tables(df, output_dir, metrics=None, kernel_names=None):
 
 
 def generate_blocksize_tables(df, output_dir, kernel_names=None):
-    """Generate LaTeX block-density Pearson correlation tables for all n_cols."""
+    """Generate LaTeX block-density correlation tables for all n_cols."""
     if kernel_names is None:
         kernel_names = KERNEL_NAMES
 
@@ -274,7 +285,7 @@ def generate_per_metric_tables(df, output_dir, metrics=None, kernel_names=None):
     """Generate per-metric LaTeX tables: kernels (rows) x n_cols (columns).
 
     For each structural metric, produces a table where rows are kernels
-    and columns are n_cols values. Each cell shows Pearson r (raw linear).
+    and columns are n_cols values.
     """
     if metrics is None:
         metrics = enabled_metrics()
@@ -286,6 +297,9 @@ def generate_per_metric_tables(df, output_dir, metrics=None, kernel_names=None):
 
     n_cols_values = sorted(df['n_cols'].unique())
     kernels = _ordered_kernels(df, kernel_names)
+    method = pu.get_correlation_method()
+    tag = _corr_method_tag()
+    corr_display = pu.correlation_display_name()
 
     for mc in metrics:
         if mc not in df.columns:
@@ -305,8 +319,8 @@ def generate_per_metric_tables(df, output_dir, metrics=None, kernel_names=None):
                 if len(valid) < 5:
                     row_data[int(n_cols)] = np.nan
                     continue
-                pearson_r, _ = stats.pearsonr(valid[mc], valid['gflops'])
-                row_data[int(n_cols)] = pearson_r
+                r, _ = pu.compute_correlation(valid[mc], valid['gflops'], method)
+                row_data[int(n_cols)] = r
             rows.append(row_data)
 
         corr_df = pd.DataFrame(rows)
@@ -343,12 +357,12 @@ def generate_per_metric_tables(df, output_dir, metrics=None, kernel_names=None):
         lines.append(r'\bottomrule')
         lines.append(r'\end{tabular}')
         lines.append(
-            r"\caption{Pearson's $r$ between " + metric_display +
+            r"\caption{" + corr_display + " between " + metric_display +
             r' and SpMM GFLOPS across $n_{cols}$ values.}')
-        lines.append(r'\label{tab:per_metric_' + metric_safe + '}')
+        lines.append(r'\label{tab:per_metric_' + tag + '_' + metric_safe + '}')
         lines.append(r'\end{table}')
 
-        out_path = output_dir / f"per_metric_pearson_{metric_safe}.tex"
+        out_path = output_dir / f"per_metric_{tag}_{metric_safe}.tex"
         with open(out_path, 'w') as f:
             f.write('\n'.join(lines))
         print(f"Saved: {out_path}")
@@ -478,14 +492,18 @@ def _write_improvement_table(imp_df, imp_cols, used_metrics,
 
 def _enabled_improvement_metrics():
     """Return improvement column names matching the enabled correlation metrics."""
-    return [
+    base = [
         'bandwidth_improvement',
+        'bandwidth_avg_improvement',
         'row_spread_improvement',
+        'col_spread_improvement',
         'vertical_adjacency_improvement',
-        'density_improvement_8',
-        'density_improvement_32',
-        'density_improvement_128',
+        'profile_improvement',
     ]
+    # Mirror the block densities enabled in settings
+    bd = [f'density_improvement_{bs}' for bs in BLOCK_SIZES
+          if ALL_METRICS.get(f'block_density_{bs}', {}).get('enabled')]
+    return base + bd
 
 
 def _density_improvement_metrics():
@@ -494,14 +512,17 @@ def _density_improvement_metrics():
 
 
 def compute_imp_correlations(df, n_cols, imp_metrics, kernels=None):
-    """Compute Pearson correlations between improvement metrics and speedup.
+    """Compute correlations between improvement metrics and speedup.
 
     Only considers reordered rows (strategy != 'Original').
+    The correlation method is read from config.
     """
     df_nc = df[(df['n_cols'] == n_cols) & (df['strategy'] != 'Original')]
 
     if kernels is None:
         kernels = sorted(df_nc['kernel_id'].unique())
+
+    method = pu.get_correlation_method()
 
     results = []
     for kernel in kernels:
@@ -510,17 +531,17 @@ def compute_imp_correlations(df, n_cols, imp_metrics, kernels=None):
 
         for metric in imp_metrics:
             if metric not in df_k.columns:
-                row_data[f'{metric}_pearson'] = np.nan
+                row_data[f'{metric}_corr'] = np.nan
                 continue
 
             valid = df_k[[metric, 'speedup']].dropna()
             valid = valid[np.isfinite(valid[metric]) & np.isfinite(valid['speedup'])]
 
             if len(valid) >= 10:
-                pearson_r, _ = stats.pearsonr(valid[metric], valid['speedup'])
-                row_data[f'{metric}_pearson'] = pearson_r
+                r, _ = pu.compute_correlation(valid[metric], valid['speedup'], method)
+                row_data[f'{metric}_corr'] = r
             else:
-                row_data[f'{metric}_pearson'] = np.nan
+                row_data[f'{metric}_corr'] = np.nan
 
         results.append(row_data)
 
@@ -533,6 +554,8 @@ def generate_imp_correlation_tables(df, output_dir, kernel_names=None):
         kernel_names = KERNEL_NAMES
 
     imp_metrics = _enabled_improvement_metrics()
+    tag = _corr_method_tag()
+    corr_display = pu.correlation_display_name()
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -545,16 +568,16 @@ def generate_imp_correlation_tables(df, output_dir, kernel_names=None):
         corr_df = compute_imp_correlations(df, n_cols, imp_metrics, kernels)
 
         caption = (
-            r"Pearson's $r$ correlation between structural improvement and speedup "
+            f"{corr_display} correlation between structural improvement and speedup "
             f"($n_{{{{cols}}}} = {n_cols_int}$). "
             f"Only reordered configurations are included ({n_configs:,} total).")
-        label = f"tab:imp_correlation_pearson_ncols_{n_cols_int}"
+        label = f"tab:imp_correlation_{tag}_ncols_{n_cols_int}"
 
         latex = correlation_to_latex(
             corr_df, imp_metrics, kernel_names,
             caption=caption, label=label)
 
-        out_path = output_dir / f"imp_correlation_pearson_ncols_{n_cols_int}.tex"
+        out_path = output_dir / f"imp_correlation_{tag}_ncols_{n_cols_int}.tex"
         with open(out_path, 'w') as f:
             f.write(latex)
         print(f"Saved: {out_path}")
@@ -566,6 +589,8 @@ def generate_imp_blocksize_tables(df, output_dir, kernel_names=None):
         kernel_names = KERNEL_NAMES
 
     bd_imp_metrics = _density_improvement_metrics()
+    tag = _corr_method_tag()
+    corr_display = pu.correlation_display_name()
 
     def _bd_imp_header(m):
         bs = m.split('_')[-1]
@@ -582,17 +607,17 @@ def generate_imp_blocksize_tables(df, output_dir, kernel_names=None):
         corr_df = compute_imp_correlations(df, n_cols, bd_imp_metrics, kernels)
 
         caption = (
-            r"Pearson's $r$ correlation between block density improvement and speedup "
+            f"{corr_display} correlation between block density improvement and speedup "
             f"across block sizes ($n_{{{{cols}}}} = {n_cols_int}$). "
             f"Only reordered configurations are included ({n_configs:,} total).")
-        label = f"tab:imp_blocksize_pearson_ncols_{n_cols_int}"
+        label = f"tab:imp_blocksize_{tag}_ncols_{n_cols_int}"
 
         latex = correlation_to_latex(
             corr_df, bd_imp_metrics, kernel_names,
             caption=caption, label=label,
             header_name_func=_bd_imp_header)
 
-        out_path = output_dir / f"imp_blocksize_pearson_ncols_{n_cols_int}.tex"
+        out_path = output_dir / f"imp_blocksize_{tag}_ncols_{n_cols_int}.tex"
         with open(out_path, 'w') as f:
             f.write(latex)
         print(f"Saved: {out_path}")
@@ -647,7 +672,7 @@ def parse_args():
         description="Generate correlation tables as LaTeX files"
     )
     parser.add_argument(
-        "--output", 
+        "--output",
         default="plots/correlation_tables",
         help="Output directory for .tex files"
     )
@@ -729,6 +754,9 @@ def main():
     # Add speedup and improvement columns for imp-correlation tables
     df = pu.add_speedup(df)
     df = pu.add_improvement_columns(df)
+
+    method = pu.get_correlation_method()
+    print(f"\nCorrelation method: {method}")
 
     # ------------------------------------------------------------------
     # Generate tables

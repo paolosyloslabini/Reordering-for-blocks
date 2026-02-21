@@ -41,7 +41,7 @@ ALL_METRICS = {
     },
     'bandwidth_avg': {
         'display': 'Average Bandwidth', 'short': 'ABW',
-        'higher_is_better': False,
+        'enabled': True, 'higher_is_better': False,
     },
     'rel_bandwidth': {
         'display': 'Relative Bandwidth', 'short': 'RBW',
@@ -49,6 +49,9 @@ ALL_METRICS = {
     },
     'bandwidth_improvement': {
         'display': 'Bandwidth Reduction', 'short': 'BWR',
+    },
+    'bandwidth_avg_improvement': {
+        'display': 'Avg Bandwidth Reduction', 'short': 'ABWR',
     },
 
     # ── Row spread / locality ────────────────────────────────────────────
@@ -67,10 +70,15 @@ ALL_METRICS = {
     'row_spread_improvement':  {'display': 'Row Spread Reduction', 'short': 'RSR'},
     'col_spread_improvement':  {'display': 'Col Spread Reduction', 'short': 'CSR'},
 
+    # ── Profile improvement ──────────────────────────────────────────────
+    'profile_improvement': {
+        'display': 'Profile Reduction', 'short': 'ProfR',
+    },
+
     # ── Column spread ────────────────────────────────────────────────────
     'locality_avg_col_spread': {
         'display': 'Average Column Spread', 'short': 'ACS',
-        'higher_is_better': False,
+        'enabled': True, 'higher_is_better': False,
     },
     'locality_max_col_spread': {
         'display': 'Maximum Column Spread', 'short': 'MCS',
@@ -107,7 +115,7 @@ ALL_METRICS = {
     # ── Profile ──────────────────────────────────────────────────────────
     'locality_profile': {
         'display': 'Profile', 'short': 'Prof',
-        'higher_is_better': False,
+        'log_scale': True, 'enabled': True, 'higher_is_better': False,
     },
 
     # ── Overall density ──────────────────────────────────────────────────
@@ -118,7 +126,7 @@ ALL_METRICS = {
 }
 
 # ── Block-size-dependent metrics (generated from BLOCK_SIZES) ────────────
-_BLOCK_DENSITY_ENABLED = {8, 32, 128}  # which block densities show in tables
+_BLOCK_DENSITY_ENABLED = {16}  # which block densities show in tables
 
 for _bs in BLOCK_SIZES:
     ALL_METRICS[f'block_density_{_bs}'] = {
@@ -132,10 +140,15 @@ for _bs in BLOCK_SIZES:
         'display': f'Density Improvement ${_bs}{{\\times}}{_bs}$',
         'short': f'DI{_bs}',
     }
+    ALL_METRICS[f'avg_blocks_per_row_improvement_{_bs}'] = {
+        'display': f'Avg Blocks/Row Reduction ${_bs}{{\\times}}{_bs}$',
+        'short': f'ABRR{_bs}',
+    }
     for _pfx, _nm in [('avg', 'Avg'), ('max', 'Max')]:
         ALL_METRICS[f'{_pfx}_blocks_per_row_{_bs}'] = {
             'display': f'{_nm} Blocks/Row ${_bs}{{\\times}}{_bs}$',
             'short':   f'{"A" if _pfx == "avg" else "M"}BR{_bs}',
+            'enabled': False,
             'higher_is_better': False,
         }
 

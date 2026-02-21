@@ -234,14 +234,15 @@ def build_metrics_config(df, include_extended=False):
     """
     metrics_config = {
         'bandwidth_max': {'improvement_name': 'bandwidth_improvement', 'higher_is_better': False},
+        'bandwidth_avg': {'improvement_name': 'bandwidth_avg_improvement', 'higher_is_better': False},
         'locality_avg_row_spread': {'improvement_name': 'row_spread_improvement', 'higher_is_better': False},
         'locality_avg_col_spread': {'improvement_name': 'col_spread_improvement', 'higher_is_better': False},
         'locality_vertical_adjacency_ratio': {'improvement_name': 'vertical_adjacency_improvement', 'higher_is_better': True},
+        'locality_profile': {'improvement_name': 'profile_improvement', 'higher_is_better': False},
     }
 
     if include_extended:
         metrics_config.update({
-            'bandwidth_avg': {'improvement_name': 'bandwidth_avg_improvement', 'higher_is_better': False},
             'locality_max_row_spread': {'improvement_name': 'max_row_spread_improvement', 'higher_is_better': False},
             'locality_max_col_spread': {'improvement_name': 'max_col_spread_improvement', 'higher_is_better': False},
         })
@@ -252,16 +253,24 @@ def build_metrics_config(df, include_extended=False):
             bs = col.split('_')[-1]
             metrics_config[col] = {'improvement_name': f'density_improvement_{bs}', 'higher_is_better': True}
 
-    # Add blocks-per-row improvements (extended mode only)
+    # Add avg blocks-per-row improvements (always available for correlation tables)
+    for bs in [4, 8, 16, 32, 64, 128]:
+        col = f'avg_blocks_per_row_{bs}'
+        if col in df.columns:
+            metrics_config[col] = {
+                'improvement_name': f'avg_blocks_per_row_improvement_{bs}',
+                'higher_is_better': False,
+            }
+
+    # Add max blocks-per-row improvements (extended mode only)
     if include_extended:
         for bs in [4, 8, 16, 32, 64, 128]:
-            for prefix in ('avg', 'max'):
-                col = f'{prefix}_blocks_per_row_{bs}'
-                if col in df.columns:
-                    metrics_config[col] = {
-                        'improvement_name': f'{prefix}_blocks_per_row_improvement_{bs}',
-                        'higher_is_better': False,
-                    }
+            col = f'max_blocks_per_row_{bs}'
+            if col in df.columns:
+                metrics_config[col] = {
+                    'improvement_name': f'max_blocks_per_row_improvement_{bs}',
+                    'higher_is_better': False,
+                }
 
     return metrics_config
 
@@ -669,6 +678,78 @@ def load_and_filter_data(config_path=None, cli_overrides=None):
 
 
 # =============================================================================
+# Correlation Method Configuration
+# =============================================================================
+
+_VALID_CORR_METHODS = {'pearson', 'spearman', 'kendall'}
+
+# Module-level cache so the config is read once.
+_correlation_method_cache = None
+
+
+def get_correlation_method(cfg=None):
+    """Return the configured correlation method (pearson/spearman/kendall).
+
+    Reads from ``display.correlation_method`` in filter_config.yaml.
+    Falls back to ``'pearson'`` when the key is absent.
+    """
+    global _correlation_method_cache
+    if _correlation_method_cache is not None:
+        return _correlation_method_cache
+
+    if cfg is None:
+        cfg = load_filter_config()
+    method = cfg.get('display', {}).get('correlation_method', 'pearson')
+    method = method.lower()
+    if method not in _VALID_CORR_METHODS:
+        print(f"Warning: unknown correlation_method '{method}', falling back to 'pearson'",
+              file=sys.stderr)
+        method = 'pearson'
+    _correlation_method_cache = method
+    return method
+
+
+def compute_correlation(x, y, method=None):
+    """Compute correlation between *x* and *y* using the configured method.
+
+    Args:
+        x, y: array-like values (NaNs should be dropped beforehand).
+        method: 'pearson', 'spearman', or 'kendall'.
+                ``None`` reads from config.
+
+    Returns:
+        (correlation_coefficient, p_value)
+    """
+    if method is None:
+        method = get_correlation_method()
+    if method == 'pearson':
+        return stats.pearsonr(x, y)
+    elif method == 'spearman':
+        return stats.spearmanr(x, y)
+    elif method == 'kendall':
+        return stats.kendalltau(x, y)
+    raise ValueError(f"Unknown correlation method: {method}")
+
+
+def correlation_display_symbol(method=None):
+    """Return a short display symbol for the configured correlation method."""
+    if method is None:
+        method = get_correlation_method()
+    return {'pearson': 'r', 'spearman': r'\rho', 'kendall': r'\tau'}[method]
+
+
+def correlation_display_name(method=None):
+    """Return a human-readable name for the configured correlation method."""
+    if method is None:
+        method = get_correlation_method()
+    return {
+        'pearson': "Pearson's $r$",
+        'spearman': "Spearman's $\\rho$",
+        'kendall': "Kendall's $\\tau$",
+    }[method]
+
+
+# =============================================================================
 # Generic Plot Functions
 # =============================================================================
 
@@ -686,13 +767,16 @@ def _save_figure(path, dpi=300):
     print(f"Saved: {Path(path).name}")
 
 
-def scatter_with_correlation(df, x_col, y_col, output_path, 
+def scatter_with_correlation(df, x_col, y_col, output_path,
                               title=None, hue_col=None,
                               log_x=None, log_y=None,
                               show_correlation=True,
                               figsize=(12, 9)):
-    """Create scatter plot with Kendall's Tau and Pearson correlations.
-    
+    """Create scatter plot with correlation annotation.
+
+    The correlation method is determined by ``display.correlation_method``
+    in ``filter_config.yaml`` (default: pearson).
+
     Args:
         df: DataFrame
         x_col: Column for x-axis
@@ -708,62 +792,55 @@ def scatter_with_correlation(df, x_col, y_col, output_path,
     # Clean data
     cols = [x_col, y_col] + ([hue_col] if hue_col else [])
     plot_df = df.dropna(subset=[x_col, y_col])
-    
+
     if len(plot_df) < 2:
         print(f"Skipping {output_path}: insufficient data")
         return
-    
+
     # Auto-detect scales (only if None)
     if log_x is None:
         log_x = use_log_scale(x_col)
     if log_y is None:
         log_y = use_log_scale(y_col)
-    
-    # Calculate Kendall's tau correlation
-    tau, tau_p = stats.kendalltau(plot_df[x_col], plot_df[y_col])
-    
-    # Calculate Pearson correlation (raw linear values)
-    x_vals = plot_df[x_col]
-    y_vals = plot_df[y_col]
 
-    if len(x_vals) >= 2:
-        pearson_r, pearson_p = stats.pearsonr(x_vals, y_vals)
-    else:
-        pearson_r, pearson_p = np.nan, np.nan
-    
+    # Calculate correlation using configured method
+    method = get_correlation_method()
+    sym = correlation_display_symbol(method)
+    corr_val = _correlation_for_scatter(plot_df[x_col], plot_df[y_col], method)
+
     # Create plot
     fig, ax = _setup_figure(figsize)
-    
+
     if hue_col and hue_col in plot_df.columns:
         pal = get_strategy_palette() if hue_col == 'strategy' else "Set2"
-        sns.scatterplot(data=plot_df, x=x_col, y=y_col, hue=hue_col, 
+        sns.scatterplot(data=plot_df, x=x_col, y=y_col, hue=hue_col,
                         alpha=0.7, ax=ax, palette=pal)
     else:
         sns.scatterplot(data=plot_df, x=x_col, y=y_col, alpha=0.7, ax=ax)
-    
+
     # Set scales
     if log_x:
         ax.set_xscale('log')
     if log_y:
         ax.set_yscale('log')
-    
+
     # Format log axes with proper ticks and grid
     if log_x or log_y:
         format_log_axes(ax)
     else:
         ax.grid(True, alpha=0.3)
-    
+
     # Labels
     ax.set_xlabel(get_display_name(x_col))
     ax.set_ylabel(get_display_name(y_col))
-    
+
     # Title
     if title is None:
         title = f"{get_display_name(y_col)} vs {get_display_name(x_col)}"
     if show_correlation:
-        title += f"\nτ = {tau:.3f}, r = {pearson_r:.3f}"
+        title += f"\n${sym} = {corr_val:.3f}$"
     ax.set_title(title)
-    
+
     _save_figure(output_path)
 
 
@@ -955,6 +1032,7 @@ def breakeven_boxplot(df_valid, df_harmful, x_col, y_col, output_path,
                     for cat in cats]
         bp = ax_box.boxplot(box_data, positions=positions,
                             widths=BOX_WIDTH, showfliers=False,
+                            whis=(5, 95),
                             patch_artist=True,
                             medianprops={'color': 'red', 'linewidth': 2},
                             zorder=3)
@@ -1267,18 +1345,20 @@ def violin_plot(df, x_col, y_col, output_path,
 
 
 def correlation_heatmap(df, cols, output_path,
-                         title=None, method='kendall',
+                         title=None, method=None,
                          figsize=(10, 8)):
     """Create correlation heatmap for selected columns.
-    
+
     Args:
         df: DataFrame
         cols: List of columns to correlate
         output_path: Path to save figure
         title: Plot title
-        method: Correlation method ('kendall', 'pearson', 'spearman')
+        method: Correlation method. ``None`` reads from config.
         figsize: Figure size
     """
+    if method is None:
+        method = get_correlation_method()
     available_cols = [c for c in cols if c in df.columns]
     
     if len(available_cols) < 2:
@@ -1362,6 +1442,16 @@ def _pearson_for_scatter(x_vals, y_vals):
     return np.nan
 
 
+def _correlation_for_scatter(x_vals, y_vals, method=None):
+    """Compute correlation on raw values using the configured method."""
+    valid = x_vals.notna() & y_vals.notna()
+    xp, yp = x_vals[valid], y_vals[valid]
+    if len(xp) >= 2:
+        r, _ = compute_correlation(xp, yp, method=method)
+        return r
+    return np.nan
+
+
 def scatter_publication(df, x_col, y_col, output_path,
                         hue_col=None, log_x=None, log_y=None,
                         show_correlation=True, label=None,
@@ -1404,8 +1494,10 @@ def scatter_publication(df, x_col, y_col, output_path,
     ax.tick_params(axis='both', labelsize=11, which='major')
 
     if show_correlation:
-        pearson_r = _pearson_for_scatter(plot_df[x_col], plot_df[y_col])
-        ax.text(0.03, 0.97, f"r={pearson_r:.2f}",
+        method = get_correlation_method()
+        sym = correlation_display_symbol(method)
+        corr_val = _correlation_for_scatter(plot_df[x_col], plot_df[y_col], method)
+        ax.text(0.03, 0.97, f"${sym}={corr_val:.2f}$",
                 transform=ax.transAxes, fontsize=10, va='top',
                 bbox=dict(boxstyle='round,pad=0.3', fc='white', alpha=0.8))
 
@@ -1465,8 +1557,10 @@ def grouped_scatter_publication(df, x_col, y_col, group_col, group_order,
                                 alpha=0.7, ax=ax, s=10)
 
             if show_correlation:
-                pr = _pearson_for_scatter(df_g[x_col], df_g[y_col])
-                ax.text(0.03, 0.97, f"r={pr:.2f}",
+                method = get_correlation_method()
+                sym = correlation_display_symbol(method)
+                cr = _correlation_for_scatter(df_g[x_col], df_g[y_col], method)
+                ax.text(0.03, 0.97, f"${sym}={cr:.2f}$",
                         transform=ax.transAxes, fontsize=7, va='top',
                         bbox=dict(boxstyle='round,pad=0.2', fc='white',
                                   alpha=0.8))

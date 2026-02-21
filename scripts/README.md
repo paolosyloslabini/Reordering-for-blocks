@@ -59,6 +59,10 @@ python scripts/job_check.py
 
 Identifies missing or failed experiment runs.
 
+## Plotting Rules
+
+- **Boxplot whiskers at 5th/95th percentiles**: All boxplots (including binned speedups and break-even plots) must use whiskers at the 5th and 95th percentiles (`whis=(5, 95)` for seaborn, `whis=(5, 95)` for matplotlib) with outliers hidden (`showfliers=False`). Do not use the default 1.5×IQR whiskers.
+
 ## Data Flow
 
 ```

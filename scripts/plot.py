@@ -52,7 +52,7 @@ def parse_args():
     
     # Fine-grained section selection (used by run_plots.py wrapper)
     SECTION_CHOICES = [
-        'kernels', 'breakeven',
+        'kernels', 'breakeven', 'original-scatter',
         'reorder-analysis', 'reorderability', 'per-matrix', 'timing',
     ]
     parser.add_argument(
@@ -311,6 +311,106 @@ def generate_kernel_plots(df, out_dir, args):
                     group_labels=kernel_labels,
                     log_x=False, log_y=False,
                 )
+
+        # -----------------------------------------------------------------
+        # 5b. Grouped Scatter: Improvement vs Speedup – LOG-LOG version
+        #     (Pearson r is always computed on linear values)
+        # -----------------------------------------------------------------
+        grouped_imp_log_dir = out_dir / f"n_cols_{int(n_cols)}" / "grouped_improvement_vs_speedup_loglog"
+        grouped_imp_log_dir.mkdir(parents=True, exist_ok=True)
+
+        for bs in [4, 8, 16, 32, 64, 128]:
+            imp_col = f'density_improvement_{bs}'
+            if imp_col in df_nc_reordered.columns:
+                pu.grouped_scatter_publication(
+                    df_nc_reordered, imp_col, 'speedup', 'kernel_id', kernels,
+                    grouped_imp_log_dir / f"speedup_vs_density_imp_bs{bs}_loglog.png",
+                    group_labels=kernel_labels,
+                    log_x=True, log_y=True,
+                )
+
+        for imp_col in ['bandwidth_improvement', 'row_spread_improvement',
+                        'vertical_adjacency_improvement']:
+            if imp_col in df_nc_reordered.columns:
+                pu.grouped_scatter_publication(
+                    df_nc_reordered, imp_col, 'speedup', 'kernel_id', kernels,
+                    grouped_imp_log_dir / f"speedup_vs_{imp_col}_loglog.png",
+                    group_labels=kernel_labels,
+                    log_x=True, log_y=True,
+                )
+
+
+def generate_original_scatter_plots(df, out_dir, args):
+    """Generate grouped scatter plots using only original (unreordered) matrices.
+
+    For each n_cols value, produces 2x3 grids (one subplot per kernel) showing
+    how the original matrix structure relates to kernel performance.
+    """
+    print("\n=== Original-Only Grouped Scatter Plots ===")
+
+    df_orig = df[df['strategy'] == 'Original'].copy()
+    if df_orig.empty:
+        print("No original (perm=None) data found — skipping.")
+        return
+
+    n_cols_values = sorted(df_orig['n_cols'].unique())
+    if args.n_cols is not None:
+        if args.n_cols in n_cols_values:
+            n_cols_values = [args.n_cols]
+        else:
+            print(f"Warning: n_cols={args.n_cols} not found. Available: {n_cols_values}")
+            return
+
+    density_cols = pu.get_density_columns(df_orig)
+
+    # Structural x-metrics to plot against GFLOPS
+    structural_metrics = []
+    for dc in density_cols:
+        structural_metrics.append(dc)
+    for col in ['rel_bandwidth', 'rel_row_spread',
+                'locality_vertical_adjacency_ratio', 'density']:
+        if col in df_orig.columns:
+            structural_metrics.append(col)
+
+    for n_cols in n_cols_values:
+        print(f"\n--- n_cols = {n_cols} ---")
+        df_nc = df_orig[df_orig['n_cols'] == n_cols]
+
+        kernels = sorted(df_nc['kernel_id'].unique())
+        if args.kernel:
+            kernels = [k for k in kernels if args.kernel.lower() in k.lower()]
+            if not kernels:
+                print(f"No kernels matching '{args.kernel}'")
+                continue
+
+        kernel_labels = {k: KERNEL_NAMES.get(k, k) for k in kernels}
+
+        # Log-log grouped scatter (original only)
+        scatter_dir = out_dir / f"n_cols_{int(n_cols)}" / "grouped_scatter_original"
+        scatter_dir.mkdir(parents=True, exist_ok=True)
+
+        for x_col in structural_metrics:
+            safe = pu.safe_filename(x_col)
+            pu.grouped_scatter_publication(
+                df_nc, x_col, 'gflops', 'kernel_id', kernels,
+                scatter_dir / f"gflops_vs_{safe}.png",
+                group_labels=kernel_labels,
+            )
+
+        # Linear-linear grouped scatter (original only)
+        scatter_linear_dir = out_dir / f"n_cols_{int(n_cols)}" / "grouped_scatter_original_linear"
+        scatter_linear_dir.mkdir(parents=True, exist_ok=True)
+
+        for x_col in structural_metrics:
+            safe = pu.safe_filename(x_col)
+            pu.grouped_scatter_publication(
+                df_nc, x_col, 'gflops', 'kernel_id', kernels,
+                scatter_linear_dir / f"gflops_vs_{safe}_linear.png",
+                group_labels=kernel_labels,
+                log_x=False, log_y=False,
+            )
+
+    print(f"  Original-only scatter plots saved under {out_dir}/n_cols_*/grouped_scatter_original*/")
 
 
 def generate_reorderability_plots(df_analysis, out_dir):
@@ -965,7 +1065,7 @@ def _should_run(section: str, args) -> bool:
     if args.sections is not None:
         return section in args.sections
     # Legacy coarse flags
-    kernel_sections = {'kernels', 'breakeven'}
+    kernel_sections = {'kernels', 'breakeven', 'original-scatter'}
     reorder_sections = {'reorder-analysis', 'reorderability', 'per-matrix', 'timing'}
     if args.only_kernels:
         return section in kernel_sections
@@ -1032,6 +1132,12 @@ def main():
         print("Generating kernel performance plots...")
         print("="*60)
         generate_kernel_plots(df, out_dir, args)
+
+    if _should_run('original-scatter', args):
+        print("\n" + "="*60)
+        print("Generating original-only grouped scatter plots...")
+        print("="*60)
+        generate_original_scatter_plots(df, out_dir, args)
 
     if _should_run('breakeven', args):
         print("\n" + "="*60)

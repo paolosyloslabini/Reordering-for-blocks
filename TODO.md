@@ -35,6 +35,8 @@ Check wiskers in boxplots.
 
 fig. 4.7 which are the most promising ones. 
 
+Better metrics.
+
 # STYLE
 
 per-column bold (instead of per-row) in table: Median structural improvement ratio per reordering algorithm
@@ -46,3 +48,7 @@ review tables captions.
 ~~better looking plots (especially nicer axes in log plots)~~
 
 Axes span equal for similar plots
+
+Causal plot, adds bar for 1.
+
+DTC-SpMM

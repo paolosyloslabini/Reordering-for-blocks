@@ -53,3 +53,9 @@ filters:
     - Janna        # Large-scale FEM problems
     - Norris       # Structural engineering benchmarks
     - vanHeukelum  # Cage graphs, unique structure
+
+# ---- Display / Analysis Settings ------------------------------------------
+display:
+  # Correlation method used in all plots and tables.
+  # Choices: pearson, spearman, kendall
+  correlation_method: pearson
