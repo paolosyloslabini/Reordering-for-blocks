@@ -6,7 +6,7 @@ CLAUDE.md
 
 # Generated plots
 plots/
-/plots
+plots_random/
 *.pyc
 test/groot_test.perm
 
