@@ -1124,34 +1124,37 @@ def main():
     # -----------------------------------------------------------------
     # 2. Process Data (add all derived columns)
     # -----------------------------------------------------------------
-    print("\nProcessing data...")
-    df = pu.prepare_full_dataframe(df)
-    
-    print(f"Unique kernels: {df['kernel_id'].unique().tolist()}")
-    print(f"Unique n_cols: {sorted(df['n_cols'].unique())}")
-    
+    has_ops = not df.empty
+    if has_ops:
+        print("\nProcessing data...")
+        df = pu.prepare_full_dataframe(df)
+        print(f"Unique kernels: {df['kernel_id'].unique().tolist()}")
+        print(f"Unique n_cols: {sorted(df['n_cols'].unique())}")
+    else:
+        print("\nNo operations data — kernel/breakeven/original-scatter plots will be skipped.")
+
     # Helper for reordering CSV path (shared by breakeven & timing)
     def _reordering_csv():
         return _cfg.get('data', {}).get('reordering_csv',
                                         'results/results_reordering.csv')
-    
+
     # -----------------------------------------------------------------
     # 3. Generate Plots  (each guarded by _should_run)
     # -----------------------------------------------------------------
 
-    if _should_run('kernels', args):
+    if has_ops and _should_run('kernels', args):
         print("\n" + "="*60)
         print("Generating kernel performance plots...")
         print("="*60)
         generate_kernel_plots(df, out_dir, args)
 
-    if _should_run('original-scatter', args):
+    if has_ops and _should_run('original-scatter', args):
         print("\n" + "="*60)
         print("Generating original-only grouped scatter plots...")
         print("="*60)
         generate_original_scatter_plots(df, out_dir, args)
 
-    if _should_run('breakeven', args):
+    if has_ops and _should_run('breakeven', args):
         print("\n" + "="*60)
         print("Generating break-even analysis plots...")
         print("="*60)

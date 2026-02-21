@@ -113,37 +113,54 @@ def get_display_name(col):
 
 def load_data(ops_path, analysis_path):
     """Load operations and analysis CSVs and merge them.
-    
+
     Returns:
-        Tuple of (merged_df, analysis_df)
+        Tuple of (merged_df, analysis_df).  merged_df may be empty when the
+        operations CSV is missing (analysis-only sections can still run).
     """
+    # Analysis CSV is always required
     try:
-        df_op = pd.read_csv(ops_path)
         df_analysis = pd.read_csv(analysis_path)
     except Exception as e:
-        print(f"Error reading CSVs: {e}")
+        print(f"Error reading analysis CSV: {e}")
         sys.exit(1)
 
-    if df_op.empty or df_analysis.empty:
-        print("One of the CSVs is empty.")
+    if df_analysis.empty:
+        print("Analysis CSV is empty.")
+        sys.exit(1)
+
+    # Operations CSV is optional (e.g. random pipeline may not have one yet)
+    try:
+        df_op = pd.read_csv(ops_path)
+    except FileNotFoundError:
+        print(f"Operations CSV not found at {ops_path} — "
+              "kernel/breakeven plots will be skipped.")
+        df_op = pd.DataFrame()
+    except Exception as e:
+        print(f"Error reading operations CSV: {e}")
         sys.exit(1)
 
     print(f"Loaded {len(df_op)} operation rows and {len(df_analysis)} analysis rows.")
 
     # Normalize keys
-    for df in [df_op, df_analysis]:
-        df['perm'] = df['perm'].fillna('None').astype(str)
-        df['perm_type'] = df['perm_type'].fillna('UNKNOWN').astype(str)
-        df['matrix'] = df['matrix'].astype(str)
+    df_analysis['perm'] = df_analysis['perm'].fillna('None').astype(str)
+    df_analysis['perm_type'] = df_analysis['perm_type'].fillna('UNKNOWN').astype(str)
+    df_analysis['matrix'] = df_analysis['matrix'].astype(str)
+
+    if df_op.empty:
+        return pd.DataFrame(), df_analysis
+
+    df_op['perm'] = df_op['perm'].fillna('None').astype(str)
+    df_op['perm_type'] = df_op['perm_type'].fillna('UNKNOWN').astype(str)
+    df_op['matrix'] = df_op['matrix'].astype(str)
 
     # Merge
     df = pd.merge(df_op, df_analysis, on=['matrix', 'perm', 'perm_type'], how='left')
     print(f"Merged DataFrame has {len(df)} rows.")
-    
+
     if df.empty:
         print("Merged DataFrame is empty! Check if keys match in both CSVs.")
-        sys.exit(1)
-        
+
     return df, df_analysis
 
 
@@ -499,7 +516,8 @@ def _filter_matrices_from_both(df, df_analysis, matrices_to_remove, reason):
     """Remove matrices from both DataFrames and print a message."""
     if len(matrices_to_remove) > 0:
         print(f"Filtering {len(matrices_to_remove)} {reason}")
-        df = df[~df['matrix'].isin(matrices_to_remove)]
+        if not df.empty:
+            df = df[~df['matrix'].isin(matrices_to_remove)]
         df_analysis = df_analysis[~df_analysis['matrix'].isin(matrices_to_remove)]
     return df, df_analysis
 
@@ -568,8 +586,11 @@ def apply_filters(df, df_analysis, matrices_list_path=None,
     Returns:
         Tuple of (filtered_df, filtered_df_analysis)
     """
+    ops_empty = df.empty
+
     if one_per_family and matrices_list_path:
-        df = filter_one_per_family(df, matrices_list_path, keep_full_families)
+        if not ops_empty:
+            df = filter_one_per_family(df, matrices_list_path, keep_full_families)
         df_analysis = filter_one_per_family(df_analysis, matrices_list_path, keep_full_families)
 
     if min_bandwidth is not None:
@@ -604,15 +625,18 @@ def apply_filters(df, df_analysis, matrices_list_path=None,
                 df, df_analysis, diagonal_matrices, "purely diagonal matrices")
 
     if square_only:
-        df = filter_square_only(df)
+        if not ops_empty:
+            df = filter_square_only(df)
         df_analysis = filter_square_only(df_analysis)
 
     if min_size is not None:
-        df = filter_min_size(df, min_size)
+        if not ops_empty:
+            df = filter_min_size(df, min_size)
         df_analysis = filter_min_size(df_analysis, min_size)
 
     if max_size is not None:
-        df = filter_max_size(df, max_size)
+        if not ops_empty:
+            df = filter_max_size(df, max_size)
         df_analysis = filter_max_size(df_analysis, max_size)
 
     return df, df_analysis
