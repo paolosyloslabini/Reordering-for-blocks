@@ -6,7 +6,7 @@ CLAUDE.md
 
 # Generated plots
 plots/
-/plots
+plots_random/
 *.pyc
 test/groot_test.perm
 
@@ -31,3 +31,4 @@ SbatchMan/experiments/
 # Permutation data
 perms/
 perms_random/
+/plots_random
