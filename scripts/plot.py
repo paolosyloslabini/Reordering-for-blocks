@@ -19,10 +19,14 @@ from settings import get_perm_display, KERNEL_NAMES
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Generate plots from analysis results.")
-    
+
+    # Random pipeline shortcut
+    parser.add_argument("--random", action="store_true",
+                        help="Use random-pipeline data (filter_config_random.yaml, output to plots_random)")
+
     # Output
-    parser.add_argument("--out", default="plots", help="Output directory")
-    
+    parser.add_argument("--out", default=None, help="Output directory (default: plots or plots_random with --random)")
+
     # Filter config (all filtering is driven by filter_config.yaml;
     # these flags *override* settings in the config file)
     parser.add_argument("--filter-config", default=None,
@@ -776,7 +780,6 @@ def _boxplot_for_perm_types(df_reordered, strategies, imp_col, title_template,
             order=[s for s in strategies if s in df_pt['strategy'].unique()],
             baseline=1.0,
             log_y=True,
-            ylim=(0.1, 10)
         )
 
 
@@ -1076,12 +1079,21 @@ def _should_run(section: str, args) -> bool:
 
 def main():
     args = parse_args()
-    
+
+    # Apply --random defaults (before any other processing)
+    if args.random:
+        if args.filter_config is None:
+            args.filter_config = str(Path(__file__).resolve().parent / 'filter_config_random.yaml')
+        if args.out is None:
+            args.out = 'plots_random'
+    if args.out is None:
+        args.out = 'plots'
+
     # Validate mutually exclusive options (only matters for legacy flags)
     if args.sections is None and args.only_reorder_analysis and args.only_kernels:
         print("Error: --only-reorder-analysis and --only-kernels are mutually exclusive.")
         return
-    
+
     # Create output directory
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -1126,7 +1138,7 @@ def main():
     # -----------------------------------------------------------------
     # 3. Generate Plots  (each guarded by _should_run)
     # -----------------------------------------------------------------
-    
+
     if _should_run('kernels', args):
         print("\n" + "="*60)
         print("Generating kernel performance plots...")

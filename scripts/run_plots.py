@@ -225,6 +225,8 @@ def parse_cli() -> argparse.Namespace:
         help="Run correlation_table.py groups by number (or no number = all)")
     parser.add_argument("--spy", action="store_true", help="Run spy_plots.py")
     parser.add_argument("--all", action="store_true", help="Run everything")
+    parser.add_argument("--random", action="store_true",
+        help="Use random-pipeline data (forwarded as --random to all scripts)")
 
     # Pass-through args (everything after --)
     parser.add_argument("extra", nargs=argparse.REMAINDER,
@@ -239,6 +241,10 @@ def main() -> None:
     extra = args.extra
     if extra and extra[0] == "--":
         extra = extra[1:]
+
+    # Forward --random to all underlying scripts
+    if args.random:
+        extra = ["--random"] + extra
 
     non_interactive = args.all or args.plots is not None or args.corr is not None or args.spy
 

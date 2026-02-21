@@ -238,6 +238,17 @@ def parse_one_random_perm_job(job):
     return row
 
 
+def parse_one_random_operation_job(job):
+    """Parse a random-pipeline operation job, stripping _RANDOM from perm/tag/algo."""
+    row = parse_one_operation_job(job)
+    if row is None:
+        return None
+    for key in ('perm', 'tag', 'algo'):
+        if isinstance(row.get(key), str) and row[key].endswith('_RANDOM'):
+            row[key] = row[key][:-len('_RANDOM')]
+    return row
+
+
 def parse_one_operation_job(job):
     """Parse a single operation job. Returns a dict row or None."""
     try:
@@ -309,6 +320,7 @@ def main():
     analysis_jobs = []
     random_analysis_jobs = []
     op_jobs = []
+    random_op_jobs = []
     perm_jobs = []
     random_perm_jobs = []
     for j in all_jobs:
@@ -317,6 +329,8 @@ def main():
             random_analysis_jobs.append(j)
         elif tag.startswith("ANALYSIS_"):
             analysis_jobs.append(j)
+        elif "SPMM" in tag and "RANDOM" in tag:
+            random_op_jobs.append(j)
         elif "SPMM" in tag:
             op_jobs.append(j)
         elif tag in RANDOM_PERM_TAGS:
@@ -432,7 +446,42 @@ def main():
     else:
         print("No random-pipeline analysis results found.")
 
-    # --- 5. Process Random-Pipeline Permutation Jobs (parallel) ---
+    # --- 5. Process Random-Pipeline Operation Jobs (parallel) ---
+    print(f"Found {len(random_op_jobs)} random-pipeline operation jobs.", file=sys.stderr)
+
+    t0 = time.perf_counter()
+    if random_op_jobs:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            results = list(tqdm(
+                pool.map(parse_one_random_operation_job, random_op_jobs, chunksize=256),
+                total=len(random_op_jobs),
+                desc="Parsing Random Operation Jobs"
+            ))
+        random_op_results = [r for r in results if r is not None]
+    else:
+        random_op_results = []
+    t_random_ops = time.perf_counter() - t0
+    print(f"Random operations parsing: {t_random_ops:.1f}s", file=sys.stderr)
+
+    # Include random1D SYMMETRIC baseline from the main operations as the
+    # "no reorder" reference point for the random experiment.
+    if op_results:
+        for r in op_results:
+            if r.get('perm') == 'random1D' and r.get('perm_type') == 'SYMMETRIC':
+                baseline = dict(r)
+                baseline['perm'] = 'None'
+                random_op_results.append(baseline)
+
+    if random_op_results:
+        df_random_op = pd.DataFrame(random_op_results)
+        df_random_op = dedup_latest(df_random_op, ['matrix', 'perm', 'perm_type', 'algo', 'block_size', 'n_cols'])
+        out_file = out_dir / "results_operations_random.csv"
+        df_random_op.to_csv(out_file, index=False)
+        print(f"Exported {len(df_random_op)} random operation rows to {out_file}")
+    else:
+        print("No random-pipeline operation results found.")
+
+    # --- 6. Process Random-Pipeline Permutation Jobs (parallel) ---
     print(f"Found {len(random_perm_jobs)} random-pipeline permutation jobs.", file=sys.stderr)
 
     t0 = time.perf_counter()
@@ -461,7 +510,8 @@ def main():
     t_total = time.perf_counter() - t_total_start
     print(f"\nTotal time: {t_total:.1f}s  (fetch: {t_fetch:.1f}s, analysis: {t_analysis:.1f}s, "
           f"operations: {t_ops:.1f}s, perms: {t_perms:.1f}s, "
-          f"random_analysis: {t_random_analysis:.1f}s, random_perms: {t_random_perms:.1f}s)",
+          f"random_analysis: {t_random_analysis:.1f}s, random_ops: {t_random_ops:.1f}s, "
+          f"random_perms: {t_random_perms:.1f}s)",
           file=sys.stderr)
 
 if __name__ == "__main__":

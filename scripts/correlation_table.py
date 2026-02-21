@@ -671,10 +671,14 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Generate correlation tables as LaTeX files"
     )
+    # Random pipeline shortcut
     parser.add_argument(
-        "--output",
-        default="plots/correlation_tables",
-        help="Output directory for .tex files"
+        "--random", action="store_true",
+        help="Use random-pipeline data (filter_config_random.yaml, output to plots_random)"
+    )
+    parser.add_argument(
+        "--output", default=None,
+        help="Output directory for .tex files (default: plots/correlation_tables or plots_random/correlation_tables with --random)"
     )
     # Filter config (all filtering is driven by filter_config.yaml;
     # these flags *override* settings in the config file)
@@ -729,6 +733,15 @@ def parse_args():
 
 def main():
     args = parse_args()
+
+    # Apply --random defaults
+    if args.random:
+        if args.filter_config is None:
+            args.filter_config = str(Path(__file__).resolve().parent / 'filter_config_random.yaml')
+        if args.output is None:
+            args.output = 'plots_random/correlation_tables'
+    if args.output is None:
+        args.output = 'plots/correlation_tables'
 
     # ------------------------------------------------------------------
     # Load, filter, and add derived columns (single pipeline)
