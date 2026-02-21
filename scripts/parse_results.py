@@ -36,6 +36,17 @@ PERM_TAGS = {
 # Random-pipeline perm tags: "<algo>_RANDOM" (from perms_random.yaml)
 RANDOM_PERM_TAGS = {f'{t}_RANDOM' for t in PERM_TAGS if t not in ('random1D', 'random2D')}
 
+def dedup_latest(df, key_cols):
+    """Drop duplicate experiments, keeping only the row with the highest job_id."""
+    before = len(df)
+    df = df.sort_values('job_id', ascending=False).drop_duplicates(subset=key_cols, keep='first')
+    df = df.sort_values('job_id').reset_index(drop=True)
+    dropped = before - len(df)
+    if dropped:
+        print(f"  Dropped {dropped} duplicate rows (kept latest per {key_cols})", file=sys.stderr)
+    return df
+
+
 def safe_get_var(job, key, default, cast_type=str):
     """Safely extract a variable from job.variables with type casting."""
     # Ensure variables dict exists
@@ -116,7 +127,10 @@ def parse_one_analysis_job(job):
         json_str = stdout[start:end+1]
         data = json.loads(json_str)
 
+        job_id = getattr(job, 'id', getattr(job, 'job_id', 'unknown'))
+
         row = {
+            'job_id': job_id,
             'matrix': matrix_name,
             'perm': perm,
             'perm_type': perm_type,
@@ -327,6 +341,7 @@ def main():
     # Export Analysis CSV
     if analysis_results:
         df_analysis = pd.DataFrame(analysis_results)
+        df_analysis = dedup_latest(df_analysis, ['matrix', 'perm', 'perm_type'])
         out_file = out_dir / "results_analysis.csv"
         df_analysis.to_csv(out_file, index=False)
         print(f"Exported {len(df_analysis)} analysis rows to {out_file}")
@@ -350,6 +365,7 @@ def main():
     # Export Operation CSV
     if op_results:
         df_op = pd.DataFrame(op_results)
+        df_op = dedup_latest(df_op, ['matrix', 'perm', 'perm_type', 'algo', 'block_size', 'n_cols'])
         out_file = out_dir / "results_operations.csv"
         df_op.to_csv(out_file, index=False)
         print(f"Exported {len(df_op)} operation rows to {out_file}")
@@ -373,6 +389,7 @@ def main():
     # Export Reordering CSV
     if perm_results:
         df_perm = pd.DataFrame(perm_results)
+        df_perm = dedup_latest(df_perm, ['matrix', 'perm'])
         out_file = out_dir / "results_reordering.csv"
         df_perm.to_csv(out_file, index=False)
         print(f"Exported {len(df_perm)} reordering rows to {out_file}")
@@ -408,6 +425,7 @@ def main():
 
     if random_analysis_results:
         df_random_analysis = pd.DataFrame(random_analysis_results)
+        df_random_analysis = dedup_latest(df_random_analysis, ['matrix', 'perm', 'perm_type'])
         out_file = out_dir / "results_analysis_random.csv"
         df_random_analysis.to_csv(out_file, index=False)
         print(f"Exported {len(df_random_analysis)} random analysis rows to {out_file}")
@@ -433,6 +451,7 @@ def main():
 
     if random_perm_results:
         df_random_perm = pd.DataFrame(random_perm_results)
+        df_random_perm = dedup_latest(df_random_perm, ['matrix', 'perm'])
         out_file = out_dir / "results_reordering_random.csv"
         df_random_perm.to_csv(out_file, index=False)
         print(f"Exported {len(df_random_perm)} random reordering rows to {out_file}")
