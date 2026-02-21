@@ -21,7 +21,6 @@ ccutils
 
 # Data and results
 datasets/
-*.csv
 *.log
 PaToH.log.*
 
