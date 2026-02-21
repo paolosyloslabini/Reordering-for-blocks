@@ -74,14 +74,17 @@ def main():
     feat_size = args.n_cols
     X = torch.ones((num_rows, feat_size)).cuda()
     
+    # DTC-SpMM internally runs the kernel EXE_TIME=1000 times per call.
+    # We time the whole call with CUDA events and divide by 1000 to get per-op time.
+    DTC_INTERNAL_ITERS = 1000
+
     # Warmup
     if not args.balance:
         DTCSpMM.run_DTCSpMM(X, RowWindowOffset, TCblocktileId, TCblockoffset, SparseAToXindex, num_rows, nnz, args.exeplan)
     else:
         DTCSpMM.run_DTCSpMM_balance(X, TCblockRowid, TCblocktileId, TCblockoffset, SparseAToXindex, num_rows, args.exeplan)
-        
     torch.cuda.synchronize()
-    
+
     # Benchmark with CUDA events
     timings = []
     for _ in range(args.n_iterations):
@@ -95,14 +98,14 @@ def main():
         end_event.record()
         torch.cuda.synchronize()
         timings.append(start_event.elapsed_time(end_event))
-    avg_ms = sum(timings) / len(timings)
+    avg_ms = sum(timings) / len(timings) / DTC_INTERNAL_ITERS
 
     print_timer("loading", loading_ms)
     print_timer("preprocessing", preprocessing_ms)
     print_timer("operation", avg_ms)
-    
-    # Calculate GFLOPs
-    gflops = (2 * nnz * args.n_cols) / (avg_ms * 1e6)
+
+    # Calculate GFLOPs using original nnz (consistent with other kernels)
+    gflops = (2 * nnz * args.n_cols) / (avg_ms * 1e6) if avg_ms > 0 else 0
     print(f"GFLOPs: {gflops:.2f}")
 
 if __name__ == '__main__':
