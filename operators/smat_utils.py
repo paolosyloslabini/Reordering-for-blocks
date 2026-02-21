@@ -55,8 +55,9 @@ def setup_smat_environment():
     return env
 
 
-def run_smat_spmm(matrix_path, perm_path=None, perm_type='ROW', 
-                  n_cols=32, blocksize=8, n_iterations=5, 
+def run_smat_spmm(matrix_path, perm_path=None, perm_type='ROW',
+                  base_perm_path=None, base_perm_type='SYMMETRIC',
+                  n_cols=32, blocksize=8, n_iterations=5,
                   alpha=1.0, beta=0.0, dtype=np.float32):
     """
     Run SMaT SpMM operation on a matrix with optional permutation.
@@ -92,7 +93,8 @@ def run_smat_spmm(matrix_path, perm_path=None, perm_type='ROW',
     """
     # Step 1: Load and permute matrix using shared utilities
     t0 = time.perf_counter()
-    A_cpu = load_and_permute_matrix(matrix_path, perm_path, perm_type, dtype)
+    A_cpu = load_and_permute_matrix(matrix_path, perm_path, perm_type, dtype,
+                                    base_perm_path=base_perm_path, base_perm_type=base_perm_type)
     loading_ms = (time.perf_counter() - t0) * 1000
     
     # Step 2: Write permuted matrix to temporary MTX file

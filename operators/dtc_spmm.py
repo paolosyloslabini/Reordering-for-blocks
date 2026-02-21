@@ -73,6 +73,10 @@ def main():
                                
     preprocessing_ms = (time.perf_counter() - t0) * 1000
     
+    # float4_split requires embedding_dim >= 128; fall back for small n_cols
+    if args.n_cols <= 128 and args.exeplan == 'float4_split':
+        args.exeplan = 'float4_nonsplit'
+
     # Prepare dense matrices
     feat_size = args.n_cols
     X = torch.ones((num_rows, feat_size)).cuda()

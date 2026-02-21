@@ -5,8 +5,6 @@ Common utilities for cuSPARSE operators.
 
 import sys
 from pathlib import Path
-import cupy as cp
-import cupyx.scipy.sparse as cupyx_sp
 import numpy as np
 
 # Import from MtxPerm
@@ -18,15 +16,18 @@ from utils import load_and_permute_matrix, load_permutation_file
 def convert_to_gpu(A_cpu, sparse_format='csr', blocksize=8):
     """
     Convert CPU sparse matrix to GPU in the specified format.
-    
+
     Args:
         A_cpu: CPU sparse matrix (CSR format)
         sparse_format: Target format ('csr', 'coo')
         blocksize: Ignored (BSR uses C++ implementation)
-    
+
     Returns:
         GPU sparse matrix in requested format
     """
+    import cupy as cp
+    import cupyx.scipy.sparse as cupyx_sp
+
     if sparse_format == 'csr':
         return cupyx_sp.csr_matrix(A_cpu)
     elif sparse_format == 'bsr':
@@ -44,32 +45,34 @@ def convert_to_gpu(A_cpu, sparse_format='csr', blocksize=8):
 def time_operation(operation, n_iterations=5):
     """
     Time a GPU operation using CUDA events.
-    
+
     Args:
         operation: Callable that performs the GPU operation
         n_iterations: Number of timing iterations
-    
+
     Returns:
         Average time in milliseconds
     """
+    import cupy as cp
+
     # Warmup
     _ = operation()
     cp.cuda.Stream.null.synchronize()
-    
+
     # Timed runs using CUDA events
     timings = []
     for _ in range(n_iterations):
         start_event = cp.cuda.Event()
         end_event = cp.cuda.Event()
-        
+
         start_event.record()
         _ = operation()
         end_event.record()
         end_event.synchronize()
-        
+
         elapsed_ms = cp.cuda.get_elapsed_time(start_event, end_event)
         timings.append(elapsed_ms)
-    
+
     return sum(timings) / len(timings)
 
 
