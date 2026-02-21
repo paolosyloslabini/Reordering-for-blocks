@@ -22,3 +22,9 @@ all-matrices:
     max_nnzs: 1000000
     limit: 10000
 
+large-matrices:
+  suite_sparse_matrix_range:
+    min_nnzs: 1000000     # 10^6
+    max_nnzs: 100000000   # 10^8
+    limit: 10000
+

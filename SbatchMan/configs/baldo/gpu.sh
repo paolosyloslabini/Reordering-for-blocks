@@ -12,7 +12,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --account=flavio.vella
-#SBATCH --time=00:02:00
+#SBATCH --time=00:15:00
 #SBATCH --gres=gpu:1
 
 # Change to the submission directory
