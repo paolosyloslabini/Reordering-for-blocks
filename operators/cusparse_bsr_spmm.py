@@ -21,12 +21,15 @@ def main():
     parser.add_argument("--perm", help="Permutation file (optional)")
     parser.add_argument("--blocksize", type=int, default=BSR_BLOCKSIZE_DEFAULT, help="Block size for BSR conversion")
     parser.add_argument("--perm-type", choices=["ROW", "SYMMETRIC", "ASYMMETRIC"], default=PERM_TYPE_DEFAULT, help="Permutation type")
+    parser.add_argument("--base-perm", type=str, default=None, help="Path to base permutation file (applied first)")
+    parser.add_argument("--base-perm-type", type=str, default="SYMMETRIC", help="Type of base permutation (default: SYMMETRIC)")
     parser.add_argument("--n-cols", type=int, default=SPMM_N_COLS_DEFAULT, help="Number of columns in dense B")
     parser.add_argument("--n-iterations", type=int, default=N_ITERATIONS_DEFAULT, help="Number of SpMM iterations")
     args = parser.parse_args()
 
     # Load and permute matrix (uses shared utility function)
-    mat = load_and_permute_matrix(args.mtx, args.perm, args.perm_type)
+    mat = load_and_permute_matrix(args.mtx, args.perm, args.perm_type,
+                                  base_perm_path=args.base_perm, base_perm_type=args.base_perm_type)
     
     # Save permuted matrix to temp file
     with tempfile.NamedTemporaryFile(suffix=".mtx", delete=False) as tmp:

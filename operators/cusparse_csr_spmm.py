@@ -17,6 +17,8 @@ def main():
     parser.add_argument('matrix_path', help='Path to Matrix Market file')
     parser.add_argument('--perm', type=str, default=None, help='Path to permutation file')
     parser.add_argument('--perm-type', type=str, default=PERM_TYPE_DEFAULT, help=f'Type of permutation: ROW, SYMMETRIC, or ASYMMETRIC (default: {PERM_TYPE_DEFAULT})')
+    parser.add_argument('--base-perm', type=str, default=None, help='Path to base permutation file (applied first)')
+    parser.add_argument('--base-perm-type', type=str, default='SYMMETRIC', help='Type of base permutation (default: SYMMETRIC)')
     parser.add_argument('--alpha', type=float, default=ALPHA_DEFAULT, help=f'Alpha scalar (default: {ALPHA_DEFAULT})')
     parser.add_argument('--beta', type=float, default=BETA_DEFAULT, help=f'Beta scalar (default: {BETA_DEFAULT})')
     parser.add_argument('--n-cols', type=int, default=SPMM_N_COLS_DEFAULT, help=f'Number of columns in dense matrix B (default: {SPMM_N_COLS_DEFAULT})')
@@ -26,7 +28,8 @@ def main():
     
     # Load and permute matrix
     t0 = time.perf_counter()
-    A_cpu = load_and_permute_matrix(args.matrix_path, args.perm, args.perm_type)
+    A_cpu = load_and_permute_matrix(args.matrix_path, args.perm, args.perm_type,
+                                    base_perm_path=args.base_perm, base_perm_type=args.base_perm_type)
     loading_ms = (time.perf_counter() - t0) * 1000
     m, n = A_cpu.shape
 
