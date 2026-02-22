@@ -9,7 +9,7 @@ Shared settings and display-name dictionaries for plots and tables."""
 PALETTE = [
     '#332288', '#88CCEE', '#44AA99', '#117733',
     '#999933', '#DDCC77', '#CC6677', '#882255',
-    '#AA4499', '#DDDDDD', '#000000',
+    '#AA4499', '#DDDDDD', '#000000', '#661100',
 ]
 
 # =============================================================================
@@ -204,6 +204,7 @@ PERMS = {
     'SB_rcm':          {'display': 'RCM',      'color': PALETTE[8]},
     'SB_slashburn':    {'display': 'SlashBurn', 'color': PALETTE[9]},
     'SPARTA_reorder':  {'display': 'SPARTA',   'color': PALETTE[10]},
+    'TCA_reorder':     {'display': 'DTC-LSH',  'color': PALETTE[11]},
 }
 
 
@@ -228,6 +229,7 @@ def get_perm_color(perm: str) -> str:
 # =============================================================================
 
 KERNEL_NAMES = {
+    'ACCSPMM_SPMM': 'AccSpMM',
     'ASPT_SPMM': 'ASPT',
     'CUSPARSE_SPMM_BSR_bs32': 'cuSparse BSR',
     'CUSPARSE_SPMM_CSR': 'cuSparse CSR',
@@ -235,6 +237,9 @@ KERNEL_NAMES = {
     'FLASHSPARSE_SPMM': 'FlashSparse',
     'SMAT_SPMM_bs32': 'SMAT',
 }
+
+# Kernels excluded from the grouped 2x3 scatter plots
+GROUPED_SCATTER_EXCLUDE = {'CUSPARSE_SPMM_BSR_bs32'}
 
 
 

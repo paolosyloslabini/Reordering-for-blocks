@@ -14,7 +14,7 @@ import pandas as pd
 import numpy as np
 from scipy import stats
 import plot_utils as pu
-from settings import get_perm_display, KERNEL_NAMES
+from settings import get_perm_display, KERNEL_NAMES, GROUPED_SCATTER_EXCLUDE
 
 
 def parse_args():
@@ -229,7 +229,8 @@ def generate_kernel_plots(df, out_dir, args):
         # -----------------------------------------------------------------
         # 4. Grouped Scatter Plots (all kernels in 2x3 grid)
         # -----------------------------------------------------------------
-        kernel_labels = {k: KERNEL_NAMES.get(k, k) for k in kernels}
+        grouped_kernels = [k for k in kernels if k not in GROUPED_SCATTER_EXCLUDE]
+        kernel_labels = {k: KERNEL_NAMES.get(k, k) for k in grouped_kernels}
 
         # Log-log grouped scatter
         grouped_dir = out_dir / f"n_cols_{int(n_cols)}" / "grouped_scatter"
@@ -238,14 +239,14 @@ def generate_kernel_plots(df, out_dir, args):
         for dens_col in density_cols:
             bs = dens_col.split('_')[-1]
             pu.grouped_scatter_publication(
-                df_nc, dens_col, 'gflops', 'kernel_id', kernels,
+                df_nc, dens_col, 'gflops', 'kernel_id', grouped_kernels,
                 grouped_dir / f"gflops_vs_density_bs{bs}.png",
                 group_labels=kernel_labels,
             )
 
         if 'rel_bandwidth' in df_nc.columns:
             pu.grouped_scatter_publication(
-                df_nc, 'rel_bandwidth', 'gflops', 'kernel_id', kernels,
+                df_nc, 'rel_bandwidth', 'gflops', 'kernel_id', grouped_kernels,
                 grouped_dir / f"gflops_vs_rel_bandwidth.png",
                 group_labels=kernel_labels,
             )
@@ -253,7 +254,7 @@ def generate_kernel_plots(df, out_dir, args):
         for loc_col in ['rel_row_spread', 'locality_vertical_adjacency_ratio']:
             if loc_col in df_nc.columns:
                 pu.grouped_scatter_publication(
-                    df_nc, loc_col, 'gflops', 'kernel_id', kernels,
+                    df_nc, loc_col, 'gflops', 'kernel_id', grouped_kernels,
                     grouped_dir / f"gflops_vs_{loc_col}.png",
                     group_labels=kernel_labels,
                 )
@@ -265,7 +266,7 @@ def generate_kernel_plots(df, out_dir, args):
         for dens_col in density_cols:
             bs = dens_col.split('_')[-1]
             pu.grouped_scatter_publication(
-                df_nc, dens_col, 'gflops', 'kernel_id', kernels,
+                df_nc, dens_col, 'gflops', 'kernel_id', grouped_kernels,
                 grouped_linear_dir / f"gflops_vs_density_bs{bs}_linear.png",
                 group_labels=kernel_labels,
                 log_x=False, log_y=False,
@@ -273,7 +274,7 @@ def generate_kernel_plots(df, out_dir, args):
 
         if 'rel_bandwidth' in df_nc.columns:
             pu.grouped_scatter_publication(
-                df_nc, 'rel_bandwidth', 'gflops', 'kernel_id', kernels,
+                df_nc, 'rel_bandwidth', 'gflops', 'kernel_id', grouped_kernels,
                 grouped_linear_dir / f"gflops_vs_rel_bandwidth_linear.png",
                 group_labels=kernel_labels,
                 log_x=False, log_y=False,
@@ -282,7 +283,7 @@ def generate_kernel_plots(df, out_dir, args):
         for loc_col in ['rel_row_spread', 'locality_vertical_adjacency_ratio']:
             if loc_col in df_nc.columns:
                 pu.grouped_scatter_publication(
-                    df_nc, loc_col, 'gflops', 'kernel_id', kernels,
+                    df_nc, loc_col, 'gflops', 'kernel_id', grouped_kernels,
                     grouped_linear_dir / f"gflops_vs_{loc_col}_linear.png",
                     group_labels=kernel_labels,
                     log_x=False, log_y=False,
@@ -300,7 +301,7 @@ def generate_kernel_plots(df, out_dir, args):
             imp_col = f'density_improvement_{bs}'
             if imp_col in df_nc_reordered.columns:
                 pu.grouped_scatter_publication(
-                    df_nc_reordered, imp_col, 'speedup', 'kernel_id', kernels,
+                    df_nc_reordered, imp_col, 'speedup', 'kernel_id', grouped_kernels,
                     grouped_imp_dir / f"speedup_vs_density_imp_bs{bs}.png",
                     group_labels=kernel_labels,
                     log_x=False, log_y=False,
@@ -310,7 +311,7 @@ def generate_kernel_plots(df, out_dir, args):
                         'vertical_adjacency_improvement']:
             if imp_col in df_nc_reordered.columns:
                 pu.grouped_scatter_publication(
-                    df_nc_reordered, imp_col, 'speedup', 'kernel_id', kernels,
+                    df_nc_reordered, imp_col, 'speedup', 'kernel_id', grouped_kernels,
                     grouped_imp_dir / f"speedup_vs_{imp_col}.png",
                     group_labels=kernel_labels,
                     log_x=False, log_y=False,
@@ -327,7 +328,7 @@ def generate_kernel_plots(df, out_dir, args):
             imp_col = f'density_improvement_{bs}'
             if imp_col in df_nc_reordered.columns:
                 pu.grouped_scatter_publication(
-                    df_nc_reordered, imp_col, 'speedup', 'kernel_id', kernels,
+                    df_nc_reordered, imp_col, 'speedup', 'kernel_id', grouped_kernels,
                     grouped_imp_log_dir / f"speedup_vs_density_imp_bs{bs}_loglog.png",
                     group_labels=kernel_labels,
                     log_x=True, log_y=True,
@@ -337,7 +338,7 @@ def generate_kernel_plots(df, out_dir, args):
                         'vertical_adjacency_improvement']:
             if imp_col in df_nc_reordered.columns:
                 pu.grouped_scatter_publication(
-                    df_nc_reordered, imp_col, 'speedup', 'kernel_id', kernels,
+                    df_nc_reordered, imp_col, 'speedup', 'kernel_id', grouped_kernels,
                     grouped_imp_log_dir / f"speedup_vs_{imp_col}_loglog.png",
                     group_labels=kernel_labels,
                     log_x=True, log_y=True,
@@ -387,7 +388,8 @@ def generate_original_scatter_plots(df, out_dir, args):
                 print(f"No kernels matching '{args.kernel}'")
                 continue
 
-        kernel_labels = {k: KERNEL_NAMES.get(k, k) for k in kernels}
+        grouped_kernels_orig = [k for k in kernels if k not in GROUPED_SCATTER_EXCLUDE]
+        kernel_labels = {k: KERNEL_NAMES.get(k, k) for k in grouped_kernels_orig}
 
         # Log-log grouped scatter (original only)
         scatter_dir = out_dir / f"n_cols_{int(n_cols)}" / "grouped_scatter_original"
@@ -396,7 +398,7 @@ def generate_original_scatter_plots(df, out_dir, args):
         for x_col in structural_metrics:
             safe = pu.safe_filename(x_col)
             pu.grouped_scatter_publication(
-                df_nc, x_col, 'gflops', 'kernel_id', kernels,
+                df_nc, x_col, 'gflops', 'kernel_id', grouped_kernels_orig,
                 scatter_dir / f"gflops_vs_{safe}.png",
                 group_labels=kernel_labels,
             )
@@ -408,7 +410,7 @@ def generate_original_scatter_plots(df, out_dir, args):
         for x_col in structural_metrics:
             safe = pu.safe_filename(x_col)
             pu.grouped_scatter_publication(
-                df_nc, x_col, 'gflops', 'kernel_id', kernels,
+                df_nc, x_col, 'gflops', 'kernel_id', grouped_kernels_orig,
                 scatter_linear_dir / f"gflops_vs_{safe}_linear.png",
                 group_labels=kernel_labels,
                 log_x=False, log_y=False,
