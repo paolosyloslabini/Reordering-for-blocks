@@ -8,6 +8,7 @@ CLAUDE.md
 plots/
 plots_random/
 *.pyc
+__pycache__/
 test/groot_test.perm
 
 # External operator libraries
@@ -15,6 +16,7 @@ operators/DTC-SpMM/
 operators/FlashSparse/
 operators/smat/
 operators/cusparse_bsr_spmm
+operators/AccSpMM/
 
 # External dependencies
 ccutils
@@ -22,7 +24,13 @@ ccutils
 # Data and results
 datasets/
 *.log
+*.out
+/results_smat.csv
+operators/results_smat.csv
+/DTCSpMM_exe_time_and_throughput.csv
 PaToH.log.*
+knn_cache/
+test_runs/
 
 # Experiment outputs
 SbatchMan/archive/
