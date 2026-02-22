@@ -12,7 +12,7 @@ variables:
     - SB_slashburn
     - GROOT_reorder
     - SPARTA_reorder
-    #- TCA_reorder
+    - TCA_reorder
   block_size:
     - 32
   n_cols:
@@ -45,6 +45,9 @@ jobs:
 
       - tag: "SMAT_SPMM_SYMMETRIC"
         command: "python3 operators/smat_spmm.py {mtx} --perm perms/{perm}/$mtx_name.perm --blocksize {block_size} --perm-type SYMMETRIC --n-cols {n_cols}"
+
+      - tag: "ACCSPMM_SPMM_SYMMETRIC"
+        command: "python3 operators/accspmm_spmm.py {mtx} --perm perms/{perm}/$mtx_name.perm --perm-type SYMMETRIC --n-cols {n_cols}"
 
       - tag: "DTC_SPMM_SYMMETRIC"
         preprocess: |

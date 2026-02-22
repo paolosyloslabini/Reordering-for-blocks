@@ -11,7 +11,7 @@ variables:
     - SB_slashburn
     - GROOT_reorder
     - SPARTA_reorder
-    #- TCA_reorder
+    - TCA_reorder
   block_size:
     - 32
   n_cols:
@@ -51,3 +51,6 @@ jobs:
 
       - tag: "SMAT_SPMM_ROW_RANDOM"
         command: "python3 operators/smat_spmm.py {mtx} --base-perm perms/random1D/$mtx_name.perm --base-perm-type SYMMETRIC --perm perms_random/{perm}/$mtx_name.perm --blocksize {block_size} --perm-type ROW --n-cols {n_cols}"
+
+      - tag: "ACCSPMM_SPMM_ROW_RANDOM"
+        command: "python3 operators/accspmm_spmm.py {mtx} --base-perm perms/random1D/$mtx_name.perm --base-perm-type SYMMETRIC --perm perms_random/{perm}/$mtx_name.perm --perm-type ROW --n-cols {n_cols}"

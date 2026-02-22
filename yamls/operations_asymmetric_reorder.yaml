@@ -43,3 +43,6 @@ jobs:
 
       - tag: "SMAT_SPMM_ASYMMETRIC"
         command: "python3 operators/smat_spmm.py {mtx} --perm perms/{perm}/$mtx_name.perm --blocksize {block_size} --perm-type ASYMMETRIC --n-cols {n_cols}"
+
+      - tag: "ACCSPMM_SPMM_ASYMMETRIC"
+        command: "python3 operators/accspmm_spmm.py {mtx} --perm perms/{perm}/$mtx_name.perm --perm-type ASYMMETRIC --n-cols {n_cols}"

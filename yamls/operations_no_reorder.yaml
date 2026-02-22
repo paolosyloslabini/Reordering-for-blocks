@@ -33,6 +33,9 @@ jobs:
       - tag: "SMAT_SPMM_NO_REORDER"
         command: "python3 operators/smat_spmm.py {mtx} --blocksize {block_size} --n-cols {n_cols}"
 
+      - tag: "ACCSPMM_SPMM_NO_REORDER"
+        command: "python3 operators/accspmm_spmm.py {mtx} --n-cols {n_cols}"
+
       - tag: "DTC_SPMM_NO_REORDER"
         preprocess: |
           source operators/dtc_preprocess.sh
