@@ -13,7 +13,7 @@ data:
   operations_csv: "results/results_operations.csv"
   analysis_csv: "results/results_analysis.csv"
   reordering_csv: "results/results_reordering.csv"
-  matrices_list: "datasets/matrices_list_mtx.txt"
+  matrices_list: "datasets/matrices_list_filtered.txt"
 
 # ---- Filtering ------------------------------------------------------------
 filters:

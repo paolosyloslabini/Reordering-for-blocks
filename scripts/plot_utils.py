@@ -413,8 +413,15 @@ def filter_one_per_family(df, matrices_list_path, keep_full_families=None):
         return df
     
     df = df.copy()
-    df['family'] = df['matrix'].map(matrix_to_family).fillna(df['matrix'])
-    
+    df['family'] = df['matrix'].map(matrix_to_family)
+
+    # Drop matrices not present in the matrices list
+    unknown_mask = df['family'].isna()
+    if unknown_mask.any():
+        n_unknown = df.loc[unknown_mask, 'matrix'].nunique()
+        df = df[~unknown_mask]
+        print(f"  Dropped {n_unknown} matrices not in {matrices_list_path}")
+
     # Separate families to keep full vs filter
     keep_full_mask = df['family'].isin(keep_full_families)
     df_keep_full = df[keep_full_mask]
@@ -1458,7 +1465,7 @@ def safe_filename(name):
 
 def _pearson_for_scatter(x_vals, y_vals):
     """Compute Pearson r on raw (linear) values."""
-    valid = x_vals.notna() & y_vals.notna()
+    valid = x_vals.notna() & y_vals.notna() & np.isfinite(x_vals) & np.isfinite(y_vals)
     xp, yp = x_vals[valid], y_vals[valid]
     if len(xp) >= 2:
         r, _ = stats.pearsonr(xp, yp)
@@ -1468,7 +1475,7 @@ def _pearson_for_scatter(x_vals, y_vals):
 
 def _correlation_for_scatter(x_vals, y_vals, method=None):
     """Compute correlation on raw values using the configured method."""
-    valid = x_vals.notna() & y_vals.notna()
+    valid = x_vals.notna() & y_vals.notna() & np.isfinite(x_vals) & np.isfinite(y_vals)
     xp, yp = x_vals[valid], y_vals[valid]
     if len(xp) >= 2:
         r, _ = compute_correlation(xp, yp, method=method)
