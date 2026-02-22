@@ -8,8 +8,8 @@ Writes a filtered list that can be used by sbatchman launch configs.
 
 Usage:
     python scripts/filter_matrix_list.py
+    python scripts/filter_matrix_list.py --input datasets/matrices_list_mtx.txt datasets/large-matrices/matrices_list.txt
     python scripts/filter_matrix_list.py --config scripts/filter_config.yaml
-    python scripts/filter_matrix_list.py --input datasets/matrices_list_mtx.txt --output datasets/matrices_list_filtered.txt
 """
 
 import argparse
@@ -54,8 +54,8 @@ def main():
     parser = argparse.ArgumentParser(description="Pre-filter matrix list for sbatchman launch")
     parser.add_argument('--config', default='scripts/filter_config.yaml',
                         help='Path to filter_config.yaml')
-    parser.add_argument('--input', default=None,
-                        help='Input matrix list (default: from config)')
+    parser.add_argument('--input', nargs='*', default=None,
+                        help='Input matrix list file(s). Auto-discovers datasets/*/matrices_list.txt if not specified.')
     parser.add_argument('--output', default='datasets/matrices_list_filtered.txt',
                         help='Output filtered matrix list')
     args = parser.parse_args()
@@ -65,13 +65,26 @@ def main():
         config = yaml.safe_load(f)
 
     filters = config.get('filters', {})
-    input_path = args.input or config.get('data', {}).get('matrices_list', 'datasets/matrices_list_mtx.txt')
 
-    # Read input list
-    with open(input_path, 'r') as f:
-        all_paths = [line.strip() for line in f if line.strip()]
+    # Collect input lists: explicit args, or auto-discover per-category matrices_list.txt
+    if args.input:
+        input_files = args.input
+    else:
+        datasets_dir = Path('datasets')
+        # Each mtxman category has datasets/<category>/matrices_list.txt
+        input_files = sorted(str(p) for p in datasets_dir.glob('*/matrices_list.txt'))
+        if not input_files:
+            input_files = [config.get('data', {}).get('matrices_list', 'datasets/matrices_list_mtx.txt')]
 
-    print(f"Input: {len(all_paths)} matrices from {input_path}")
+    # Read and combine all input lists
+    all_paths = []
+    for input_path in input_files:
+        with open(input_path, 'r') as f:
+            paths = [line.strip() for line in f if line.strip()]
+        print(f"  {input_path}: {len(paths)} matrices")
+        all_paths.extend(paths)
+
+    print(f"Combined input: {len(all_paths)} matrices from {len(input_files)} file(s)")
 
     # Read headers for all matrices
     matrices = []
