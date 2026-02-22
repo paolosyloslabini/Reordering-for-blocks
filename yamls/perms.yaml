@@ -91,3 +91,11 @@ jobs:
           mkdir -p perms/SB_slashburn
           perm_path=perms/SB_slashburn/$mtx_name.perm
         command: "./MtxPerm/SPARSEBASE/build/slashburn_perm {mtx} $perm_path"
+
+      #- tag: "TCA_reorder"
+      #  preprocess: |
+      #    source MtxPerm/DTC-LSH/tca_preprocess.sh
+      #    mtx_name=$(basename {mtx} .mtx)
+      #    mkdir -p perms/TCA_reorder
+      #    perm_path=perms/TCA_reorder/$mtx_name.perm
+      #  command: "python3 MtxPerm/DTC-LSH/reorder.py {mtx} $perm_path"

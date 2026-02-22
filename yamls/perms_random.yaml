@@ -139,3 +139,16 @@ jobs:
           --perm perms/random1D/$mtx_name.perm --perm-type SYMMETRIC &&
           ./MtxPerm/SPARSEBASE/build/slashburn_perm $temp_mtx $perm_path;
           rm -f $temp_mtx
+
+      #- tag: "TCA_reorder_RANDOM"
+      #  preprocess: |
+      #    source MtxPerm/DTC-LSH/tca_preprocess.sh
+      #    mtx_name=$(basename {mtx} .mtx)
+      #    mkdir -p perms_random/TCA_reorder
+      #    perm_path=perms_random/TCA_reorder/$mtx_name.perm
+      #  command: >
+      #    temp_mtx=$(mktemp /tmp/pre_perm_XXXXXX.mtx) &&
+      #    python3 MtxPerm/pre_permute.py {mtx} $temp_mtx
+      #    --perm perms/random1D/$mtx_name.perm --perm-type SYMMETRIC &&
+      #    python3 MtxPerm/DTC-LSH/reorder.py $temp_mtx $perm_path;
+      #    rm -f $temp_mtx
