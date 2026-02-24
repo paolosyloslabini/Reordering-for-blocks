@@ -40,7 +40,7 @@ def _corr_method_tag():
     return pu.get_correlation_method()
 
 
-def compute_correlations(df, n_cols, metrics, kernels=None):
+def compute_correlations(df, n_cols, metrics, kernels=None, original_only=False):
     """Compute correlations between metrics and GFLOPS.
 
     The correlation method is read from ``filter_config.yaml``
@@ -51,11 +51,14 @@ def compute_correlations(df, n_cols, metrics, kernels=None):
         n_cols: Filter to this n_cols value
         metrics: List of metric columns to compute correlations for
         kernels: List of kernels to include (None = all)
+        original_only: If True, use only original (unreordered) matrices.
 
     Returns:
         DataFrame with correlations (rows=kernels, cols=metrics with _corr suffix)
     """
     df_nc = df[df['n_cols'] == n_cols]
+    if original_only:
+        df_nc = df_nc[df_nc['strategy'] == 'Original']
 
     if kernels is None:
         kernels = sorted(df_nc['kernel_id'].unique())
@@ -219,12 +222,19 @@ def _generate_corr_table(corr_df, metrics, kernel_names,
     print(f"Saved: {out_path}")
 
 
-def generate_all_tables(df, output_dir, metrics=None, kernel_names=None):
-    """Generate LaTeX correlation tables for all n_cols values."""
+def generate_all_tables(df, output_dir, metrics=None, kernel_names=None,
+                        original_only=False):
+    """Generate LaTeX correlation tables for all n_cols values.
+
+    Args:
+        original_only: If True, use only original (unreordered) matrices.
+    """
     if metrics is None:
         metrics = enabled_metrics()
     if kernel_names is None:
         kernel_names = KERNEL_NAMES
+
+    suffix = '_original' if original_only else ''
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -232,29 +242,44 @@ def generate_all_tables(df, output_dir, metrics=None, kernel_names=None):
 
     for n_cols in sorted(df['n_cols'].unique()):
         n_cols_int = int(n_cols)
-        df_nc = df[df['n_cols'] == n_cols]
-        n_matrices = df_nc[['matrix', 'perm', 'perm_type']].drop_duplicates().shape[0]
-        corr_df = compute_correlations(df, n_cols, metrics, kernels)
+        corr_df = compute_correlations(df, n_cols, metrics, kernels,
+                                       original_only=original_only)
 
-        caption_tpl = (
-            "{corr_display} correlation between metrics and SpMM GFLOPS "
-            f"($n_{{{{cols}}}} = {n_cols_int}$). "
-            f"Correlation is calculated across matrices in SuiteSparse and all "
-            f"their reorderings, for a total of {n_matrices:,} configurations.")
+        if original_only:
+            df_nc = df[(df['n_cols'] == n_cols) & (df['strategy'] == 'Original')]
+            n_matrices = df_nc['matrix'].nunique()
+            caption_tpl = (
+                "{corr_display} correlation between metrics and SpMM GFLOPS "
+                f"($n_{{{{cols}}}} = {n_cols_int}$). "
+                f"Original (unreordered) matrices only ({n_matrices:,} matrices).")
+        else:
+            df_nc = df[df['n_cols'] == n_cols]
+            n_configs = df_nc[['matrix', 'perm', 'perm_type']].drop_duplicates().shape[0]
+            caption_tpl = (
+                "{corr_display} correlation between metrics and SpMM GFLOPS "
+                f"($n_{{{{cols}}}} = {n_cols_int}$). "
+                f"All matrices and reorderings ({n_configs:,} configurations).")
 
         _generate_corr_table(
             corr_df, metrics, kernel_names,
-            output_dir, caption_tpl, 'correlation', 'correlation',
+            output_dir, caption_tpl,
+            f'correlation{suffix}', f'correlation{suffix}',
             n_cols_int)
 
 
-def generate_blocksize_tables(df, output_dir, kernel_names=None):
-    """Generate LaTeX block-density correlation tables for all n_cols."""
+def generate_blocksize_tables(df, output_dir, kernel_names=None,
+                              original_only=False):
+    """Generate LaTeX block-density correlation tables for all n_cols.
+
+    Args:
+        original_only: If True, use only original (unreordered) matrices.
+    """
     if kernel_names is None:
         kernel_names = KERNEL_NAMES
 
+    suffix = '_original' if original_only else ''
+
     bd_metrics = block_density_metrics()
-    # Short header: "4×4", "8×8", …
     def _bd_header(m):
         bs = m.split('_')[-1]
         return f'${bs}\\times{bs}$'
@@ -265,53 +290,67 @@ def generate_blocksize_tables(df, output_dir, kernel_names=None):
 
     for n_cols in sorted(df['n_cols'].unique()):
         n_cols_int = int(n_cols)
-        df_nc = df[df['n_cols'] == n_cols]
-        n_matrices = df_nc[['matrix', 'perm', 'perm_type']].drop_duplicates().shape[0]
-        corr_df = compute_correlations(df, n_cols, bd_metrics, kernels)
+        corr_df = compute_correlations(df, n_cols, bd_metrics, kernels,
+                                       original_only=original_only)
 
-        caption_tpl = (
-            "{corr_display} correlation between block density and SpMM GFLOPS "
-            f"across block sizes ($n_{{{{cols}}}} = {n_cols_int}$). "
-            f"Correlation is calculated across matrices in SuiteSparse and all "
-            f"their reorderings, for a total of {n_matrices:,} configurations.")
+        if original_only:
+            df_nc = df[(df['n_cols'] == n_cols) & (df['strategy'] == 'Original')]
+            n_matrices = df_nc['matrix'].nunique()
+            caption_tpl = (
+                "{corr_display} correlation between block density and SpMM GFLOPS "
+                f"across block sizes ($n_{{{{cols}}}} = {n_cols_int}$). "
+                f"Original (unreordered) matrices only ({n_matrices:,} matrices).")
+        else:
+            df_nc = df[df['n_cols'] == n_cols]
+            n_configs = df_nc[['matrix', 'perm', 'perm_type']].drop_duplicates().shape[0]
+            caption_tpl = (
+                "{corr_display} correlation between block density and SpMM GFLOPS "
+                f"across block sizes ($n_{{{{cols}}}} = {n_cols_int}$). "
+                f"All matrices and reorderings ({n_configs:,} configurations).")
 
         _generate_corr_table(
             corr_df, bd_metrics, kernel_names,
-            output_dir, caption_tpl, 'blocksize', 'blocksize',
+            output_dir, caption_tpl,
+            f'blocksize{suffix}', f'blocksize{suffix}',
             n_cols_int, header_name_func=_bd_header)
 
 
-def generate_per_metric_tables(df, output_dir, metrics=None, kernel_names=None):
+def generate_per_metric_tables(df, output_dir, metrics=None, kernel_names=None,
+                               original_only=False):
     """Generate per-metric LaTeX tables: kernels (rows) x n_cols (columns).
 
-    For each structural metric, produces a table where rows are kernels
-    and columns are n_cols values.
+    Args:
+        original_only: If True, use only original (unreordered) matrices.
     """
     if metrics is None:
         metrics = enabled_metrics()
     if kernel_names is None:
         kernel_names = KERNEL_NAMES
 
+    suffix = '_original' if original_only else ''
+
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    n_cols_values = sorted(df['n_cols'].unique())
-    kernels = _ordered_kernels(df, kernel_names)
+    df_work = df[df['strategy'] == 'Original'] if original_only else df
+
+    n_cols_values = sorted(df_work['n_cols'].unique())
+    kernels = _ordered_kernels(df_work, kernel_names)
     method = pu.get_correlation_method()
     tag = _corr_method_tag()
     corr_display = pu.correlation_display_name()
+    orig_note = ' (original matrices only)' if original_only else ''
 
     for mc in metrics:
-        if mc not in df.columns:
+        if mc not in df_work.columns:
             continue
 
         metric_display = get_metric_display(mc)
         metric_safe = pu.safe_filename(mc)
 
-        # Build table: rows = kernels, columns = n_cols
         rows = []
         for kernel in kernels:
-            df_k = df[df['kernel_id'] == kernel]
+            df_k = df_work[df_work['kernel_id'] == kernel]
             row_data = {'kernel': kernel}
             for n_cols in n_cols_values:
                 df_kn = df_k[df_k['n_cols'] == n_cols]
@@ -329,7 +368,6 @@ def generate_per_metric_tables(df, output_dir, metrics=None, kernel_names=None):
         if corr_df[n_cols_ints].isna().all().all():
             continue
 
-        # Build LaTeX table
         lines = []
         lines.append(r'\begin{table}[htb!]')
         lines.append(r'\centering')
@@ -344,7 +382,6 @@ def generate_per_metric_tables(df, output_dir, metrics=None, kernel_names=None):
 
         for _, row in corr_df.iterrows():
             kernel_label = kernel_names.get(row['kernel'], row['kernel'])
-
             cells = [kernel_label]
             for nc in n_cols_ints:
                 val = row[nc]
@@ -358,11 +395,11 @@ def generate_per_metric_tables(df, output_dir, metrics=None, kernel_names=None):
         lines.append(r'\end{tabular}')
         lines.append(
             r"\caption{" + corr_display + " between " + metric_display +
-            r' and SpMM GFLOPS across $n_{cols}$ values.}')
-        lines.append(r'\label{tab:per_metric_' + tag + '_' + metric_safe + '}')
+            r' and SpMM GFLOPS across $n_{cols}$ values' + orig_note + '.}')
+        lines.append(r'\label{tab:per_metric' + suffix + '_' + tag + '_' + metric_safe + '}')
         lines.append(r'\end{table}')
 
-        out_path = output_dir / f"per_metric_{tag}_{metric_safe}.tex"
+        out_path = output_dir / f"per_metric{suffix}_{tag}_{metric_safe}.tex"
         with open(out_path, 'w') as f:
             f.write('\n'.join(lines))
         print(f"Saved: {out_path}")
@@ -717,9 +754,15 @@ def parse_args():
         help="Generate only median improvement ratio tables"
     )
 
+    parser.add_argument(
+        "--clean", action="store_true",
+        help="Delete existing output directory before generating tables"
+    )
+
     # Fine-grained section selection (used by run_plots.py wrapper)
     SECTION_CHOICES = ['correlations', 'blocksize', 'per-metric', 'improvement',
-                       'imp-correlations', 'imp-blocksize']
+                       'imp-correlations', 'imp-blocksize',
+                       'correlations-original', 'blocksize-original', 'per-metric-original']
     parser.add_argument(
         "--sections", nargs="+", choices=SECTION_CHOICES, default=None,
         help=(
@@ -732,6 +775,8 @@ def parse_args():
 
 
 def main():
+    import shutil
+
     args = parse_args()
 
     # Apply --random defaults
@@ -742,6 +787,15 @@ def main():
             args.output = 'plots_random/correlation_tables'
     if args.output is None:
         args.output = 'plots/correlation_tables'
+
+    out_dir = Path(args.output)
+
+    # --clean: remove and recreate output directory
+    if args.clean and out_dir.exists():
+        print(f"Cleaning output directory: {out_dir}")
+        shutil.rmtree(out_dir)
+
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------
     # Load, filter, and add derived columns (single pipeline)
@@ -772,7 +826,7 @@ def main():
     print(f"\nCorrelation method: {method}")
 
     # ------------------------------------------------------------------
-    # Generate tables
+    # Generate tables (organized into subfolders)
     # ------------------------------------------------------------------
     print("\nGenerating LaTeX tables...")
 
@@ -785,22 +839,37 @@ def main():
         sections = {'blocksize'}
     else:
         sections = {'correlations', 'blocksize', 'per-metric', 'improvement',
-                     'imp-correlations', 'imp-blocksize'}
+                     'imp-correlations', 'imp-blocksize',
+                     'correlations-original', 'blocksize-original', 'per-metric-original'}
 
+    # All data (original + reordered)
     if 'correlations' in sections:
-        generate_all_tables(df, args.output)
+        generate_all_tables(df, out_dir / 'all')
     if 'blocksize' in sections:
-        generate_blocksize_tables(df, args.output)
+        generate_blocksize_tables(df, out_dir / 'all')
     if 'per-metric' in sections:
-        generate_per_metric_tables(df, args.output)
-    if 'improvement' in sections:
-        generate_improvement_tables(df_analysis, args.output)
-    if 'imp-correlations' in sections:
-        generate_imp_correlation_tables(df, args.output)
-    if 'imp-blocksize' in sections:
-        generate_imp_blocksize_tables(df, args.output)
+        generate_per_metric_tables(df, out_dir / 'all')
 
-    print("\nDone!")
+    # Original only
+    if 'correlations-original' in sections:
+        generate_all_tables(df, out_dir / 'original', original_only=True)
+    if 'blocksize-original' in sections:
+        generate_blocksize_tables(df, out_dir / 'original', original_only=True)
+    if 'per-metric-original' in sections:
+        generate_per_metric_tables(df, out_dir / 'original', original_only=True)
+
+    # Improvement tables
+    if 'improvement' in sections:
+        generate_improvement_tables(df_analysis, out_dir / 'improvement')
+
+    # Improvement-correlation tables
+    if 'imp-correlations' in sections:
+        generate_imp_correlation_tables(df, out_dir / 'imp_correlations')
+    if 'imp-blocksize' in sections:
+        generate_imp_blocksize_tables(df, out_dir / 'imp_correlations')
+
+    print(f"\nAll tables saved to {out_dir}")
+    print("Done!")
 
 
 if __name__ == "__main__":

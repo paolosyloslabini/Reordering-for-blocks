@@ -58,4 +58,4 @@ filters:
 display:
   # Correlation method used in all plots and tables.
   # Choices: pearson, spearman, kendall
-  correlation_method: pearson
+  correlation_method: spearman

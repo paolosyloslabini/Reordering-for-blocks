@@ -11,6 +11,7 @@ import pandas as pd
 import numpy as np
 import seaborn as sns
 import matplotlib as mpl
+mpl.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.ticker import LogLocator, NullFormatter, NullLocator
 from pathlib import Path
@@ -18,6 +19,8 @@ from scipy import stats
 import re
 import sys
 import yaml
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from settings import (
     PALETTE, PERMS, ALL_METRICS,
     get_metric_display, get_perm_display, get_perm_color,
@@ -796,6 +799,38 @@ def _save_figure(path, dpi=300):
     plt.savefig(path, dpi=dpi)
     plt.close()
     print(f"Saved: {Path(path).name}")
+
+
+def _exec_plot_task(task):
+    """Execute a single (func, kwargs) plot task."""
+    func, kwargs = task
+    try:
+        func(**kwargs)
+    except Exception as e:
+        print(f"  Error in {func.__name__}: {e}")
+
+
+def parallel_execute(tasks, n_jobs=None):
+    """Execute plot tasks in parallel using multiprocessing.
+
+    Args:
+        tasks: List of (callable, kwargs_dict) tuples.
+        n_jobs: Worker count. None = min(cpu_count, 8). 1 = sequential.
+    """
+    if not tasks:
+        return
+    if n_jobs is None:
+        n_jobs = min(multiprocessing.cpu_count(), 8)
+    if n_jobs <= 1 or len(tasks) <= 2:
+        for task in tasks:
+            _exec_plot_task(task)
+        return
+    print(f"  Running {len(tasks)} plots across {n_jobs} workers...")
+    with ProcessPoolExecutor(max_workers=n_jobs) as pool:
+        futs = [pool.submit(_exec_plot_task, t) for t in tasks]
+        for f in as_completed(futs):
+            if f.exception():
+                print(f"  Error: {f.exception()}")
 
 
 def scatter_with_correlation(df, x_col, y_col, output_path,
