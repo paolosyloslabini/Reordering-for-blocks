@@ -14,7 +14,8 @@ import pandas as pd
 import numpy as np
 from scipy import stats
 import plot_utils as pu
-from settings import get_perm_display, KERNEL_NAMES, GROUPED_SCATTER_EXCLUDE
+from settings import get_perm_display, get_perm_color, KERNEL_NAMES, GROUPED_SCATTER_EXCLUDE, PERMS, enabled_metrics, get_metric_display
+from correlation_table import compute_improvement_ratios
 
 
 def parse_args():
@@ -59,6 +60,7 @@ def parse_args():
         'kernels', 'breakeven', 'original-scatter',
         'reorder-analysis', 'reorderability', 'per-matrix', 'timing',
         'singular-improvement',
+        'profiles',
     ]
     parser.add_argument(
         "--sections", nargs="+", choices=SECTION_CHOICES, default=None,
@@ -1101,6 +1103,100 @@ def generate_reorder_analysis_plots(df_analysis, out_dir, n_jobs=None):
     pu.parallel_execute(tasks, n_jobs=n_jobs)
 
 
+def generate_profile_plots(df_analysis, out_dir):
+    """Generate performance-profile plots (survival curves of improvement ratios).
+
+    For each metric, the x-axis is ratio = value / best_value (in (0,1]),
+    and the y-axis is the fraction of matrices achieving at least that ratio.
+    """
+    imp_df, used_metrics = compute_improvement_ratios(df_analysis)
+    if imp_df.empty:
+        print("  No improvement data — skipping profile plots.")
+        return
+
+    # Determine perm_type groups to plot
+    perm_types = sorted(imp_df['perm_type'].dropna().unique())
+    groups = [(pt, imp_df[imp_df['perm_type'] == pt]) for pt in perm_types]
+    groups.append(('both', imp_df))
+
+    for group_label, group_df in groups:
+        if group_df.empty:
+            continue
+
+        imp_cols = [f'{m}_imp' for m in used_metrics]
+
+        # For each metric, find the best algorithm value per matrix
+        # ratio = this_algorithm / best_algorithm  (in (0, 1])
+        profile_data = {}  # metric -> {perm -> sorted ratios array}
+        for m in used_metrics:
+            col = f'{m}_imp'
+            sub = group_df[['matrix', 'perm', col]].dropna(subset=[col])
+            best_per_matrix = sub.groupby('matrix')[col].max().rename('best')
+            sub = sub.merge(best_per_matrix, on='matrix')
+            # Filter out matrices where best <= 0
+            sub = sub[sub['best'] > 0]
+            sub['ratio'] = sub[col] / sub['best']
+            profile_data[m] = {}
+            for perm, perm_sub in sub.groupby('perm'):
+                ratios = np.sort(perm_sub['ratio'].values)
+                profile_data[m][perm] = ratios
+
+        # Layout: 3 columns
+        n_metrics = len(used_metrics)
+        ncols = min(3, n_metrics)
+        nrows = (n_metrics + ncols - 1) // ncols
+        fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 4 * nrows),
+                                 squeeze=False)
+
+        # Canonical perm order
+        perm_order = [p for p in PERMS if p in group_df['perm'].unique()]
+
+        for idx, m in enumerate(used_metrics):
+            ax = axes[idx // ncols][idx % ncols]
+            data = profile_data[m]
+            for perm in perm_order:
+                if perm not in data or len(data[perm]) == 0:
+                    continue
+                ratios = data[perm]
+                n = len(ratios)
+                # Survival function: fraction >= x
+                # Step curve: at each sorted ratio value, survival drops
+                x_vals = np.concatenate([[0], ratios, [1.0]])
+                # For each x, fraction of ratios >= x
+                surv = np.array([np.mean(ratios >= x) for x in x_vals])
+                ax.step(x_vals, surv, where='post',
+                        label=get_perm_display(perm),
+                        color=get_perm_color(perm), linewidth=1.5)
+
+            ax.set_title(get_metric_display(m), fontsize=10)
+            ax.set_xlabel('Ratio to best')
+            ax.set_ylabel('Fraction of matrices')
+            ax.set_xlim(0, 1.05)
+            ax.set_ylim(0, 1.05)
+            ax.grid(True, alpha=0.3)
+
+        # Hide unused axes
+        for idx in range(n_metrics, nrows * ncols):
+            axes[idx // ncols][idx % ncols].set_visible(False)
+
+        # Shared legend at bottom
+        handles, labels = axes[0][0].get_legend_handles_labels()
+        fig.legend(handles, labels, loc='lower center',
+                   ncol=min(6, len(handles)), fontsize=9,
+                   bbox_to_anchor=(0.5, -0.02))
+
+        fig.suptitle(f'Performance Profiles ({group_label})', fontsize=13, y=1.01)
+        fig.tight_layout()
+
+        prof_dir = out_dir / 'reorder_analysis' / 'profiles'
+        prof_dir.mkdir(parents=True, exist_ok=True)
+        for ext in ('pdf', 'png'):
+            fig.savefig(prof_dir / f'profiles_{group_label}.{ext}',
+                        bbox_inches='tight', dpi=150)
+        plt.close(fig)
+        print(f"  Saved profiles_{group_label}.pdf/png")
+
+
 def _should_run(section: str, args) -> bool:
     """Decide whether *section* should run given CLI flags.
 
@@ -1232,7 +1328,13 @@ def main():
         print("="*60)
         generate_reorder_timing_plots(df_analysis, out_dir,
                                       reordering_csv=_reordering_csv())
-    
+
+    if _should_run('profiles', args):
+        print("\n" + "="*60)
+        print("Generating performance profile plots...")
+        print("="*60)
+        generate_profile_plots(df_analysis, out_dir)
+
     print(f"\nAll plots saved to {out_dir}")
 
 

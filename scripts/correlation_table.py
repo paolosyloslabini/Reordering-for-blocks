@@ -471,25 +471,24 @@ def improvement_to_latex(median_df, metrics, caption=None, label=None):
     lines.append(' & '.join(header_cols) + r' \\')
     lines.append(r'\midrule')
 
+    # Pre-compute best algorithm (perm) per metric column
+    best_perm_per_metric = {}
+    for m in metrics:
+        col = f'{m}_imp'
+        valid = median_df[['perm', col]].dropna(subset=[col])
+        if not valid.empty:
+            best_perm_per_metric[m] = valid.loc[valid[col].idxmax(), 'perm']
+
     for _, row in median_df.iterrows():
         perm = row['perm']
         perm_display = get_perm_display(perm)
-
-        values_dict = {}
-        for m in metrics:
-            val = row.get(f'{m}_imp', np.nan)
-            if not pd.isna(val):
-                values_dict[m] = val
-
-        # Bold the best (highest) median improvement in each row
-        best_metric = max(values_dict, key=lambda m: values_dict[m]) if values_dict else None
 
         cells = [perm_display]
         for m in metrics:
             val = row.get(f'{m}_imp', np.nan)
             if pd.isna(val):
                 cells.append('--')
-            elif m == best_metric:
+            elif best_perm_per_metric.get(m) == perm:
                 cells.append(r'\textbf{' + f'{val:.2f}' + '}')
             else:
                 cells.append(f'{val:.2f}')
@@ -617,6 +616,93 @@ def generate_imp_correlation_tables(df, output_dir, kernel_names=None):
         out_path = output_dir / f"imp_correlation_{tag}_ncols_{n_cols_int}.tex"
         with open(out_path, 'w') as f:
             f.write(latex)
+        print(f"Saved: {out_path}")
+
+
+def generate_imp_per_metric_tables(df, output_dir, kernel_names=None):
+    """Generate per-improvement-metric LaTeX tables: kernels (rows) x n_cols (columns).
+
+    Each table shows how the correlation between one improvement metric and
+    speedup varies across n_cols values.
+    """
+    if kernel_names is None:
+        kernel_names = KERNEL_NAMES
+
+    imp_metrics = _enabled_improvement_metrics()
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    df_work = df[df['strategy'] != 'Original']
+
+    n_cols_values = sorted(df_work['n_cols'].unique())
+    kernels = _ordered_kernels(df_work, kernel_names)
+    method = pu.get_correlation_method()
+    tag = _corr_method_tag()
+    corr_display = pu.correlation_display_name()
+
+    for mc in imp_metrics:
+        if mc not in df_work.columns:
+            continue
+
+        metric_display = get_metric_display(mc)
+        metric_safe = pu.safe_filename(mc)
+
+        rows = []
+        for kernel in kernels:
+            df_k = df_work[df_work['kernel_id'] == kernel]
+            row_data = {'kernel': kernel}
+            for n_cols in n_cols_values:
+                df_kn = df_k[df_k['n_cols'] == n_cols]
+                valid = df_kn[[mc, 'speedup']].dropna()
+                valid = valid[np.isfinite(valid[mc]) & np.isfinite(valid['speedup'])]
+                if len(valid) < 10:
+                    row_data[int(n_cols)] = np.nan
+                    continue
+                r, _ = pu.compute_correlation(valid[mc], valid['speedup'], method)
+                row_data[int(n_cols)] = r
+            rows.append(row_data)
+
+        corr_df = pd.DataFrame(rows)
+        n_cols_ints = [int(nc) for nc in n_cols_values]
+
+        if corr_df[n_cols_ints].isna().all().all():
+            continue
+
+        lines = []
+        lines.append(r'\begin{table}[htb!]')
+        lines.append(r'\centering')
+        lines.append(r'\footnotesize')
+        col_spec = 'l' + 'c' * len(n_cols_ints)
+        lines.append(r'\begin{tabular}{' + col_spec + '}')
+        lines.append(r'\toprule')
+
+        header_cols = ['Kernel'] + [f'$n_{{cols}} = {nc}$' for nc in n_cols_ints]
+        lines.append(' & '.join(header_cols) + r' \\')
+        lines.append(r'\midrule')
+
+        for _, row in corr_df.iterrows():
+            kernel_label = kernel_names.get(row['kernel'], row['kernel'])
+            cells = [kernel_label]
+            for nc in n_cols_ints:
+                val = row[nc]
+                if pd.isna(val):
+                    cells.append('--')
+                else:
+                    cells.append(f'{val:.3f}')
+            lines.append(' & '.join(cells) + r' \\')
+
+        lines.append(r'\bottomrule')
+        lines.append(r'\end{tabular}')
+        lines.append(
+            r"\caption{" + corr_display + " between " + metric_display +
+            r' and speedup across $n_{cols}$ values (reordered configurations only).}')
+        lines.append(r'\label{tab:imp_per_metric_' + tag + '_' + metric_safe + '}')
+        lines.append(r'\end{table}')
+
+        out_path = output_dir / f"imp_per_metric_{tag}_{metric_safe}.tex"
+        with open(out_path, 'w') as f:
+            f.write('\n'.join(lines))
         print(f"Saved: {out_path}")
 
 
@@ -761,7 +847,7 @@ def parse_args():
 
     # Fine-grained section selection (used by run_plots.py wrapper)
     SECTION_CHOICES = ['correlations', 'blocksize', 'per-metric', 'improvement',
-                       'imp-correlations', 'imp-blocksize',
+                       'imp-correlations', 'imp-blocksize', 'imp-per-metric',
                        'correlations-original', 'blocksize-original', 'per-metric-original']
     parser.add_argument(
         "--sections", nargs="+", choices=SECTION_CHOICES, default=None,
@@ -839,7 +925,7 @@ def main():
         sections = {'blocksize'}
     else:
         sections = {'correlations', 'blocksize', 'per-metric', 'improvement',
-                     'imp-correlations', 'imp-blocksize',
+                     'imp-correlations', 'imp-blocksize', 'imp-per-metric',
                      'correlations-original', 'blocksize-original', 'per-metric-original'}
 
     # All data (original + reordered)
@@ -867,6 +953,8 @@ def main():
         generate_imp_correlation_tables(df, out_dir / 'imp_correlations')
     if 'imp-blocksize' in sections:
         generate_imp_blocksize_tables(df, out_dir / 'imp_correlations')
+    if 'imp-per-metric' in sections:
+        generate_imp_per_metric_tables(df, out_dir / 'imp_correlations')
 
     print(f"\nAll tables saved to {out_dir}")
     print("Done!")

@@ -28,6 +28,7 @@ PLOT_GROUPS = [
     ("Reorderability analysis plots",  "reorderability"),
     ("Per-matrix difficulty study",    "per-matrix"),
     ("Reorder timing analysis",        "timing"),
+    ("Performance profile plots",      "profiles"),
     ("ALL plot.py plots",              None),          # None → no --sections flag
 ]
 
