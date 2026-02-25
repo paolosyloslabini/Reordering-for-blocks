@@ -1165,8 +1165,8 @@ def binned_bar_chart(df, bin_col, value_col, output_path,
         bin_col: Column to bin
         value_col: Column to aggregate
         output_path: Path to save figure
-        bins: Bin edges (default: [0, 0.5, 1.0, 2.0, 5.0, 10.0, 1000.0])
-        labels: Bin labels (default: ['<0.5x', '0.5-1x', '1-2x', '2-5x', '5-10x', '>10x'])
+        bins: Bin edges (default: [0, 0.5, 1.0, 1.5, 2.0, 3.0, 5.0, 1000.0])
+        labels: Bin labels (default: ['<0.5x', '0.5-1x', '1-1.5x', '1.5-2x', '2-3x', '3-5x', '>5x'])
         title: Plot title
         baseline: Value for horizontal reference line
         agg_func: Aggregation function ('median' or 'mean')
@@ -1174,19 +1174,19 @@ def binned_bar_chart(df, bin_col, value_col, output_path,
         figsize: Figure size
     """
     if bins is None:
-        bins = [0, 0.5, 1.0, 1.5, 2.0, 5.0, 10.0, 1000.0]
+        bins = [0, 0.5, 1.0, 1.5, 2.0, 3.0, 5.0, 1000.0]
     if labels is None:
-        labels = ['<0.5x', '0.5-1x', '1-1.5x', '1.5-2x', '2-5x', '5-10x', '>10x']
-    
+        labels = ['<0.5x', '0.5-1x', '1-1.5x', '1.5-2x', '2-3x', '3-5x', '>5x']
+
     plot_df = df.dropna(subset=[bin_col, value_col]).copy()
-    
+
     if plot_df.empty:
         print(f"Skipping {output_path}: no data")
         return
-    
+
     # Create bins
     plot_df['bin'] = pd.cut(plot_df[bin_col], bins=bins, labels=labels)
-    
+
     # Aggregate
     stats_df = plot_df.groupby('bin', observed=True)[value_col].agg([agg_func, 'count']).reset_index()
     stats_df = stats_df[stats_df['count'] >= min_count]
@@ -1234,8 +1234,8 @@ def binned_boxplot(df, bin_col, value_col, output_path,
         bin_col: Column to bin
         value_col: Column to plot distribution for
         output_path: Path to save figure
-        bins: Bin edges (default: [0, 0.5, 1.0, 2.0, 5.0, 10.0, 1000.0])
-        labels: Bin labels (default: ['<0.5x', '0.5-1x', '1-1.5x', '1.5-2x', '2-5x', '5-10x', '>10x'])
+        bins: Bin edges (default: [0, 0.5, 1.0, 1.5, 2.0, 3.0, 5.0, 1000.0])
+        labels: Bin labels (default: ['<0.5x', '0.5-1x', '1-1.5x', '1.5-2x', '2-3x', '3-5x', '>5x'])
         title: Plot title
         baseline: Value for horizontal reference line
         min_count: Minimum samples per bin to include
@@ -1243,16 +1243,16 @@ def binned_boxplot(df, bin_col, value_col, output_path,
         figsize: Figure size
     """
     if bins is None:
-        bins = [0, 0.5, 1.0, 1.5, 2.0, 5.0, 10.0, 1000.0]
+        bins = [0, 0.5, 1.0, 1.5, 2.0, 3.0, 5.0, 1000.0]
     if labels is None:
-        labels = ['<0.5x', '0.5-1x', '1-1.5x', '1.5-2x', '2-5x', '5-10x', '>10x']
-    
+        labels = ['<0.5x', '0.5-1x', '1-1.5x', '1.5-2x', '2-3x', '3-5x', '>5x']
+
     plot_df = df.dropna(subset=[bin_col, value_col]).copy()
-    
+
     if plot_df.empty:
         print(f"Skipping {output_path}: no data")
         return
-    
+
     # Create bins
     plot_df['bin'] = pd.cut(plot_df[bin_col], bins=bins, labels=labels)
     
@@ -1573,6 +1573,97 @@ def scatter_publication(df, x_col, y_col, output_path,
                 bbox=dict(boxstyle='round,pad=0.3', fc='wheat', alpha=0.8))
 
     _save_figure(output_path)
+
+
+def scatter_presentation(df, x_col, y_col, output_path,
+                         log_x=None, log_y=None,
+                         show_correlation=True, label=None,
+                         baseline_y=1.0, trend_line=True,
+                         figsize=(7.0, 5.0)):
+    """Presentation-ready scatter plot: larger size, clean axes, reference
+    line at *baseline_y*, and an optional robust trend line.
+    """
+    plot_df = df.dropna(subset=[x_col, y_col])
+    if len(plot_df) < 2:
+        print(f"Skipping {output_path}: insufficient data")
+        return
+
+    if log_x is None:
+        log_x = use_log_scale(x_col)
+    if log_y is None:
+        log_y = use_log_scale(y_col)
+
+    fig, ax = plt.subplots(figsize=figsize)
+
+    ax.scatter(plot_df[x_col], plot_df[y_col],
+               alpha=0.55, s=28, color=PALETTE[0],
+               edgecolor='white', linewidth=0.4, zorder=3)
+
+    # Scales (set before drawing lines so axis limits are established)
+    if log_x:
+        ax.set_xscale('log')
+    if log_y:
+        ax.set_yscale('log')
+
+    # Reference line
+    if baseline_y is not None:
+        ax.axhline(baseline_y, color='#CC0000', linestyle='--',
+                   linewidth=1.0, alpha=0.6, zorder=2, label=f'Speedup = {baseline_y}')
+
+    # Trend line (fitted in data space; clipped to data range)
+    if trend_line and len(plot_df) >= 5:
+        xv = plot_df[x_col].values.astype(float)
+        yv = plot_df[y_col].values.astype(float)
+        mask = np.isfinite(xv) & np.isfinite(yv)
+        if log_x and log_y:
+            pos = mask & (xv > 0) & (yv > 0)
+            xfit, yfit = np.log10(xv[pos]), np.log10(yv[pos])
+        elif log_x:
+            pos = mask & (xv > 0)
+            xfit, yfit = np.log10(xv[pos]), yv[pos]
+        elif log_y:
+            pos = mask & (yv > 0)
+            xfit, yfit = xv[pos], np.log10(yv[pos])
+        else:
+            xfit, yfit = xv[mask], yv[mask]
+        if len(xfit) >= 5:
+            z = np.polyfit(xfit, yfit, 1)
+            xs = np.linspace(xfit.min(), xfit.max(), 200)
+            ys = np.polyval(z, xs)
+            if log_x:
+                xs = 10**xs
+            if log_y:
+                ys = 10**ys
+            ax.plot(xs, ys, color='#555555', linewidth=1.4,
+                    linestyle='-', alpha=0.45, zorder=2)
+
+    # Axis formatting
+    ax.set_xlabel(get_display_name(x_col), fontsize=16)
+    ax.set_ylabel(get_display_name(y_col), fontsize=16)
+    ax.tick_params(axis='both', labelsize=13, which='major')
+    ax.tick_params(axis='both', which='minor', length=3, width=0.5)
+    ax.grid(True, which='major', alpha=0.25, linewidth=0.6)
+    ax.grid(False, which='minor')
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+
+    if show_correlation:
+        method = get_correlation_method()
+        sym = correlation_display_symbol(method)
+        corr_val = _correlation_for_scatter(plot_df[x_col], plot_df[y_col], method)
+        ax.text(0.03, 0.97, f"${sym}={corr_val:.2f}$",
+                transform=ax.transAxes, fontsize=14, va='top',
+                bbox=dict(boxstyle='round,pad=0.3', fc='white', alpha=0.85))
+
+    if label:
+        ax.text(0.97, 0.03, label, transform=ax.transAxes, fontsize=13,
+                ha='right', va='bottom', fontstyle='italic',
+                bbox=dict(boxstyle='round,pad=0.3', fc='white', alpha=0.85))
+
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=200, bbox_inches='tight', pad_inches=0.1)
+    plt.close(fig)
+    print(f"Saved: {Path(output_path).name}")
 
 
 def grouped_scatter_publication(df, x_col, y_col, group_col, group_order,
