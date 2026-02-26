@@ -14,8 +14,7 @@ import pandas as pd
 import numpy as np
 from scipy import stats
 import plot_utils as pu
-from settings import get_perm_display, get_perm_color, KERNEL_NAMES, GROUPED_SCATTER_EXCLUDE, PERMS, enabled_metrics, get_metric_display
-from correlation_table import compute_improvement_ratios
+from settings import get_perm_display, get_perm_color, KERNEL_NAMES, GROUPED_SCATTER_EXCLUDE, PERMS, ALL_METRICS, enabled_metrics, get_metric_display
 
 
 def parse_args():
@@ -61,6 +60,7 @@ def parse_args():
         'reorder-analysis', 'reorderability', 'per-matrix', 'timing',
         'singular-improvement',
         'profiles',
+        'pairwise',
     ]
     parser.add_argument(
         "--sections", nargs="+", choices=SECTION_CHOICES, default=None,
@@ -1104,75 +1104,142 @@ def generate_reorder_analysis_plots(df_analysis, out_dir, n_jobs=None):
 
 
 def generate_profile_plots(df_analysis, out_dir):
-    """Generate performance-profile plots (survival curves of improvement ratios).
+    """Generate Dolan-Moré performance-profile plots.
 
-    For each metric, the x-axis is ratio = value / best_value (in (0,1]),
-    and the y-axis is the fraction of matrices achieving at least that ratio.
+    For each metric and solver (perm) s, compute the ratio relative to the
+    best solver on each matrix m:
+        higher_is_better:  r_{m,s} = val_{m,s} / max_{s'} val_{m,s'}  ∈ (0, 1]
+        lower_is_better:   r_{m,s} = val_{m,s} / min_{s'} val_{m,s'}  ∈ [1, ∞)
+
+    In both cases r = 1 means s is the best solver on that matrix.
+
+    The profile plots:
+      - higher_is_better: survival function P(ratio >= τ), x from 1 toward 0
+      - lower_is_better:  CDF P(ratio <= τ), x from 1 toward ∞
+
+    Higher curve = better solver in both cases.
+
+    All permutations *and* the original ordering (None) are included as
+    competing solvers.
     """
-    imp_df, used_metrics = compute_improvement_ratios(df_analysis)
-    if imp_df.empty:
-        print("  No improvement data — skipping profile plots.")
+    # Include bandwidth_max alongside the default enabled metrics
+    profile_metrics = enabled_metrics()
+    if 'bandwidth_max' not in profile_metrics:
+        profile_metrics = ['bandwidth_max'] + profile_metrics
+
+    # Keep only metrics present in df and with a defined direction
+    profile_metrics = [m for m in profile_metrics
+                       if m in df_analysis.columns
+                       and ALL_METRICS.get(m, {}).get('higher_is_better') is not None]
+    if not profile_metrics:
+        print("  No usable metrics — skipping profile plots.")
         return
 
-    # Determine perm_type groups to plot
-    perm_types = sorted(imp_df['perm_type'].dropna().unique())
-    groups = [(pt, imp_df[imp_df['perm_type'] == pt]) for pt in perm_types]
-    groups.append(('both', imp_df))
+    # Work directly with raw metric values (including perm='None')
+    base_cols = ['matrix', 'perm', 'perm_type']
+    work = df_analysis[base_cols + profile_metrics].copy()
+
+    # For perm='None' rows, perm_type is meaningless; fill so they appear in
+    # every group when we split by perm_type later.
+    none_mask = work['perm'] == 'None'
+
+    # Determine perm_type groups
+    perm_types = sorted(work.loc[~none_mask, 'perm_type'].dropna().unique())
+    groups = []
+    for pt in perm_types:
+        g = pd.concat([work[work['perm_type'] == pt],
+                        work[none_mask]], ignore_index=True)
+        groups.append((pt, g))
+    groups.append(('both', work))
 
     for group_label, group_df in groups:
         if group_df.empty:
             continue
 
-        imp_cols = [f'{m}_imp' for m in used_metrics]
+        # For each metric, compute Dolan-Moré performance ratios
+        profile_data = {}  # metric -> (n_matrices, {perm -> sorted_ratios})
+        for m in profile_metrics:
+            sub = group_df[['matrix', 'perm', m]].dropna(subset=[m])
+            # Filter out zero / negative values
+            sub = sub[sub[m] > 0]
+            if sub.empty:
+                profile_data[m] = (0, {})
+                continue
 
-        # For each metric, find the best algorithm value per matrix
-        # ratio = this_algorithm / best_algorithm  (in (0, 1])
-        profile_data = {}  # metric -> {perm -> sorted ratios array}
-        for m in used_metrics:
-            col = f'{m}_imp'
-            sub = group_df[['matrix', 'perm', col]].dropna(subset=[col])
-            best_per_matrix = sub.groupby('matrix')[col].max().rename('best')
-            sub = sub.merge(best_per_matrix, on='matrix')
-            # Filter out matrices where best <= 0
-            sub = sub[sub['best'] > 0]
-            sub['ratio'] = sub[col] / sub['best']
-            profile_data[m] = {}
+            # ratio = value / best:
+            #   higher_is_better → ∈ (0, 1], lower_is_better → ∈ [1, ∞)
+            hib = ALL_METRICS[m]['higher_is_better']
+            if hib:
+                best = sub.groupby('matrix')[m].max().rename('best')
+            else:
+                best = sub.groupby('matrix')[m].min().rename('best')
+            sub = sub.merge(best, on='matrix')
+            # relative value (value / best)
+            sub['tau'] = sub[m] / sub['best']
+
+            n_matrices = sub['matrix'].nunique()
+            perm_ratios = {}
             for perm, perm_sub in sub.groupby('perm'):
-                ratios = np.sort(perm_sub['ratio'].values)
-                profile_data[m][perm] = ratios
+                perm_ratios[perm] = np.sort(perm_sub['tau'].values)
+            profile_data[m] = (n_matrices, perm_ratios)
 
         # Layout: 3 columns
-        n_metrics = len(used_metrics)
+        n_metrics = len(profile_metrics)
         ncols = min(3, n_metrics)
         nrows = (n_metrics + ncols - 1) // ncols
         fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 4 * nrows),
                                  squeeze=False)
 
-        # Canonical perm order
-        perm_order = [p for p in PERMS if p in group_df['perm'].unique()]
+        # Canonical perm order (include None)
+        perm_order = [p for p in ['None'] + list(PERMS)
+                      if p in group_df['perm'].unique()]
 
-        for idx, m in enumerate(used_metrics):
+        for idx, m in enumerate(profile_metrics):
             ax = axes[idx // ncols][idx % ncols]
-            data = profile_data[m]
+            n_matrices, data = profile_data[m]
+            if n_matrices == 0:
+                continue
+            hib = ALL_METRICS[m]['higher_is_better']
             for perm in perm_order:
                 if perm not in data or len(data[perm]) == 0:
                     continue
-                ratios = data[perm]
-                n = len(ratios)
-                # Survival function: fraction >= x
-                # Step curve: at each sorted ratio value, survival drops
-                x_vals = np.concatenate([[0], ratios, [1.0]])
-                # For each x, fraction of ratios >= x
-                surv = np.array([np.mean(ratios >= x) for x in x_vals])
-                ax.step(x_vals, surv, where='post',
+                taus = data[perm]                   # sorted ascending
+                n = len(taus)
+                if hib:
+                    # higher_is_better: tau = value/max ∈ (0,1].
+                    # Plot survival function P(ratio >= τ) vs τ.
+                    # Sort descending so x goes from 1 toward 0.
+                    taus_desc = taus[::-1]           # descending
+                    surv = np.arange(1, n + 1) / n_matrices
+                    ax.step(np.concatenate([taus_desc, [taus_desc[-1] / 2]]),
+                        np.concatenate([surv, [surv[-1]]]),
+                        where='pre',
+                        label=get_perm_display(perm),
+                        color=get_perm_color(perm), linewidth=1.5)
+                else:
+                    # lower_is_better: tau = value/min ∈ [1,∞).
+                    # Plot standard CDF P(ratio <= τ) vs τ.
+                    cdf = np.arange(1, n + 1) / n_matrices
+                    ax.step(np.concatenate([taus, [taus[-1] * 2]]),
+                        np.concatenate([cdf, [cdf[-1]]]),
+                        where='pre',
                         label=get_perm_display(perm),
                         color=get_perm_color(perm), linewidth=1.5)
 
             ax.set_title(get_metric_display(m), fontsize=10)
-            ax.set_xlabel('Ratio to best')
+            ax.set_xlabel(f"{get_metric_display(m)} relative to the best")
             ax.set_ylabel('Fraction of matrices')
-            ax.set_xlim(0, 1.05)
+            ax.set_xscale('log', base=2)
             ax.set_ylim(0, 1.05)
+            if hib:
+                # x from 1 toward 0; cap at 2^-4
+                ax.set_xlim(2**-4, 1.05)
+                ax.invert_xaxis()
+            else:
+                # x from 1 toward +inf; cap at 2^4
+                all_taus = np.concatenate([v for v in data.values()])
+                max_tau = min(np.percentile(all_taus, 99) * 1.2, 2**6)
+                ax.set_xlim(0.95, max(max_tau, 2))
             ax.grid(True, alpha=0.3)
 
         # Hide unused axes
@@ -1197,6 +1264,122 @@ def generate_profile_plots(df_analysis, out_dir):
         print(f"  Saved profiles_{group_label}.pdf/png")
 
 
+def _pairwise_for_group(df, order, metrics, group_label, output_dir):
+    """Build per-metric and aggregate pairwise heatmaps for one group of rows.
+
+    Uses pairwise-complete logic: for each cell (i, j), only matrices where
+    both algorithms i and j have data are considered.
+    """
+    for metric in metrics:
+        hib = ALL_METRICS[metric]['higher_is_better']
+        metric_display = get_metric_display(metric)
+
+        # Pivot without dropping NaN — each column may have different coverage
+        pivot = df.pivot_table(index='matrix', columns='strategy', values=metric)
+        if pivot.empty:
+            print(f"    Skipping {metric}: no data")
+            continue
+
+        win_frac = pd.DataFrame(np.nan, index=order, columns=order)
+        n_pairs = pd.DataFrame(0, index=order, columns=order)
+
+        for i, si in enumerate(order):
+            if si not in pivot.columns:
+                continue
+            for j, sj in enumerate(order):
+                if i == j or sj not in pivot.columns:
+                    continue
+                # Only matrices where both si and sj have values
+                mask = pivot[si].notna() & pivot[sj].notna()
+                n = mask.sum()
+                if n < 2:
+                    continue
+                if hib:
+                    wins = (pivot.loc[mask, si] > pivot.loc[mask, sj]).sum()
+                else:
+                    wins = (pivot.loc[mask, si] < pivot.loc[mask, sj]).sum()
+                win_frac.loc[si, sj] = wins / n
+                n_pairs.loc[si, sj] = n
+
+        n_min = int(n_pairs.values[n_pairs.values > 0].min()) if (n_pairs.values > 0).any() else 0
+        n_max = int(n_pairs.values.max())
+
+        pu.pairwise_heatmap(
+            win_frac,
+            output_dir / f"pairwise_{pu.safe_filename(metric)}_{group_label}.png",
+            title=f"Pairwise Win Rate — {metric_display} ({group_label})\n({n_min}–{n_max} matrices per pair)",
+        )
+
+
+def generate_pairwise_heatmap(df_analysis, out_dir):
+    """Generate pairwise win/loss heatmaps comparing reordering algorithms.
+
+    For each structural metric and perm_type, builds a matrix where cell (i, j)
+    is the fraction of test matrices on which algorithm i strictly beats
+    algorithm j. Only matrices that have data for every reordering within that
+    perm_type are included. Random reordering is excluded.
+    """
+    print("\n=== Pairwise Win/Loss Heatmaps ===")
+
+    pairwise_dir = out_dir / "reorder_analysis" / "pairwise"
+    pairwise_dir.mkdir(parents=True, exist_ok=True)
+
+    df = df_analysis.copy()
+    df['perm'] = df['perm'].fillna('None').astype(str)
+
+    df['strategy'] = df['perm'].apply(
+        lambda x: 'Original' if x == 'None' else get_perm_display(x)
+    )
+
+    # Exclude Random
+    df = df[df['strategy'] != 'Random']
+
+    # Per-perm_type exclusions (strategies to drop from specific groups)
+    perm_type_exclude = {
+        'SYMMETRIC': {'SPARTA', 'SlashBurn'},
+    }
+
+    # Metrics to compare
+    profile_metrics = enabled_metrics()
+    if 'bandwidth_max' not in profile_metrics:
+        profile_metrics = ['bandwidth_max'] + profile_metrics
+    profile_metrics = [m for m in profile_metrics
+                       if m in df.columns
+                       and ALL_METRICS.get(m, {}).get('higher_is_better') is not None]
+
+    if not profile_metrics:
+        print("  No usable metrics — skipping.")
+        return
+
+    # Original rows (perm=None) need to appear in every perm_type group.
+    # In the data they carry perm_type='ROW', so we duplicate them into
+    # each group via concat and then deduplicate.
+    df_original = df[df['strategy'] == 'Original']
+
+    # Generate separate heatmaps per perm_type
+    for perm_type in sorted(df.loc[df['strategy'] != 'Original', 'perm_type'].dropna().unique()):
+        df_pt = pd.concat([df[df['perm_type'] == perm_type], df_original], ignore_index=True)
+        df_pt = df_pt.drop_duplicates(subset=['matrix', 'strategy'])
+
+        # Apply per-perm_type exclusions
+        exclude = perm_type_exclude.get(perm_type, set())
+        if exclude:
+            df_pt = df_pt[~df_pt['strategy'].isin(exclude)]
+
+        n_matrices = df_pt['matrix'].nunique()
+        n_strategies = df_pt['strategy'].nunique()
+        print(f"  {perm_type}: {n_matrices} matrices, {n_strategies} strategies (pairwise-complete)")
+
+        if df_pt.empty:
+            print(f"  No data for {perm_type} — skipping.")
+            continue
+
+        order = list(dict.fromkeys(s for s in pu.get_strategy_order(df_pt) if s != 'Random'))
+        _pairwise_for_group(df_pt, order, profile_metrics, perm_type, pairwise_dir)
+
+    print(f"  Pairwise heatmaps saved to {pairwise_dir}")
+
+
 def _should_run(section: str, args) -> bool:
     """Decide whether *section* should run given CLI flags.
 
@@ -1206,7 +1389,7 @@ def _should_run(section: str, args) -> bool:
         return section in args.sections
     # Legacy coarse flags
     kernel_sections = {'kernels', 'breakeven', 'original-scatter'}
-    reorder_sections = {'reorder-analysis', 'reorderability', 'per-matrix', 'timing'}
+    reorder_sections = {'reorder-analysis', 'reorderability', 'per-matrix', 'timing', 'pairwise'}
     if args.only_kernels:
         return section in kernel_sections
     if args.only_reorder_analysis:
@@ -1334,6 +1517,12 @@ def main():
         print("Generating performance profile plots...")
         print("="*60)
         generate_profile_plots(df_analysis, out_dir)
+
+    if _should_run('pairwise', args):
+        print("\n" + "="*60)
+        print("Generating pairwise win/loss heatmaps...")
+        print("="*60)
+        generate_pairwise_heatmap(df_analysis, out_dir)
 
     print(f"\nAll plots saved to {out_dir}")
 

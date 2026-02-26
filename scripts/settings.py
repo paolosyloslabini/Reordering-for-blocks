@@ -193,6 +193,7 @@ def block_density_metrics() -> list[str]:
 # =============================================================================
 
 PERMS = {
+    'None':            {'display': 'Original',  'color': '#333333'},
     'SB_amd':          {'display': 'AMD',       'color': PALETTE[0]},
     'SB_degree':       {'display': 'Degree',    'color': PALETTE[1]},
     'GROOT_reorder':   {'display': 'GROOT',    'color': PALETTE[2]},

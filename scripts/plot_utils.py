@@ -1445,6 +1445,36 @@ def correlation_heatmap(df, cols, output_path,
     _save_figure(output_path)
 
 
+def pairwise_heatmap(win_frac_df, output_path, title=None, figsize=(10, 9)):
+    """Create a pairwise win-fraction heatmap for reordering algorithms.
+
+    Args:
+        win_frac_df: Square DataFrame (index=strategies, columns=strategies).
+                     Cell (i, j) = fraction of matrices where i beats j.
+                     Diagonal should be NaN.
+        output_path: Path to save figure.
+        title: Plot title.
+        figsize: Figure size.
+    """
+    fig, ax = _setup_figure(figsize)
+
+    sns.heatmap(
+        win_frac_df, annot=True, fmt='.0%',
+        cmap='RdYlBu', center=0.5, vmin=0, vmax=1,
+        ax=ax, linewidths=0.5, linecolor='white',
+        cbar_kws={'label': 'Win fraction (row beats column)'},
+    )
+
+    if title:
+        ax.set_title(title, pad=12)
+    ax.set_xlabel('')
+    ax.set_ylabel('')
+    ax.tick_params(axis='x', rotation=45)
+    ax.tick_params(axis='y', rotation=0)
+
+    _save_figure(output_path)
+
+
 # =============================================================================
 # Utility Functions
 # =============================================================================

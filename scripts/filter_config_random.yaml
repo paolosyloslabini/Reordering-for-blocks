@@ -35,4 +35,4 @@ filters:
 
 # ---- Display / Analysis Settings ------------------------------------------
 display:
-  correlation_method: spearman
+  correlation_method: pearson
