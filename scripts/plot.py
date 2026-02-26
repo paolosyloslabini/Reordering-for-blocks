@@ -14,7 +14,8 @@ import pandas as pd
 import numpy as np
 from scipy import stats
 import plot_utils as pu
-from settings import get_perm_display, KERNEL_NAMES, GROUPED_SCATTER_EXCLUDE
+from settings import get_perm_display, get_perm_color, KERNEL_NAMES, GROUPED_SCATTER_EXCLUDE, PERMS, enabled_metrics, get_metric_display
+from correlation_table import compute_improvement_ratios
 
 
 def parse_args():
@@ -58,6 +59,8 @@ def parse_args():
     SECTION_CHOICES = [
         'kernels', 'breakeven', 'original-scatter',
         'reorder-analysis', 'reorderability', 'per-matrix', 'timing',
+        'singular-improvement',
+        'profiles',
     ]
     parser.add_argument(
         "--sections", nargs="+", choices=SECTION_CHOICES, default=None,
@@ -67,13 +70,20 @@ def parse_args():
             f"Choices: {', '.join(SECTION_CHOICES)}"
         ),
     )
-    
+
+    # Parallelism
+    parser.add_argument(
+        "-j", "--jobs", type=int, default=None,
+        help="Number of parallel workers for plot generation (default: min(cpu_count, 8), 1=sequential)",
+    )
+
     return parser.parse_args()
 
 
 def generate_kernel_plots(df, out_dir, args):
     """Generate performance plots for kernel operations."""
-    
+    n_jobs = getattr(args, 'jobs', None)
+
     # Get unique n_cols values
     n_cols_values = sorted(df['n_cols'].unique())
     if args.n_cols is not None:
@@ -82,14 +92,15 @@ def generate_kernel_plots(df, out_dir, args):
         else:
             print(f"Warning: n_cols={args.n_cols} not found. Available: {n_cols_values}")
             return
-    
+
     # Get density and improvement columns
     density_cols = pu.get_density_columns(df)
-    
+    tasks = []
+
     for n_cols in n_cols_values:
         print(f"\n=== n_cols = {n_cols} ===")
         df_nc = df[df['n_cols'] == n_cols]
-        
+
         # Get unique kernels
         kernels = sorted(df_nc['kernel_id'].unique())
         if args.kernel:
@@ -97,134 +108,102 @@ def generate_kernel_plots(df, out_dir, args):
             if not kernels:
                 print(f"No kernels matching '{args.kernel}'")
                 continue
-        
+
         for kernel in kernels:
-            print(f"\n--- Kernel: {kernel} ---")
+            print(f"  Collecting tasks for kernel: {kernel}")
             df_k = df_nc[df_nc['kernel_id'] == kernel]
-            
+
             kernel_safe = pu.safe_filename(kernel)
             base_dir = out_dir / f"n_cols_{int(n_cols)}" / kernel_safe
-            
-            # -----------------------------------------------------------------
-            # 1. GFLOPS vs Metrics (scatter plots) - Log-Log Scale
-            # -----------------------------------------------------------------
-            gflops_dir = base_dir / "gflops_correlations"
-            gflops_dir.mkdir(parents=True, exist_ok=True)
-            
             kernel_label = KERNEL_NAMES.get(kernel, kernel)
 
-            # GFLOPS vs each density column
-            for dens_col in density_cols:
-                bs = dens_col.split('_')[-1]
-                pu.scatter_publication(
-                    df_k, dens_col, 'gflops',
-                    gflops_dir / f"gflops_vs_density_bs{bs}.png",
-                    label=kernel_label
-                )
-
-            # GFLOPS vs bandwidth
-            if 'rel_bandwidth' in df_k.columns:
-                pu.scatter_publication(
-                    df_k, 'rel_bandwidth', 'gflops',
-                    gflops_dir / f"gflops_vs_rel_bandwidth.png",
-                    label=kernel_label
-                )
-
-            # GFLOPS vs locality
-            for loc_col in ['rel_row_spread', 'locality_vertical_adjacency_ratio']:
-                if loc_col in df_k.columns:
-                    pu.scatter_publication(
-                        df_k, loc_col, 'gflops',
-                        gflops_dir / f"gflops_vs_{loc_col}.png",
-                        label=kernel_label
-                    )
-            
-            # -----------------------------------------------------------------
-            # 1b. GFLOPS vs Density (Linear-Linear Scale)
-            # -----------------------------------------------------------------
+            # Create directories upfront
+            gflops_dir = base_dir / "gflops_correlations"
+            gflops_dir.mkdir(parents=True, exist_ok=True)
             linear_dir = base_dir / "gflops_vs_density_linear"
             linear_dir.mkdir(parents=True, exist_ok=True)
-            
-            # GFLOPS vs each density column in linear-linear scale
-            for dens_col in density_cols:
-                bs = dens_col.split('_')[-1]
-                pu.scatter_publication(
-                    df_k, dens_col, 'gflops',
-                    linear_dir / f"gflops_vs_density_bs{bs}_linear.png",
-                    log_x=False, log_y=False,
-                    label=kernel_label
-                )
-
-            # GFLOPS vs bandwidth (linear scale)
-            if 'rel_bandwidth' in df_k.columns:
-                pu.scatter_publication(
-                    df_k, 'rel_bandwidth', 'gflops',
-                    linear_dir / f"gflops_vs_rel_bandwidth_linear.png",
-                    log_x=False, log_y=False,
-                    label=kernel_label
-                )
-
-            # GFLOPS vs locality (linear scale)
-            for loc_col in ['rel_row_spread', 'locality_vertical_adjacency_ratio']:
-                if loc_col in df_k.columns:
-                    pu.scatter_publication(
-                        df_k, loc_col, 'gflops',
-                        linear_dir / f"gflops_vs_{loc_col}_linear.png",
-                        log_x=False, log_y=False,
-                        label=kernel_label
-                    )
-            
-            # -----------------------------------------------------------------
-            # 2. Speedup Distribution (by perm_type)
-            # -----------------------------------------------------------------
             speedup_dir = base_dir / "speedup"
             speedup_dir.mkdir(parents=True, exist_ok=True)
-            
+            binned_dir = base_dir / "binned_speedup"
+            binned_dir.mkdir(parents=True, exist_ok=True)
+
+            # 1. GFLOPS vs Metrics (log-log)
+            for dens_col in density_cols:
+                bs = dens_col.split('_')[-1]
+                tasks.append((pu.scatter_publication, dict(
+                    df=df_k, x_col=dens_col, y_col='gflops',
+                    output_path=gflops_dir / f"gflops_vs_density_bs{bs}.png",
+                    label=kernel_label)))
+
+            if 'rel_bandwidth' in df_k.columns:
+                tasks.append((pu.scatter_publication, dict(
+                    df=df_k, x_col='rel_bandwidth', y_col='gflops',
+                    output_path=gflops_dir / f"gflops_vs_rel_bandwidth.png",
+                    label=kernel_label)))
+
+            for loc_col in ['rel_row_spread', 'locality_vertical_adjacency_ratio']:
+                if loc_col in df_k.columns:
+                    tasks.append((pu.scatter_publication, dict(
+                        df=df_k, x_col=loc_col, y_col='gflops',
+                        output_path=gflops_dir / f"gflops_vs_{loc_col}.png",
+                        label=kernel_label)))
+
+            # 1b. GFLOPS vs Density (linear-linear)
+            for dens_col in density_cols:
+                bs = dens_col.split('_')[-1]
+                tasks.append((pu.scatter_publication, dict(
+                    df=df_k, x_col=dens_col, y_col='gflops',
+                    output_path=linear_dir / f"gflops_vs_density_bs{bs}_linear.png",
+                    log_x=False, log_y=False, label=kernel_label)))
+
+            if 'rel_bandwidth' in df_k.columns:
+                tasks.append((pu.scatter_publication, dict(
+                    df=df_k, x_col='rel_bandwidth', y_col='gflops',
+                    output_path=linear_dir / f"gflops_vs_rel_bandwidth_linear.png",
+                    log_x=False, log_y=False, label=kernel_label)))
+
+            for loc_col in ['rel_row_spread', 'locality_vertical_adjacency_ratio']:
+                if loc_col in df_k.columns:
+                    tasks.append((pu.scatter_publication, dict(
+                        df=df_k, x_col=loc_col, y_col='gflops',
+                        output_path=linear_dir / f"gflops_vs_{loc_col}_linear.png",
+                        log_x=False, log_y=False, label=kernel_label)))
+
+            # 2. Speedup Distribution (by perm_type)
             df_reordered = df_k[df_k['strategy'] != 'Original']
-            
             for perm_type in df_reordered['perm_type'].unique():
                 df_pt = df_reordered[df_reordered['perm_type'] == perm_type]
                 strategies = sorted(df_pt['strategy'].unique())
-                
-                # Boxplot of speedup by strategy
-                pu.boxplot_by_category(
-                    df_pt, 'strategy', 'speedup',
-                    speedup_dir / f"speedup_boxplot_{perm_type}.png",
+                tasks.append((pu.boxplot_by_category, dict(
+                    df=df_pt, x_col='strategy', y_col='speedup',
+                    output_path=speedup_dir / f"speedup_boxplot_{perm_type}.png",
                     title=f"Speedup Distribution - {perm_type}\n{kernel}",
-                    order=strategies,
-                    baseline=1.0,
-                    log_y=True,
-                    ylim=(0.5, 5)
-                )
-            
-            # -----------------------------------------------------------------
-            # 3. Binned Speedup Charts
-            # -----------------------------------------------------------------
-            binned_dir = base_dir / "binned_speedup"
-            binned_dir.mkdir(parents=True, exist_ok=True)
-            
-            density_bins = [0, 1.5, 2.0, 3.0, 1000.0]
-            density_labels = ['<1.5x', '1.5-2x', '2-3x', '>3x']
+                    order=strategies, baseline=1.0, log_y=True, ylim=(0.5, 5))))
+
+            # 3. Binned Speedup Charts (best reorder per matrix, by the binned metric)
+            df_valid = df_reordered.dropna(subset=['speedup'])
             for bs in [4, 8, 16, 32, 64, 128]:
                 imp_col = f'density_improvement_{bs}'
-                if imp_col in df_reordered.columns:
-                    pu.binned_boxplot(
-                        df_reordered, imp_col, 'speedup',
-                        binned_dir / f"speedup_by_density_imp_bs{bs}.png",
-                        title=f"Speedup Distribution by Density Improvement (BS {bs})\n{kernel}",
-                        baseline=1.0,
-                        bins=density_bins,
-                        labels=density_labels
-                    )
-            
-            for imp_col in ['row_spread_improvement', 'vertical_adjacency_improvement','bandwidth_improvement',]:
-                if imp_col in df_reordered.columns:
-                    pu.binned_boxplot(
-                        df_reordered, imp_col, 'speedup',
-                        binned_dir / f"speedup_by_{imp_col}.png",
-                        title=f"Speedup Distribution by {pu.get_display_name(imp_col)}\n{kernel}",
-                        baseline=1.0
-                    )
+                if imp_col in df_valid.columns:
+                    df_imp = df_valid.dropna(subset=[imp_col])
+                    if not df_imp.empty:
+                        df_best = df_imp.loc[df_imp.groupby('matrix')[imp_col].idxmax()]
+                        tasks.append((pu.binned_boxplot, dict(
+                            df=df_best, bin_col=imp_col, value_col='speedup',
+                            output_path=binned_dir / f"speedup_by_density_imp_bs{bs}.png",
+                            title=f"Speedup Distribution by Density Improvement (BS {bs})\n{kernel}",
+                            baseline=1.0)))
+
+            for imp_col in ['row_spread_improvement', 'vertical_adjacency_improvement', 'bandwidth_improvement']:
+                if imp_col in df_valid.columns:
+                    df_imp = df_valid.dropna(subset=[imp_col])
+                    if not df_imp.empty:
+                        df_best = df_imp.loc[df_imp.groupby('matrix')[imp_col].idxmax()]
+                        tasks.append((pu.binned_boxplot, dict(
+                            df=df_best, bin_col=imp_col, value_col='speedup',
+                            output_path=binned_dir / f"speedup_by_{imp_col}.png",
+                            title=f"Speedup Distribution by {pu.get_display_name(imp_col)}\n{kernel}",
+                            baseline=1.0)))
 
         # -----------------------------------------------------------------
         # 4. Grouped Scatter Plots (all kernels in 2x3 grid)
@@ -232,117 +211,163 @@ def generate_kernel_plots(df, out_dir, args):
         grouped_kernels = [k for k in kernels if k not in GROUPED_SCATTER_EXCLUDE]
         kernel_labels = {k: KERNEL_NAMES.get(k, k) for k in grouped_kernels}
 
-        # Log-log grouped scatter
         grouped_dir = out_dir / f"n_cols_{int(n_cols)}" / "grouped_scatter"
         grouped_dir.mkdir(parents=True, exist_ok=True)
-
-        for dens_col in density_cols:
-            bs = dens_col.split('_')[-1]
-            pu.grouped_scatter_publication(
-                df_nc, dens_col, 'gflops', 'kernel_id', grouped_kernels,
-                grouped_dir / f"gflops_vs_density_bs{bs}.png",
-                group_labels=kernel_labels,
-            )
-
-        if 'rel_bandwidth' in df_nc.columns:
-            pu.grouped_scatter_publication(
-                df_nc, 'rel_bandwidth', 'gflops', 'kernel_id', grouped_kernels,
-                grouped_dir / f"gflops_vs_rel_bandwidth.png",
-                group_labels=kernel_labels,
-            )
-
-        for loc_col in ['rel_row_spread', 'locality_vertical_adjacency_ratio']:
-            if loc_col in df_nc.columns:
-                pu.grouped_scatter_publication(
-                    df_nc, loc_col, 'gflops', 'kernel_id', grouped_kernels,
-                    grouped_dir / f"gflops_vs_{loc_col}.png",
-                    group_labels=kernel_labels,
-                )
-
-        # Linear grouped scatter
         grouped_linear_dir = out_dir / f"n_cols_{int(n_cols)}" / "grouped_scatter_linear"
         grouped_linear_dir.mkdir(parents=True, exist_ok=True)
 
         for dens_col in density_cols:
             bs = dens_col.split('_')[-1]
-            pu.grouped_scatter_publication(
-                df_nc, dens_col, 'gflops', 'kernel_id', grouped_kernels,
-                grouped_linear_dir / f"gflops_vs_density_bs{bs}_linear.png",
-                group_labels=kernel_labels,
-                log_x=False, log_y=False,
-            )
+            tasks.append((pu.grouped_scatter_publication, dict(
+                df=df_nc, x_col=dens_col, y_col='gflops', group_col='kernel_id',
+                group_order=grouped_kernels,
+                output_path=grouped_dir / f"gflops_vs_density_bs{bs}.png",
+                group_labels=kernel_labels)))
+            tasks.append((pu.grouped_scatter_publication, dict(
+                df=df_nc, x_col=dens_col, y_col='gflops', group_col='kernel_id',
+                group_order=grouped_kernels,
+                output_path=grouped_linear_dir / f"gflops_vs_density_bs{bs}_linear.png",
+                group_labels=kernel_labels, log_x=False, log_y=False)))
 
         if 'rel_bandwidth' in df_nc.columns:
-            pu.grouped_scatter_publication(
-                df_nc, 'rel_bandwidth', 'gflops', 'kernel_id', grouped_kernels,
-                grouped_linear_dir / f"gflops_vs_rel_bandwidth_linear.png",
-                group_labels=kernel_labels,
-                log_x=False, log_y=False,
-            )
+            tasks.append((pu.grouped_scatter_publication, dict(
+                df=df_nc, x_col='rel_bandwidth', y_col='gflops', group_col='kernel_id',
+                group_order=grouped_kernels,
+                output_path=grouped_dir / f"gflops_vs_rel_bandwidth.png",
+                group_labels=kernel_labels)))
+            tasks.append((pu.grouped_scatter_publication, dict(
+                df=df_nc, x_col='rel_bandwidth', y_col='gflops', group_col='kernel_id',
+                group_order=grouped_kernels,
+                output_path=grouped_linear_dir / f"gflops_vs_rel_bandwidth_linear.png",
+                group_labels=kernel_labels, log_x=False, log_y=False)))
 
         for loc_col in ['rel_row_spread', 'locality_vertical_adjacency_ratio']:
             if loc_col in df_nc.columns:
-                pu.grouped_scatter_publication(
-                    df_nc, loc_col, 'gflops', 'kernel_id', grouped_kernels,
-                    grouped_linear_dir / f"gflops_vs_{loc_col}_linear.png",
-                    group_labels=kernel_labels,
-                    log_x=False, log_y=False,
-                )
+                tasks.append((pu.grouped_scatter_publication, dict(
+                    df=df_nc, x_col=loc_col, y_col='gflops', group_col='kernel_id',
+                    group_order=grouped_kernels,
+                    output_path=grouped_dir / f"gflops_vs_{loc_col}.png",
+                    group_labels=kernel_labels)))
+                tasks.append((pu.grouped_scatter_publication, dict(
+                    df=df_nc, x_col=loc_col, y_col='gflops', group_col='kernel_id',
+                    group_order=grouped_kernels,
+                    output_path=grouped_linear_dir / f"gflops_vs_{loc_col}_linear.png",
+                    group_labels=kernel_labels, log_x=False, log_y=False)))
 
-        # -----------------------------------------------------------------
-        # 5. Grouped Scatter: Improvement vs Speedup (reordered only)
-        # -----------------------------------------------------------------
+        # 5. Grouped Scatter: Improvement vs Speedup
         df_nc_reordered = df_nc[df_nc['strategy'] != 'Original']
 
         grouped_imp_dir = out_dir / f"n_cols_{int(n_cols)}" / "grouped_improvement_vs_speedup"
         grouped_imp_dir.mkdir(parents=True, exist_ok=True)
-
-        for bs in [4, 8, 16, 32, 64, 128]:
-            imp_col = f'density_improvement_{bs}'
-            if imp_col in df_nc_reordered.columns:
-                pu.grouped_scatter_publication(
-                    df_nc_reordered, imp_col, 'speedup', 'kernel_id', grouped_kernels,
-                    grouped_imp_dir / f"speedup_vs_density_imp_bs{bs}.png",
-                    group_labels=kernel_labels,
-                    log_x=False, log_y=False,
-                )
-
-        for imp_col in ['bandwidth_improvement', 'row_spread_improvement',
-                        'vertical_adjacency_improvement']:
-            if imp_col in df_nc_reordered.columns:
-                pu.grouped_scatter_publication(
-                    df_nc_reordered, imp_col, 'speedup', 'kernel_id', grouped_kernels,
-                    grouped_imp_dir / f"speedup_vs_{imp_col}.png",
-                    group_labels=kernel_labels,
-                    log_x=False, log_y=False,
-                )
-
-        # -----------------------------------------------------------------
-        # 5b. Grouped Scatter: Improvement vs Speedup – LOG-LOG version
-        #     (Pearson r is always computed on linear values)
-        # -----------------------------------------------------------------
         grouped_imp_log_dir = out_dir / f"n_cols_{int(n_cols)}" / "grouped_improvement_vs_speedup_loglog"
         grouped_imp_log_dir.mkdir(parents=True, exist_ok=True)
 
         for bs in [4, 8, 16, 32, 64, 128]:
             imp_col = f'density_improvement_{bs}'
             if imp_col in df_nc_reordered.columns:
-                pu.grouped_scatter_publication(
-                    df_nc_reordered, imp_col, 'speedup', 'kernel_id', grouped_kernels,
-                    grouped_imp_log_dir / f"speedup_vs_density_imp_bs{bs}_loglog.png",
-                    group_labels=kernel_labels,
-                    log_x=True, log_y=True,
-                )
+                tasks.append((pu.grouped_scatter_publication, dict(
+                    df=df_nc_reordered, x_col=imp_col, y_col='speedup',
+                    group_col='kernel_id', group_order=grouped_kernels,
+                    output_path=grouped_imp_dir / f"speedup_vs_density_imp_bs{bs}.png",
+                    group_labels=kernel_labels, log_x=False, log_y=False)))
+                tasks.append((pu.grouped_scatter_publication, dict(
+                    df=df_nc_reordered, x_col=imp_col, y_col='speedup',
+                    group_col='kernel_id', group_order=grouped_kernels,
+                    output_path=grouped_imp_log_dir / f"speedup_vs_density_imp_bs{bs}_loglog.png",
+                    group_labels=kernel_labels, log_x=True, log_y=True)))
 
         for imp_col in ['bandwidth_improvement', 'row_spread_improvement',
                         'vertical_adjacency_improvement']:
             if imp_col in df_nc_reordered.columns:
-                pu.grouped_scatter_publication(
-                    df_nc_reordered, imp_col, 'speedup', 'kernel_id', grouped_kernels,
-                    grouped_imp_log_dir / f"speedup_vs_{imp_col}_loglog.png",
-                    group_labels=kernel_labels,
-                    log_x=True, log_y=True,
-                )
+                tasks.append((pu.grouped_scatter_publication, dict(
+                    df=df_nc_reordered, x_col=imp_col, y_col='speedup',
+                    group_col='kernel_id', group_order=grouped_kernels,
+                    output_path=grouped_imp_dir / f"speedup_vs_{imp_col}.png",
+                    group_labels=kernel_labels, log_x=False, log_y=False)))
+                tasks.append((pu.grouped_scatter_publication, dict(
+                    df=df_nc_reordered, x_col=imp_col, y_col='speedup',
+                    group_col='kernel_id', group_order=grouped_kernels,
+                    output_path=grouped_imp_log_dir / f"speedup_vs_{imp_col}_loglog.png",
+                    group_labels=kernel_labels, log_x=True, log_y=True)))
+
+    print(f"\n  Collected {len(tasks)} kernel plot tasks")
+    pu.parallel_execute(tasks, n_jobs=n_jobs)
+
+
+def generate_singular_improvement_plots(df, out_dir, args):
+    """Improvement-vs-speedup scatter for each kernel individually.
+
+    Produces one ``scatter_publication`` per (kernel, improvement metric)
+    pair, in both linear and log-log variants.  Disabled by default;
+    invoke with ``--sections singular-improvement``.
+    """
+    print("\n=== Singular Kernel Improvement vs Speedup ===")
+    n_jobs = args.jobs
+
+    n_cols_values = sorted(df['n_cols'].unique())
+    if args.n_cols is not None:
+        if args.n_cols in n_cols_values:
+            n_cols_values = [args.n_cols]
+        else:
+            print(f"Warning: n_cols={args.n_cols} not found. Available: {n_cols_values}")
+            return
+
+    tasks = []
+
+    for n_cols in n_cols_values:
+        print(f"\n--- n_cols = {n_cols} ---")
+        df_nc = df[df['n_cols'] == n_cols]
+
+        kernels = sorted(df_nc['kernel_id'].unique())
+        if args.kernel:
+            kernels = [k for k in kernels if args.kernel.lower() in k.lower()]
+            if not kernels:
+                print(f"No kernels matching '{args.kernel}'")
+                continue
+
+        for kernel in kernels:
+            df_k = df_nc[df_nc['kernel_id'] == kernel]
+            df_reordered = df_k[df_k['strategy'] != 'Original']
+            if len(df_reordered) < 2:
+                continue
+
+            kernel_safe = pu.safe_filename(kernel)
+            kernel_label = KERNEL_NAMES.get(kernel, kernel)
+            base = out_dir / f"n_cols_{int(n_cols)}" / kernel_safe
+
+            imp_dir = base / "improvement_vs_speedup"
+            imp_dir.mkdir(parents=True, exist_ok=True)
+            imp_log_dir = base / "improvement_vs_speedup_loglog"
+            imp_log_dir.mkdir(parents=True, exist_ok=True)
+
+            print(f"  Collecting tasks for kernel: {kernel}")
+
+            for bs in [4, 8, 16, 32, 64, 128]:
+                imp_col = f'density_improvement_{bs}'
+                if imp_col in df_reordered.columns:
+                    tasks.append((pu.scatter_presentation, dict(
+                        df=df_reordered, x_col=imp_col, y_col='speedup',
+                        output_path=imp_dir / f"speedup_vs_density_imp_bs{bs}.png",
+                        log_x=False, log_y=False, label=kernel_label)))
+                    tasks.append((pu.scatter_presentation, dict(
+                        df=df_reordered, x_col=imp_col, y_col='speedup',
+                        output_path=imp_log_dir / f"speedup_vs_density_imp_bs{bs}_loglog.png",
+                        log_x=True, log_y=True, label=kernel_label)))
+
+            for imp_col in ['bandwidth_improvement', 'row_spread_improvement',
+                            'vertical_adjacency_improvement']:
+                if imp_col in df_reordered.columns:
+                    tasks.append((pu.scatter_presentation, dict(
+                        df=df_reordered, x_col=imp_col, y_col='speedup',
+                        output_path=imp_dir / f"speedup_vs_{imp_col}.png",
+                        log_x=False, log_y=False, label=kernel_label)))
+                    tasks.append((pu.scatter_presentation, dict(
+                        df=df_reordered, x_col=imp_col, y_col='speedup',
+                        output_path=imp_log_dir / f"speedup_vs_{imp_col}_loglog.png",
+                        log_x=True, log_y=True, label=kernel_label)))
+
+    print(f"\n  Collected {len(tasks)} singular improvement plot tasks")
+    pu.parallel_execute(tasks, n_jobs=n_jobs)
 
 
 def generate_original_scatter_plots(df, out_dir, args):
@@ -953,7 +978,9 @@ def generate_breakeven_plots(df, out_dir, reordering_csv='results/results_reorde
 
     kernel_filter = args.kernel if args is not None else None
 
-    # --- Generate plots ---
+    # --- Collect and generate plots ---
+    n_jobs = getattr(args, 'jobs', None) if args is not None else None
+    tasks = []
     for n_cols in n_cols_values:
         df_nc = df_reord[df_reord['n_cols'] == n_cols]
 
@@ -977,20 +1004,21 @@ def generate_breakeven_plots(df, out_dir, reordering_csv='results/results_reorde
                 df_valid = df_pt[~df_pt['harmful']]
                 df_harm = df_pt[df_pt['harmful']]
 
-                pu.breakeven_boxplot(
-                    df_valid, df_harm,
-                    'strategy', 'breakeven_n',
-                    breakeven_dir / f"breakeven_{perm_type}.png",
+                tasks.append((pu.breakeven_boxplot, dict(
+                    df_valid=df_valid, df_harmful=df_harm,
+                    x_col='strategy', y_col='breakeven_n',
+                    output_path=breakeven_dir / f"breakeven_{perm_type}.png",
                     title=f"Break-even Operations — {perm_type}\n{kernel}  (n_cols={int(n_cols)})",
                     order=[s for s in strategies if s in df_valid['strategy'].unique()
                            or s in df_harm['strategy'].unique()],
-                    palette=palette,
-                )
+                    palette=palette)))
 
+    print(f"  Collected {len(tasks)} break-even plot tasks")
+    pu.parallel_execute(tasks, n_jobs=n_jobs)
     print(f"  Break-even plots saved under {out_dir}/n_cols_*/*/breakeven/")
 
 
-def generate_reorder_analysis_plots(df_analysis, out_dir):
+def generate_reorder_analysis_plots(df_analysis, out_dir, n_jobs=None):
     """Generate reordering analysis plots (independent of kernel performance)."""
 
     print("\n=== Reordering Analysis ===")
@@ -1054,12 +1082,119 @@ def generate_reorder_analysis_plots(df_analysis, out_dir):
             imp_col, name + " - {perm_type}",
             "locality", f"{imp_col}_{{perm_type}}.png"))
 
+    # Collect all boxplot tasks
+    tasks = []
+    perm_types = df_reordered['perm_type'].unique()
     for imp_col, title_template, subdir, filename_template in boxplot_specs:
+        if imp_col not in df_reordered.columns:
+            continue
         output_dir = reorder_dir / subdir
         output_dir.mkdir(parents=True, exist_ok=True)
-        _boxplot_for_perm_types(
-            df_reordered, strategies, imp_col,
-            title_template, output_dir, filename_template)
+        for perm_type in perm_types:
+            df_pt = df_reordered[df_reordered['perm_type'] == perm_type]
+            tasks.append((pu.boxplot_by_category, dict(
+                df=df_pt, x_col='strategy', y_col=imp_col,
+                output_path=output_dir / filename_template.format(perm_type=perm_type),
+                title=title_template.format(perm_type=perm_type),
+                order=[s for s in strategies if s in df_pt['strategy'].unique()],
+                baseline=1.0, log_y=True)))
+
+    print(f"  Collected {len(tasks)} reorder analysis plot tasks")
+    pu.parallel_execute(tasks, n_jobs=n_jobs)
+
+
+def generate_profile_plots(df_analysis, out_dir):
+    """Generate performance-profile plots (survival curves of improvement ratios).
+
+    For each metric, the x-axis is ratio = value / best_value (in (0,1]),
+    and the y-axis is the fraction of matrices achieving at least that ratio.
+    """
+    imp_df, used_metrics = compute_improvement_ratios(df_analysis)
+    if imp_df.empty:
+        print("  No improvement data — skipping profile plots.")
+        return
+
+    # Determine perm_type groups to plot
+    perm_types = sorted(imp_df['perm_type'].dropna().unique())
+    groups = [(pt, imp_df[imp_df['perm_type'] == pt]) for pt in perm_types]
+    groups.append(('both', imp_df))
+
+    for group_label, group_df in groups:
+        if group_df.empty:
+            continue
+
+        imp_cols = [f'{m}_imp' for m in used_metrics]
+
+        # For each metric, find the best algorithm value per matrix
+        # ratio = this_algorithm / best_algorithm  (in (0, 1])
+        profile_data = {}  # metric -> {perm -> sorted ratios array}
+        for m in used_metrics:
+            col = f'{m}_imp'
+            sub = group_df[['matrix', 'perm', col]].dropna(subset=[col])
+            best_per_matrix = sub.groupby('matrix')[col].max().rename('best')
+            sub = sub.merge(best_per_matrix, on='matrix')
+            # Filter out matrices where best <= 0
+            sub = sub[sub['best'] > 0]
+            sub['ratio'] = sub[col] / sub['best']
+            profile_data[m] = {}
+            for perm, perm_sub in sub.groupby('perm'):
+                ratios = np.sort(perm_sub['ratio'].values)
+                profile_data[m][perm] = ratios
+
+        # Layout: 3 columns
+        n_metrics = len(used_metrics)
+        ncols = min(3, n_metrics)
+        nrows = (n_metrics + ncols - 1) // ncols
+        fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 4 * nrows),
+                                 squeeze=False)
+
+        # Canonical perm order
+        perm_order = [p for p in PERMS if p in group_df['perm'].unique()]
+
+        for idx, m in enumerate(used_metrics):
+            ax = axes[idx // ncols][idx % ncols]
+            data = profile_data[m]
+            for perm in perm_order:
+                if perm not in data or len(data[perm]) == 0:
+                    continue
+                ratios = data[perm]
+                n = len(ratios)
+                # Survival function: fraction >= x
+                # Step curve: at each sorted ratio value, survival drops
+                x_vals = np.concatenate([[0], ratios, [1.0]])
+                # For each x, fraction of ratios >= x
+                surv = np.array([np.mean(ratios >= x) for x in x_vals])
+                ax.step(x_vals, surv, where='post',
+                        label=get_perm_display(perm),
+                        color=get_perm_color(perm), linewidth=1.5)
+
+            ax.set_title(get_metric_display(m), fontsize=10)
+            ax.set_xlabel('Ratio to best')
+            ax.set_ylabel('Fraction of matrices')
+            ax.set_xlim(0, 1.05)
+            ax.set_ylim(0, 1.05)
+            ax.grid(True, alpha=0.3)
+
+        # Hide unused axes
+        for idx in range(n_metrics, nrows * ncols):
+            axes[idx // ncols][idx % ncols].set_visible(False)
+
+        # Shared legend at bottom
+        handles, labels = axes[0][0].get_legend_handles_labels()
+        fig.legend(handles, labels, loc='lower center',
+                   ncol=min(6, len(handles)), fontsize=9,
+                   bbox_to_anchor=(0.5, -0.02))
+
+        fig.suptitle(f'Performance Profiles ({group_label})', fontsize=13, y=1.01)
+        fig.tight_layout()
+
+        prof_dir = out_dir / 'reorder_analysis' / 'profiles'
+        prof_dir.mkdir(parents=True, exist_ok=True)
+        for ext in ('pdf', 'png'):
+            fig.savefig(prof_dir / f'profiles_{group_label}.{ext}',
+                        bbox_inches='tight', dpi=150)
+        plt.close(fig)
+        print(f"  Saved profiles_{group_label}.pdf/png")
 
 
 def _should_run(section: str, args) -> bool:
@@ -1150,6 +1285,12 @@ def main():
         print("="*60)
         generate_kernel_plots(df, out_dir, args)
 
+    if has_ops and _should_run('singular-improvement', args):
+        print("\n" + "="*60)
+        print("Generating singular kernel improvement plots...")
+        print("="*60)
+        generate_singular_improvement_plots(df, out_dir, args)
+
     if has_ops and _should_run('original-scatter', args):
         print("\n" + "="*60)
         print("Generating original-only grouped scatter plots...")
@@ -1167,7 +1308,7 @@ def main():
         print("\n" + "="*60)
         print("Generating reordering analysis plots...")
         print("="*60)
-        generate_reorder_analysis_plots(df_analysis, out_dir)
+        generate_reorder_analysis_plots(df_analysis, out_dir, n_jobs=args.jobs)
         
     if _should_run('reorderability', args):
         print("\n" + "="*60)
@@ -1187,7 +1328,13 @@ def main():
         print("="*60)
         generate_reorder_timing_plots(df_analysis, out_dir,
                                       reordering_csv=_reordering_csv())
-    
+
+    if _should_run('profiles', args):
+        print("\n" + "="*60)
+        print("Generating performance profile plots...")
+        print("="*60)
+        generate_profile_plots(df_analysis, out_dir)
+
     print(f"\nAll plots saved to {out_dir}")
 
 

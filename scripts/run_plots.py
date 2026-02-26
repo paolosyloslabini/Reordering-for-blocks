@@ -28,14 +28,18 @@ PLOT_GROUPS = [
     ("Reorderability analysis plots",  "reorderability"),
     ("Per-matrix difficulty study",    "per-matrix"),
     ("Reorder timing analysis",        "timing"),
+    ("Performance profile plots",      "profiles"),
     ("ALL plot.py plots",              None),          # None → no --sections flag
 ]
 
 # ── Correlation table groups (correlation_table.py --sections <key>) ─────────
 CORR_GROUPS = [
-    ("Metric-kernel correlation tables",              "correlations"),
-    ("Block-size correlation tables",                 "blocksize"),
-    ("Per-metric correlation tables",                 "per-metric"),
+    ("Metric-kernel correlation tables (all)",        "correlations"),
+    ("Block-size correlation tables (all)",           "blocksize"),
+    ("Per-metric correlation tables (all)",           "per-metric"),
+    ("Metric-kernel correlation tables (original)",   "correlations-original"),
+    ("Block-size correlation tables (original)",      "blocksize-original"),
+    ("Per-metric correlation tables (original)",      "per-metric-original"),
     ("Median improvement tables",                     "improvement"),
     ("Improvement-speedup correlation tables",        "imp-correlations"),
     ("Improvement-speedup block-size tables",         "imp-blocksize"),
