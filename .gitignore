@@ -5,7 +5,9 @@ operators/ASpT/
 CLAUDE.md
 
 # Generated plots
-plots/
+plots/*
+!plots/spy_plots/
+!plots/spy_quick/
 plots_random/
 *.pyc
 __pycache__/
