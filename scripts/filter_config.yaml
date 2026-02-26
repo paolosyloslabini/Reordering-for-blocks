@@ -41,6 +41,14 @@ filters:
   # Remove purely diagonal matrices (nnz == rows for square matrices).
   filter_diagonal: true
 
+  # Permutations (reordering algorithms) to exclude from plots.
+  # Can be a flat list (applies to all perm_types) or a mapping of
+  # perm_type → list.  Perm names must match the `perm` column values
+  # (e.g. SPARTA_reorder, GROOT_reorder, SB_rcm, …).
+  exclude_perms:
+    SYMMETRIC:
+      - SPARTA_reorder
+
   # Families to keep fully (not reduce to one representative).
   # These contain diverse, non-duplicate matrices commonly used in sparse
   # matrix research. Set to [] to disable.
@@ -58,4 +66,4 @@ filters:
 display:
   # Correlation method used in all plots and tables.
   # Choices: pearson, spearman, kendall
-  correlation_method: pearson
+  correlation_method: spearman

@@ -652,6 +652,35 @@ def apply_filters(df, df_analysis, matrices_list_path=None,
     return df, df_analysis
 
 
+def _apply_exclude_perms(df, df_analysis, exclude_perms):
+    """Drop rows whose perm matches the exclude_perms specification.
+
+    *exclude_perms* can be:
+      - a flat list  → exclude those perms regardless of perm_type
+      - a dict mapping perm_type → list of perms to exclude
+    """
+    if isinstance(exclude_perms, list):
+        # Flat list: exclude from all perm_types
+        excluded = set(exclude_perms)
+        n0 = len(df) + len(df_analysis)
+        if not df.empty:
+            df = df[~df['perm'].isin(excluded)]
+        df_analysis = df_analysis[~df_analysis['perm'].isin(excluded)]
+        n1 = len(df) + len(df_analysis)
+        print(f"  exclude_perms (all): removed {n0 - n1} rows for {excluded}")
+    elif isinstance(exclude_perms, dict):
+        for perm_type, perms in exclude_perms.items():
+            excluded = set(perms)
+            mask_ops = (df['perm'].isin(excluded) & (df['perm_type'] == perm_type)) if not df.empty else pd.Series(dtype=bool)
+            mask_ana = df_analysis['perm'].isin(excluded) & (df_analysis['perm_type'] == perm_type)
+            n_removed = mask_ops.sum() + mask_ana.sum()
+            if not df.empty:
+                df = df[~mask_ops]
+            df_analysis = df_analysis[~mask_ana]
+            print(f"  exclude_perms ({perm_type}): removed {n_removed} rows for {excluded}")
+    return df, df_analysis
+
+
 def load_and_filter_data(config_path=None, cli_overrides=None):
     """Single entry-point: load CSVs, apply every filter from config.
 
@@ -704,6 +733,11 @@ def load_and_filter_data(config_path=None, cli_overrides=None):
         filter_diagonal=filt_cfg.get('filter_diagonal', True),
         keep_full_families=filt_cfg.get('keep_full_families', []),
     )
+
+    # Exclude perms --------------------------------------------------------
+    exclude_perms = filt_cfg.get('exclude_perms', None)
+    if exclude_perms:
+        df, df_analysis = _apply_exclude_perms(df, df_analysis, exclude_perms)
 
     print(f"After filtering: {len(df)} operation rows, "
           f"{len(df_analysis)} analysis rows")
@@ -765,11 +799,22 @@ def compute_correlation(x, y, method=None):
     raise ValueError(f"Unknown correlation method: {method}")
 
 
-def correlation_display_symbol(method=None):
-    """Return a short display symbol for the configured correlation method."""
+def correlation_display_symbol(method=None, log_x=False, log_y=False):
+    """Return a short display symbol for the configured correlation method.
+
+    When *log_x* and/or *log_y* are ``True`` a subscript is appended to
+    indicate that the correlation was computed on log-transformed data.
+    """
     if method is None:
         method = get_correlation_method()
-    return {'pearson': 'r', 'spearman': r'\rho', 'kendall': r'\tau'}[method]
+    base = {'pearson': 'r', 'spearman': r'\rho', 'kendall': r'\tau'}[method]
+    if log_x and log_y:
+        return base + r'_{\log}'
+    if log_x:
+        return base + r'_{\log x}'
+    if log_y:
+        return base + r'_{\log y}'
+    return base
 
 
 def correlation_display_name(method=None):
@@ -871,8 +916,9 @@ def scatter_with_correlation(df, x_col, y_col, output_path,
 
     # Calculate correlation using configured method
     method = get_correlation_method()
-    sym = correlation_display_symbol(method)
-    corr_val = _correlation_for_scatter(plot_df[x_col], plot_df[y_col], method)
+    sym = correlation_display_symbol(method, log_x=log_x, log_y=log_y)
+    corr_val = _correlation_for_scatter(plot_df[x_col], plot_df[y_col], method,
+                                        log_x=log_x, log_y=log_y)
 
     # Create plot
     fig, ax = _setup_figure(figsize)
@@ -1538,10 +1584,24 @@ def _pearson_for_scatter(x_vals, y_vals):
     return np.nan
 
 
-def _correlation_for_scatter(x_vals, y_vals, method=None):
-    """Compute correlation on raw values using the configured method."""
+def _correlation_for_scatter(x_vals, y_vals, method=None,
+                              log_x=False, log_y=False):
+    """Compute correlation using the configured method.
+
+    When *log_x* or *log_y* is ``True`` the corresponding values are
+    log10-transformed before computing the correlation so that the
+    reported coefficient matches the visual (log-scale) relationship.
+    """
     valid = x_vals.notna() & y_vals.notna() & np.isfinite(x_vals) & np.isfinite(y_vals)
     xp, yp = x_vals[valid], y_vals[valid]
+    if log_x:
+        pos = xp > 0
+        xp, yp = xp[pos], yp[pos]
+        xp = np.log10(xp)
+    if log_y:
+        pos = yp > 0
+        xp, yp = xp[pos], yp[pos]
+        yp = np.log10(yp)
     if len(xp) >= 2:
         r, _ = compute_correlation(xp, yp, method=method)
         return r
@@ -1591,8 +1651,9 @@ def scatter_publication(df, x_col, y_col, output_path,
 
     if show_correlation:
         method = get_correlation_method()
-        sym = correlation_display_symbol(method)
-        corr_val = _correlation_for_scatter(plot_df[x_col], plot_df[y_col], method)
+        sym = correlation_display_symbol(method, log_x=log_x, log_y=log_y)
+        corr_val = _correlation_for_scatter(plot_df[x_col], plot_df[y_col], method,
+                                            log_x=log_x, log_y=log_y)
         ax.text(0.03, 0.97, f"${sym}={corr_val:.2f}$",
                 transform=ax.transAxes, fontsize=10, va='top',
                 bbox=dict(boxstyle='round,pad=0.3', fc='white', alpha=0.8))
@@ -1679,8 +1740,9 @@ def scatter_presentation(df, x_col, y_col, output_path,
 
     if show_correlation:
         method = get_correlation_method()
-        sym = correlation_display_symbol(method)
-        corr_val = _correlation_for_scatter(plot_df[x_col], plot_df[y_col], method)
+        sym = correlation_display_symbol(method, log_x=log_x, log_y=log_y)
+        corr_val = _correlation_for_scatter(plot_df[x_col], plot_df[y_col], method,
+                                            log_x=log_x, log_y=log_y)
         ax.text(0.03, 0.97, f"${sym}={corr_val:.2f}$",
                 transform=ax.transAxes, fontsize=14, va='top',
                 bbox=dict(boxstyle='round,pad=0.3', fc='white', alpha=0.85))
@@ -1745,8 +1807,9 @@ def grouped_scatter_publication(df, x_col, y_col, group_col, group_order,
 
             if show_correlation:
                 method = get_correlation_method()
-                sym = correlation_display_symbol(method)
-                cr = _correlation_for_scatter(df_g[x_col], df_g[y_col], method)
+                sym = correlation_display_symbol(method, log_x=log_x, log_y=log_y)
+                cr = _correlation_for_scatter(df_g[x_col], df_g[y_col], method,
+                                              log_x=log_x, log_y=log_y)
                 ax.text(0.03, 0.97, f"${sym}={cr:.2f}$",
                         transform=ax.transAxes, fontsize=7, va='top',
                         bbox=dict(boxstyle='round,pad=0.2', fc='white',

@@ -14,7 +14,10 @@ import pandas as pd
 import numpy as np
 from scipy import stats
 import plot_utils as pu
-from settings import get_perm_display, get_perm_color, KERNEL_NAMES, GROUPED_SCATTER_EXCLUDE, PERMS, ALL_METRICS, enabled_metrics, get_metric_display
+from settings import get_perm_display, get_perm_color, KERNEL_NAMES, GROUPED_SCATTER_EXCLUDE, PERMS, ALL_METRICS, BLOCK_SIZES, enabled_metrics, get_metric_display
+from correlation_table import (compute_imp_correlations,
+                               _enabled_improvement_metrics, _corr_method_tag,
+                               _ordered_kernels)
 
 
 def parse_args():
@@ -61,6 +64,7 @@ def parse_args():
         'singular-improvement',
         'profiles',
         'pairwise',
+        'imp-correlation',
     ]
     parser.add_argument(
         "--sections", nargs="+", choices=SECTION_CHOICES, default=None,
@@ -1380,6 +1384,88 @@ def generate_pairwise_heatmap(df_analysis, out_dir):
     print(f"  Pairwise heatmaps saved to {pairwise_dir}")
 
 
+def generate_imp_correlation_plots(df, out_dir):
+    """Generate grouped bar charts of improvement-metric correlations.
+
+    Uses the correlation method from config (pearson/spearman/kendall).
+    Generates both linear and log-log variants.
+    One image per (scale, n_cols, perm_type) combination.
+    x-axis: kernels, y-axis: correlation value, one bar per metric.
+    """
+    import seaborn as sns
+
+    method = pu.get_correlation_method()
+    corr_display = pu.correlation_display_name()
+    tag = _corr_method_tag()
+
+    imp_metrics = _enabled_improvement_metrics()
+    kernels = _ordered_kernels(df, KERNEL_NAMES)
+    n_cols_values = sorted(df['n_cols'].unique())
+    perm_types = sorted(
+        df.loc[df['strategy'] != 'Original', 'perm_type'].unique())
+
+    kernel_order = [KERNEL_NAMES[k] for k in kernels if k in KERNEL_NAMES]
+    metric_order = [get_metric_display(m) for m in imp_metrics]
+    n_metrics = len(metric_order)
+    n_kernels = len(kernel_order)
+
+    palette = sns.color_palette('muted', n_colors=n_metrics)
+    metric_colors = dict(zip(metric_order, palette))
+
+    plot_dir = Path(out_dir) / 'imp_correlation'
+    plot_dir.mkdir(parents=True, exist_ok=True)
+
+    for log_transform in [False, True]:
+        scale_suffix = '_loglog' if log_transform else ''
+        scale_label = ' (log-log)' if log_transform else ''
+
+        for n_cols in n_cols_values:
+            for pt in perm_types:
+                corr_df = compute_imp_correlations(
+                    df, n_cols, imp_metrics, kernels,
+                    perm_type=pt, method=method,
+                    log_transform=log_transform)
+
+                fig, ax = plt.subplots(figsize=(12, 6))
+
+                bar_width = 0.7 / n_metrics
+                x = np.arange(n_kernels)
+
+                for mi, mc in enumerate(imp_metrics):
+                    col = f'{mc}_corr'
+                    display = get_metric_display(mc)
+                    vals = []
+                    for kernel in kernels:
+                        row = corr_df[corr_df['kernel'] == kernel]
+                        if row.empty or pd.isna(row.iloc[0].get(col, np.nan)):
+                            vals.append(0)
+                        else:
+                            vals.append(row.iloc[0][col])
+                    offset = (mi - (n_metrics - 1) / 2) * bar_width
+                    ax.bar(x + offset, vals, bar_width * 0.9,
+                           label=display, color=metric_colors[display],
+                           edgecolor='black', linewidth=0.4)
+
+                ax.axhline(0, color='grey', linestyle='--', alpha=0.5,
+                           linewidth=0.8)
+                ax.set_xticks(x)
+                ax.set_xticklabels(kernel_order, rotation=30, ha='right')
+                ax.set_xlabel('')
+                ax.set_ylabel(f'{corr_display} Correlation with Speedup')
+                ax.set_title(f'Improvement–Speedup Correlation{scale_label}  '
+                             f'(n_cols={int(n_cols)}, {pt})')
+                ax.legend(title='Metric', fontsize=9, title_fontsize=10)
+                ax.grid(True, axis='y', alpha=0.3)
+
+                fname = (f'imp_correlation_bars_{tag}{scale_suffix}'
+                         f'_ncols_{int(n_cols)}_{pt.lower()}.png')
+                out_path = plot_dir / fname
+                plt.tight_layout()
+                plt.savefig(out_path, dpi=300)
+                plt.close()
+                print(f"  Saved: {out_path}")
+
+
 def _should_run(section: str, args) -> bool:
     """Decide whether *section* should run given CLI flags.
 
@@ -1523,6 +1609,12 @@ def main():
         print("Generating pairwise win/loss heatmaps...")
         print("="*60)
         generate_pairwise_heatmap(df_analysis, out_dir)
+
+    if has_ops and _should_run('imp-correlation', args):
+        print("\n" + "="*60)
+        print("Generating improvement-correlation bar charts...")
+        print("="*60)
+        generate_imp_correlation_plots(df, out_dir)
 
     print(f"\nAll plots saved to {out_dir}")
 

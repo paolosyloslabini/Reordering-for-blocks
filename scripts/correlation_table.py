@@ -530,8 +530,6 @@ def _enabled_improvement_metrics():
     """Return improvement column names matching the enabled correlation metrics."""
     base = [
         'bandwidth_improvement',
-        'bandwidth_avg_improvement',
-        'row_spread_improvement',
         'col_spread_improvement',
         'vertical_adjacency_improvement',
         'profile_improvement',
@@ -547,18 +545,27 @@ def _density_improvement_metrics():
     return [f'density_improvement_{bs}' for bs in BLOCK_SIZES]
 
 
-def compute_imp_correlations(df, n_cols, imp_metrics, kernels=None):
+def compute_imp_correlations(df, n_cols, imp_metrics, kernels=None,
+                             perm_type=None, method=None,
+                             log_transform=False):
     """Compute correlations between improvement metrics and speedup.
 
     Only considers reordered rows (strategy != 'Original').
-    The correlation method is read from config.
+
+    If *method* is None the correlation method is read from config.
+    If *perm_type* is given, only rows with that perm_type are used.
+    If *log_transform* is True, both metric and speedup are log-transformed
+    before computing the correlation (rows with non-positive values are dropped).
     """
     df_nc = df[(df['n_cols'] == n_cols) & (df['strategy'] != 'Original')]
+    if perm_type is not None:
+        df_nc = df_nc[df_nc['perm_type'] == perm_type]
 
     if kernels is None:
         kernels = sorted(df_nc['kernel_id'].unique())
 
-    method = pu.get_correlation_method()
+    if method is None:
+        method = pu.get_correlation_method()
 
     results = []
     for kernel in kernels:
@@ -573,7 +580,16 @@ def compute_imp_correlations(df, n_cols, imp_metrics, kernels=None):
             valid = df_k[[metric, 'speedup']].dropna()
             valid = valid[np.isfinite(valid[metric]) & np.isfinite(valid['speedup'])]
 
-            if len(valid) >= 10:
+            if log_transform:
+                valid = valid[(valid[metric] > 0) & (valid['speedup'] > 0)]
+                if len(valid) >= 10:
+                    r, _ = pu.compute_correlation(
+                        np.log(valid[metric]), np.log(valid['speedup']),
+                        method)
+                    row_data[f'{metric}_corr'] = r
+                else:
+                    row_data[f'{metric}_corr'] = np.nan
+            elif len(valid) >= 10:
                 r, _ = pu.compute_correlation(valid[metric], valid['speedup'], method)
                 row_data[f'{metric}_corr'] = r
             else:
