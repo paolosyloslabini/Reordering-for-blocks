@@ -178,11 +178,18 @@ def find_permutation_file(perm_dir, matrix_name, algorithm):
 
 
 def get_perm_type_for_algorithm(algorithm, analysis_df, matrix_name):
-    """Get the permutation type for a given algorithm from analysis data."""
-    row = analysis_df[(analysis_df['matrix'] == matrix_name) & 
-                      (analysis_df['perm'] == algorithm)]
-    if not row.empty:
-        return row.iloc[0]['perm_type']
+    """Get the permutation type for a given algorithm from analysis data.
+
+    Prefers SYMMETRIC when both ROW and SYMMETRIC entries exist for the
+    same (matrix, algorithm) pair.
+    """
+    rows = analysis_df[(analysis_df['matrix'] == matrix_name) &
+                       (analysis_df['perm'] == algorithm)]
+    if not rows.empty:
+        perm_types = set(rows['perm_type'].unique())
+        if 'SYMMETRIC' in perm_types:
+            return 'SYMMETRIC'
+        return rows.iloc[0]['perm_type']
     return 'SYMMETRIC'  # Default
 
 

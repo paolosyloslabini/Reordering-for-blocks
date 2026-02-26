@@ -68,13 +68,19 @@ def find_matrix(name):
 
 
 def get_perm_type(algorithm, matrix_name):
-    """Look up perm_type from analysis CSV, default to SYMMETRIC."""
+    """Look up perm_type from analysis CSV, default to SYMMETRIC.
+
+    Prefers SYMMETRIC when both ROW and SYMMETRIC entries exist.
+    """
     try:
         import pandas as pd
         df = pd.read_csv(ANALYSIS_CSV)
-        row = df[(df['perm'] == algorithm) & (df['matrix'] == matrix_name)]
-        if not row.empty:
-            return row.iloc[0]['perm_type']
+        rows = df[(df['perm'] == algorithm) & (df['matrix'] == matrix_name)]
+        if not rows.empty:
+            perm_types = set(rows['perm_type'].unique())
+            if 'SYMMETRIC' in perm_types:
+                return 'SYMMETRIC'
+            return rows.iloc[0]['perm_type']
     except Exception:
         pass
     return 'SYMMETRIC'
