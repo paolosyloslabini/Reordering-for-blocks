@@ -87,12 +87,26 @@ def get_perm_type(algorithm, matrix_name):
 
 
 def make_spy(A, title, color, output_path, markersize):
-    """Save a single spy plot."""
+    """Save a single spy plot using imshow for pixel-accurate rendering."""
+    from matplotlib.colors import to_rgb
+    n_rows, n_cols = A.shape
+    # Render into a binary image, then colorize
+    img_size = 1500  # pixels for the image
+    # Map matrix coords to pixel coords
+    A_coo = A.tocoo()
+    pr = (A_coo.row * (img_size - 1) / max(n_rows - 1, 1)).astype(int)
+    pc = (A_coo.col * (img_size - 1) / max(n_cols - 1, 1)).astype(int)
+    # White background, colored nonzeros
+    rgb = to_rgb(color)
+    img = np.ones((img_size, img_size, 3), dtype=np.float32)
+    img[pr, pc] = rgb
+
     fig, ax = plt.subplots(figsize=(5, 5))
-    ax.spy(A, markersize=markersize, aspect='equal', color=color)
+    ax.imshow(img, interpolation='nearest', aspect='equal',
+              extent=[-0.5, n_cols - 0.5, n_rows - 0.5, -0.5])
     ax.set_title(title, fontsize=13, fontweight='bold', color=color)
-    ax.set_xlabel(f'{A.shape[1]:,} cols', fontsize=10)
-    ax.set_ylabel(f'{A.shape[0]:,} rows', fontsize=10)
+    ax.set_xlabel(f'{n_cols:,} cols', fontsize=10)
+    ax.set_ylabel(f'{n_rows:,} rows', fontsize=10)
     plt.tight_layout()
     plt.savefig(output_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
     plt.close()
@@ -104,7 +118,7 @@ def main():
     parser.add_argument('matrix', help='Matrix name (e.g. bcsstk10)')
     parser.add_argument('algorithms', nargs='+',
                         help='Algorithms (e.g. random rcm groot)')
-    parser.add_argument('--markersize', type=float, default=0.1)
+    parser.add_argument('--markersize', type=float, default=0.05)
     parser.add_argument('--output-dir', type=str, default=None)
     parser.add_argument('--original', action='store_true', default=True,
                         help='Also generate a spy plot of the original matrix (default: yes)')
