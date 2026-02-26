@@ -1,12 +1,19 @@
 import pandas as pd
 import json
+import pickle
 import re
 import os
 import sys
 import time
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
-from sbatchman import jobs_list
+
+try:
+    import yaml
+    from yaml import CSafeLoader as SafeLoader
+except ImportError:
+    import yaml
+    from yaml import SafeLoader
 
 try:
     from tqdm import tqdm
@@ -36,6 +43,10 @@ PERM_TAGS = {
 # Random-pipeline perm tags: "<algo>_RANDOM" (from perms_random.yaml)
 RANDOM_PERM_TAGS = {f'{t}_RANDOM' for t in PERM_TAGS if t not in ('random1D', 'random2D')}
 
+# Cache format version — bump when parsed row schema changes
+CACHE_VERSION = 2
+
+
 def dedup_latest(df, key_cols):
     """Drop duplicate experiments, keeping only the row with the highest job_id."""
     before = len(df)
@@ -52,7 +63,7 @@ def safe_get_var(job, key, default, cast_type=str):
     # Ensure variables dict exists
     variables = getattr(job, 'variables', {}) or {}
     value = variables.get(key)
-    
+
     if value is None:
         return default
     try:
@@ -77,10 +88,10 @@ def parse_timers(stdout):
         return {}
 
     timers = {}
-    
+
     # Remove ANSI color codes only if needed
     clean_stdout = ANSI_ESCAPE.sub('', stdout) if '\x1b' in stdout or '\x1B' in stdout else stdout
-    
+
     # Look for lines like: <Timer>[label] 123.456 ms
     for match in TIMER_PATTERN.finditer(clean_stdout):
         label = match.group(1).lower()
@@ -104,6 +115,23 @@ def _get_perm_type(tag):
     elif 'NO_REORDER' in tag:
         return 'ROW'
     return 'UNKNOWN'
+
+
+def _categorize_tag(tag):
+    """Return the category string for a job tag, or None if uncategorized."""
+    if tag.startswith("ANALYSIS_RANDOM_"):
+        return 'random_analysis'
+    elif tag.startswith("ANALYSIS_"):
+        return 'analysis'
+    elif "SPMM" in tag and "RANDOM" in tag:
+        return 'random_ops'
+    elif "SPMM" in tag:
+        return 'ops'
+    elif tag in RANDOM_PERM_TAGS:
+        return 'random_perms'
+    elif tag in PERM_TAGS:
+        return 'perms'
+    return None
 
 
 def parse_one_analysis_job(job):
@@ -227,6 +255,17 @@ def parse_one_perm_job(job):
         return None
 
 
+def parse_one_random_analysis_job(job):
+    """Parse a random-pipeline analysis job, stripping _RANDOM suffix from perm/tag/algo."""
+    row = parse_one_analysis_job(job)
+    if row is None:
+        return None
+    for key in ('perm', 'tag', 'algo'):
+        if isinstance(row.get(key), str) and row[key].endswith('_RANDOM'):
+            row[key] = row[key][:-len('_RANDOM')]
+    return row
+
+
 def parse_one_random_perm_job(job):
     """Parse a random-pipeline perm job, stripping the _RANDOM suffix from perm/tag."""
     row = parse_one_perm_job(job)
@@ -285,23 +324,254 @@ def parse_one_operation_job(job):
         return None
 
 
-def main():
-    import argparse
-    parser = argparse.ArgumentParser(description="Parse job results into CSV files.")
-    parser.add_argument("--out-dir", default="results", help="Directory for output CSV files")
-    parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS,
-                        help=f"Number of parallel I/O threads (default: {DEFAULT_WORKERS})")
-    args = parser.parse_args()
+# ---------------------------------------------------------------------------
+# Cache helpers
+# ---------------------------------------------------------------------------
 
-    # Create output directory
-    out_dir = Path(args.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    workers = args.workers
-    t_total_start = time.perf_counter()
+def _load_cache(cache_path):
+    """Load the parse cache. Returns None if missing or incompatible."""
+    try:
+        with open(cache_path, 'rb') as f:
+            cache = pickle.load(f)
+        if cache.get('version') != CACHE_VERSION:
+            print("Cache version mismatch, rebuilding.", file=sys.stderr)
+            return None
+        return cache
+    except Exception:
+        return None
+
+
+def _save_cache(cache_path, cache):
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = cache_path.with_suffix('.tmp')
+    with open(tmp, 'wb') as f:
+        pickle.dump(cache, f, protocol=pickle.HIGHEST_PROTOCOL)
+    tmp.rename(cache_path)
+
+
+def _scan_job_dirs():
+    """
+    Fast directory scan (no YAML parsing) returning all job directory paths.
+    Returns a set of absolute dir path strings (the timestamp-level dirs that
+    contain metadata.yaml / stdout.log).
+    """
+    from sbatchman.config.project_config import get_experiments_dir, get_archive_dir
+
+    dirs = set()
+
+    def _scan_tag_level(tag_dir_path):
+        """Scan timestamp dirs under a tag dir."""
+        try:
+            with os.scandir(tag_dir_path) as it:
+                for entry in it:
+                    if entry.is_dir(follow_symlinks=False):
+                        dirs.add(entry.path)
+        except OSError:
+            pass
+
+    def _scan_from_root(base, extra_level=False):
+        """
+        Scan the directory tree under base.
+        extra_level=True for archive (archive_name/cluster/config/tag/timestamp)
+        extra_level=False for experiments (cluster/config/tag/timestamp)
+        """
+        if not base.exists():
+            return
+        try:
+            level1_entries = list(os.scandir(base))
+        except OSError:
+            return
+        for l1 in level1_entries:
+            if not l1.is_dir(follow_symlinks=False):
+                continue
+            if extra_level:
+                # l1 = archive_name, need one more level before cluster
+                try:
+                    cluster_entries = list(os.scandir(l1.path))
+                except OSError:
+                    continue
+            else:
+                cluster_entries = [l1]
+
+            for cluster_entry in cluster_entries:
+                if extra_level and not cluster_entry.is_dir(follow_symlinks=False):
+                    continue
+                try:
+                    with os.scandir(cluster_entry.path) as config_it:
+                        config_entries = list(config_it)
+                except OSError:
+                    continue
+                for config_entry in config_entries:
+                    if not config_entry.is_dir(follow_symlinks=False):
+                        continue
+                    try:
+                        with os.scandir(config_entry.path) as tag_it:
+                            tag_entries = list(tag_it)
+                    except OSError:
+                        continue
+                    for tag_entry in tag_entries:
+                        if not tag_entry.is_dir(follow_symlinks=False):
+                            continue
+                        _scan_tag_level(tag_entry.path)
+
+    _scan_from_root(get_experiments_dir(), extra_level=False)
+    _scan_from_root(get_archive_dir(), extra_level=True)
+    return dirs
+
+
+def _load_and_parse_one(job_dir_str):
+    """
+    Load metadata.yaml from a job dir, check it's COMPLETED, parse stdout,
+    and return (category, parsed_row) or None.
+    Bypasses sbatchman's jobs_list entirely.
+    """
+    job_dir = Path(job_dir_str)
+    metadata_path = job_dir / "metadata.yaml"
+
+    try:
+        with open(metadata_path, 'r') as f:
+            meta = yaml.load(f, Loader=SafeLoader)
+    except Exception:
+        return None
+
+    if not meta or str(meta.get('status', '')) != 'COMPLETED':
+        return None
+
+    tag = meta.get('tag', '')
+    category = _categorize_tag(tag)
+    if category is None:
+        return None
+
+    # Build a lightweight object with the fields the parse_one_* functions need
+    class _JobProxy:
+        pass
+
+    job = _JobProxy()
+    job.tag = tag
+    job.job_id = meta.get('job_id', 'unknown')
+    job.id = job.job_id
+    job.variables = meta.get('variables') or {}
+
+    # Read stdout directly
+    stdout_path = job_dir / "stdout.log"
+    try:
+        with open(stdout_path, 'r') as f:
+            job._stdout = f.read()
+    except Exception:
+        job._stdout = None
+    job.get_stdout = lambda: job._stdout
+
+    # Parse according to category
+    if category in ('analysis', 'random_analysis'):
+        row = parse_one_analysis_job(job)
+    elif category in ('ops', 'random_ops'):
+        row = parse_one_operation_job(job)
+    elif category in ('perms', 'random_perms'):
+        row = parse_one_perm_job(job)
+    else:
+        return None
+
+    if row is None:
+        return None
+
+    # Strip _RANDOM suffix for random categories
+    if category.startswith('random_'):
+        for key in ('perm', 'tag', 'algo'):
+            if isinstance(row.get(key), str) and row[key].endswith('_RANDOM'):
+                row[key] = row[key][:-len('_RANDOM')]
+
+    return (category, row)
+
+
+# ---------------------------------------------------------------------------
+# CSV export helpers (shared between cached and uncached paths)
+# ---------------------------------------------------------------------------
+
+CATEGORIES = ['analysis', 'random_analysis', 'ops', 'random_ops', 'perms', 'random_perms']
+
+
+def _empty_rows():
+    return {c: [] for c in CATEGORIES}
+
+
+def _backfill_job_dirs(rows, all_dirs):
+    """
+    Populate '_job_dir' on rows produced by the uncached path (which lack it).
+    Scans metadata.yaml in each dir to build a job_id -> dir mapping, then
+    stamps each row.  Rows that can't be matched get _job_dir = None.
+    """
+    # Build job_id -> dir mapping
+    job_id_to_dir = {}
+    for d in all_dirs:
+        meta_path = Path(d) / "metadata.yaml"
+        try:
+            with open(meta_path, 'r') as f:
+                meta = yaml.load(f, Loader=SafeLoader)
+            jid = meta.get('job_id')
+            if jid is not None:
+                job_id_to_dir[str(jid)] = d
+        except Exception:
+            continue
+
+    matched = 0
+    for cat in CATEGORIES:
+        for row in rows[cat]:
+            jid = str(row.get('job_id', ''))
+            row['_job_dir'] = job_id_to_dir.get(jid)
+            if row['_job_dir'] is not None:
+                matched += 1
+
+    total = sum(len(rows[c]) for c in CATEGORIES)
+    print(f"  Backfilled _job_dir: {matched}/{total} rows matched", file=sys.stderr)
+
+
+def _add_random_baselines(rows):
+    """Copy random1D SYMMETRIC rows from main into random categories as baselines."""
+    # analysis -> random_analysis
+    for r in rows['analysis']:
+        if r.get('perm') == 'random1D' and r.get('perm_type') == 'SYMMETRIC':
+            baseline = dict(r)
+            baseline['perm'] = 'None'
+            rows['random_analysis'].append(baseline)
+    # ops -> random_ops
+    for r in rows['ops']:
+        if r.get('perm') == 'random1D' and r.get('perm_type') == 'SYMMETRIC':
+            baseline = dict(r)
+            baseline['perm'] = 'None'
+            rows['random_ops'].append(baseline)
+
+
+def _export_csvs(rows, out_dir):
+    """Export all category DataFrames to CSV files."""
+    csv_map = {
+        'analysis':        ('results_analysis.csv',          ['matrix', 'perm', 'perm_type']),
+        'random_analysis': ('results_analysis_random.csv',   ['matrix', 'perm', 'perm_type']),
+        'ops':             ('results_operations.csv',        ['matrix', 'perm', 'perm_type', 'algo', 'block_size', 'n_cols']),
+        'random_ops':      ('results_operations_random.csv', ['matrix', 'perm', 'perm_type', 'algo', 'block_size', 'n_cols']),
+        'perms':           ('results_reordering.csv',        ['matrix', 'perm']),
+        'random_perms':    ('results_reordering_random.csv', ['matrix', 'perm']),
+    }
+    for cat, (filename, dedup_keys) in csv_map.items():
+        data = rows[cat]
+        if data:
+            df = pd.DataFrame(data)
+            df = dedup_latest(df, dedup_keys)
+            out_file = out_dir / filename
+            df.to_csv(out_file, index=False)
+            print(f"Exported {len(df)} {cat} rows to {out_file}")
+        else:
+            print(f"No {cat} results found.")
+
+
+# ---------------------------------------------------------------------------
+# Main: uncached path (first run / --no-cache)
+# ---------------------------------------------------------------------------
+
+def _run_uncached(workers):
+    """Original approach: fetch all jobs via sbatchman, parse, return rows dict."""
+    from sbatchman import jobs_list
 
     print("Fetching jobs (this may take a while)...", file=sys.stderr)
-    
-    # Fetch ALL completed jobs
     t0 = time.perf_counter()
     try:
         all_jobs = jobs_list(from_archived=True, status=["COMPLETED"], update_jobs=False)
@@ -309,210 +579,169 @@ def main():
         print(f"Error fetching jobs: {e}", file=sys.stderr)
         sys.exit(1)
     t_fetch = time.perf_counter() - t0
-        
     print(f"Total completed jobs found: {len(all_jobs)} ({t_fetch:.1f}s)", file=sys.stderr)
-    
-    if len(all_jobs) == 0:
+
+    if not all_jobs:
         print("No completed jobs found.", file=sys.stderr)
         sys.exit(0)
 
-    # --- Single-pass job categorization ---
-    analysis_jobs = []
-    random_analysis_jobs = []
-    op_jobs = []
-    random_op_jobs = []
-    perm_jobs = []
-    random_perm_jobs = []
+    # Single-pass categorization
+    categorized = {c: [] for c in CATEGORIES}
     for j in all_jobs:
-        tag = j.tag or ""
-        if tag.startswith("ANALYSIS_RANDOM_"):
-            random_analysis_jobs.append(j)
-        elif tag.startswith("ANALYSIS_"):
-            analysis_jobs.append(j)
-        elif "SPMM" in tag and "RANDOM" in tag:
-            random_op_jobs.append(j)
-        elif "SPMM" in tag:
-            op_jobs.append(j)
-        elif tag in RANDOM_PERM_TAGS:
-            random_perm_jobs.append(j)
-        elif tag in PERM_TAGS:
-            perm_jobs.append(j)
+        cat = _categorize_tag(j.tag or "")
+        if cat:
+            categorized[cat].append(j)
 
-    # --- 1. Process Analysis Jobs (parallel) ---
-    print(f"Found {len(analysis_jobs)} analysis jobs.", file=sys.stderr)
+    rows = _empty_rows()
+    parse_fn = {
+        'analysis':        parse_one_analysis_job,
+        'random_analysis': parse_one_random_analysis_job,
+        'ops':             parse_one_operation_job,
+        'random_ops':      parse_one_random_operation_job,
+        'perms':           parse_one_perm_job,
+        'random_perms':    parse_one_random_perm_job,
+    }
 
-    t0 = time.perf_counter()
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        results = list(tqdm(
-            pool.map(parse_one_analysis_job, analysis_jobs, chunksize=256),
-            total=len(analysis_jobs),
-            desc="Parsing Analysis Jobs"
-        ))
-    analysis_results = [r for r in results if r is not None]
-    t_analysis = time.perf_counter() - t0
-    print(f"Analysis parsing: {t_analysis:.1f}s", file=sys.stderr)
-
-    # Export Analysis CSV
-    if analysis_results:
-        df_analysis = pd.DataFrame(analysis_results)
-        df_analysis = dedup_latest(df_analysis, ['matrix', 'perm', 'perm_type'])
-        out_file = out_dir / "results_analysis.csv"
-        df_analysis.to_csv(out_file, index=False)
-        print(f"Exported {len(df_analysis)} analysis rows to {out_file}")
-    else:
-        print("No analysis results found.")
-
-    # --- 2. Process Operation Jobs (parallel) ---
-    print(f"Found {len(op_jobs)} operation jobs.", file=sys.stderr)
-
-    t0 = time.perf_counter()
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        results = list(tqdm(
-            pool.map(parse_one_operation_job, op_jobs, chunksize=256),
-            total=len(op_jobs),
-            desc="Parsing Operation Jobs"
-        ))
-    op_results = [r for r in results if r is not None]
-    t_ops = time.perf_counter() - t0
-    print(f"Operations parsing: {t_ops:.1f}s", file=sys.stderr)
-
-    # Export Operation CSV
-    if op_results:
-        df_op = pd.DataFrame(op_results)
-        df_op = dedup_latest(df_op, ['matrix', 'perm', 'perm_type', 'algo', 'block_size', 'n_cols'])
-        out_file = out_dir / "results_operations.csv"
-        df_op.to_csv(out_file, index=False)
-        print(f"Exported {len(df_op)} operation rows to {out_file}")
-    else:
-        print("No operation results found.")
-
-    # --- 3. Process Permutation Jobs (parallel) ---
-    print(f"Found {len(perm_jobs)} permutation jobs.", file=sys.stderr)
-
-    t0 = time.perf_counter()
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        results = list(tqdm(
-            pool.map(parse_one_perm_job, perm_jobs, chunksize=256),
-            total=len(perm_jobs),
-            desc="Parsing Perm Jobs"
-        ))
-    perm_results = [r for r in results if r is not None]
-    t_perms = time.perf_counter() - t0
-    print(f"Perm parsing: {t_perms:.1f}s", file=sys.stderr)
-
-    # Export Reordering CSV
-    if perm_results:
-        df_perm = pd.DataFrame(perm_results)
-        df_perm = dedup_latest(df_perm, ['matrix', 'perm'])
-        out_file = out_dir / "results_reordering.csv"
-        df_perm.to_csv(out_file, index=False)
-        print(f"Exported {len(df_perm)} reordering rows to {out_file}")
-    else:
-        print("No permutation timing results found.")
-
-    # --- 4. Process Random-Pipeline Analysis Jobs (parallel) ---
-    print(f"Found {len(random_analysis_jobs)} random-pipeline analysis jobs.", file=sys.stderr)
-
-    t0 = time.perf_counter()
-    if random_analysis_jobs:
+    for cat in CATEGORIES:
+        jobs = categorized[cat]
+        if not jobs:
+            continue
+        print(f"Parsing {len(jobs)} {cat} jobs...", file=sys.stderr)
+        t0 = time.perf_counter()
         with ThreadPoolExecutor(max_workers=workers) as pool:
             results = list(tqdm(
-                pool.map(parse_one_analysis_job, random_analysis_jobs, chunksize=256),
-                total=len(random_analysis_jobs),
-                desc="Parsing Random Analysis Jobs"
+                pool.map(parse_fn[cat], jobs, chunksize=256),
+                total=len(jobs), desc=f"  {cat}"
             ))
-        random_analysis_results = [r for r in results if r is not None]
-    else:
-        random_analysis_results = []
-    t_random_analysis = time.perf_counter() - t0
-    print(f"Random analysis parsing: {t_random_analysis:.1f}s", file=sys.stderr)
+        rows[cat] = [r for r in results if r is not None]
+        print(f"  {cat}: {time.perf_counter() - t0:.1f}s, {len(rows[cat])} parsed", file=sys.stderr)
 
-    # Include random1D SYMMETRIC baseline from the main analysis as the
-    # "no reorder" reference point for the random experiment.
-    # Re-label perm='None' so it matches the NO_REORDER convention.
-    if analysis_results:
-        for r in analysis_results:
-            if r.get('perm') == 'random1D' and r.get('perm_type') == 'SYMMETRIC':
-                baseline = dict(r)
-                baseline['perm'] = 'None'
-                random_analysis_results.append(baseline)
+    return rows
 
-    if random_analysis_results:
-        df_random_analysis = pd.DataFrame(random_analysis_results)
-        df_random_analysis = dedup_latest(df_random_analysis, ['matrix', 'perm', 'perm_type'])
-        out_file = out_dir / "results_analysis_random.csv"
-        df_random_analysis.to_csv(out_file, index=False)
-        print(f"Exported {len(df_random_analysis)} random analysis rows to {out_file}")
-    else:
-        print("No random-pipeline analysis results found.")
 
-    # --- 5. Process Random-Pipeline Operation Jobs (parallel) ---
-    print(f"Found {len(random_op_jobs)} random-pipeline operation jobs.", file=sys.stderr)
+# ---------------------------------------------------------------------------
+# Main: cached path (fast incremental)
+# ---------------------------------------------------------------------------
 
+def _run_cached(cache, workers):
+    """
+    Incremental path: scan directories, diff against cache, only process new
+    job dirs, merge with cached rows.
+    """
     t0 = time.perf_counter()
-    if random_op_jobs:
+    all_dirs = _scan_job_dirs()
+    t_scan = time.perf_counter() - t0
+    print(f"Directory scan: {len(all_dirs)} job dirs ({t_scan:.1f}s)", file=sys.stderr)
+
+    known_dirs = cache.get('known_dirs', set())
+    new_dirs = all_dirs - known_dirs
+    removed_dirs = known_dirs - all_dirs
+
+    print(f"  New: {len(new_dirs)}, Removed: {len(removed_dirs)}, Cached: {len(known_dirs)}", file=sys.stderr)
+
+    # Start from cached rows, removing any from deleted dirs
+    rows = _empty_rows()
+    if removed_dirs:
+        removed_set = removed_dirs
+        for cat in CATEGORIES:
+            rows[cat] = [r for r in cache.get(cat, []) if r.get('_job_dir') not in removed_set]
+    else:
+        for cat in CATEGORIES:
+            rows[cat] = list(cache.get(cat, []))
+
+    # Process new dirs
+    if new_dirs:
+        new_dirs_list = list(new_dirs)
+        print(f"Processing {len(new_dirs_list)} new jobs...", file=sys.stderr)
+        t0 = time.perf_counter()
         with ThreadPoolExecutor(max_workers=workers) as pool:
             results = list(tqdm(
-                pool.map(parse_one_random_operation_job, random_op_jobs, chunksize=256),
-                total=len(random_op_jobs),
-                desc="Parsing Random Operation Jobs"
+                pool.map(_load_and_parse_one, new_dirs_list, chunksize=256),
+                total=len(new_dirs_list), desc="  new jobs"
             ))
-        random_op_results = [r for r in results if r is not None]
+        new_count = 0
+        for i, result in enumerate(results):
+            if result is not None:
+                cat, row = result
+                row['_job_dir'] = new_dirs_list[i]
+                rows[cat].append(row)
+                new_count += 1
+        t_parse = time.perf_counter() - t0
+        print(f"  Parsed {new_count} new rows ({t_parse:.1f}s)", file=sys.stderr)
     else:
-        random_op_results = []
-    t_random_ops = time.perf_counter() - t0
-    print(f"Random operations parsing: {t_random_ops:.1f}s", file=sys.stderr)
+        print("No new jobs to process.", file=sys.stderr)
 
-    # Include random1D SYMMETRIC baseline from the main operations as the
-    # "no reorder" reference point for the random experiment.
-    if op_results:
-        for r in op_results:
-            if r.get('perm') == 'random1D' and r.get('perm_type') == 'SYMMETRIC':
-                baseline = dict(r)
-                baseline['perm'] = 'None'
-                random_op_results.append(baseline)
+    return rows, all_dirs
 
-    if random_op_results:
-        df_random_op = pd.DataFrame(random_op_results)
-        df_random_op = dedup_latest(df_random_op, ['matrix', 'perm', 'perm_type', 'algo', 'block_size', 'n_cols'])
-        out_file = out_dir / "results_operations_random.csv"
-        df_random_op.to_csv(out_file, index=False)
-        print(f"Exported {len(df_random_op)} random operation rows to {out_file}")
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Parse job results into CSV files.")
+    parser.add_argument("--out-dir", default="results", help="Directory for output CSV files")
+    parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS,
+                        help=f"Number of parallel I/O threads (default: {DEFAULT_WORKERS})")
+    parser.add_argument("--no-cache", action="store_true",
+                        help="Ignore cache and re-parse everything from scratch")
+    args = parser.parse_args()
+
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    # Store cache in project root so it's reused regardless of --out-dir
+    cache_path = Path(__file__).resolve().parent.parent / ".parse_cache.pkl"
+    workers = args.workers
+    t_total_start = time.perf_counter()
+
+    cache = None
+    if not args.no_cache:
+        cache = _load_cache(cache_path)
+
+    if cache is not None:
+        # --- Fast incremental path ---
+        rows, all_dirs = _run_cached(cache, workers)
+
+        # Save cache BEFORE adding baselines (baselines are export-only)
+        new_cache = {'version': CACHE_VERSION, 'known_dirs': all_dirs}
+        for cat in CATEGORIES:
+            new_cache[cat] = rows[cat]
+        _save_cache(cache_path, new_cache)
+
+        # Add random baselines (export-only, not cached)
+        _add_random_baselines(rows)
+
+        # Export CSVs (strip internal _job_dir before export)
+        export_rows = _empty_rows()
+        for cat in CATEGORIES:
+            export_rows[cat] = [{k: v for k, v in r.items() if k != '_job_dir'} for r in rows[cat]]
+        _export_csvs(export_rows, out_dir)
+
     else:
-        print("No random-pipeline operation results found.")
+        # --- Full parse path (first run or --no-cache) ---
+        rows = _run_uncached(workers)
 
-    # --- 6. Process Random-Pipeline Permutation Jobs (parallel) ---
-    print(f"Found {len(random_perm_jobs)} random-pipeline permutation jobs.", file=sys.stderr)
+        # Build and save cache BEFORE adding baselines.
+        # Scan dirs to populate known_dirs; rows from uncached path need
+        # _job_dir populated via _backfill_job_dirs.
+        print("Building cache for next run...", file=sys.stderr)
+        t0 = time.perf_counter()
+        all_dirs = _scan_job_dirs()
+        _backfill_job_dirs(rows, all_dirs)
+        new_cache = {'version': CACHE_VERSION, 'known_dirs': all_dirs}
+        for cat in CATEGORIES:
+            new_cache[cat] = rows[cat]
+        _save_cache(cache_path, new_cache)
+        print(f"Cache saved ({time.perf_counter() - t0:.1f}s)", file=sys.stderr)
 
-    t0 = time.perf_counter()
-    if random_perm_jobs:
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            results = list(tqdm(
-                pool.map(parse_one_random_perm_job, random_perm_jobs, chunksize=256),
-                total=len(random_perm_jobs),
-                desc="Parsing Random Perm Jobs"
-            ))
-        random_perm_results = [r for r in results if r is not None]
-    else:
-        random_perm_results = []
-    t_random_perms = time.perf_counter() - t0
-    print(f"Random perm parsing: {t_random_perms:.1f}s", file=sys.stderr)
+        # Add random baselines (export-only, not cached)
+        _add_random_baselines(rows)
 
-    if random_perm_results:
-        df_random_perm = pd.DataFrame(random_perm_results)
-        df_random_perm = dedup_latest(df_random_perm, ['matrix', 'perm'])
-        out_file = out_dir / "results_reordering_random.csv"
-        df_random_perm.to_csv(out_file, index=False)
-        print(f"Exported {len(df_random_perm)} random reordering rows to {out_file}")
-    else:
-        print("No random-pipeline permutation timing results found.")
+        # Export CSVs (strip _job_dir before export)
+        export_rows = _empty_rows()
+        for cat in CATEGORIES:
+            export_rows[cat] = [{k: v for k, v in r.items() if k != '_job_dir'} for r in rows[cat]]
+        _export_csvs(export_rows, out_dir)
 
     t_total = time.perf_counter() - t_total_start
-    print(f"\nTotal time: {t_total:.1f}s  (fetch: {t_fetch:.1f}s, analysis: {t_analysis:.1f}s, "
-          f"operations: {t_ops:.1f}s, perms: {t_perms:.1f}s, "
-          f"random_analysis: {t_random_analysis:.1f}s, random_ops: {t_random_ops:.1f}s, "
-          f"random_perms: {t_random_perms:.1f}s)",
-          file=sys.stderr)
+    print(f"\nTotal time: {t_total:.1f}s", file=sys.stderr)
 
 if __name__ == "__main__":
     main()

@@ -31,6 +31,7 @@ operators/results_smat.csv
 PaToH.log.*
 knn_cache/
 test_runs/
+.parse_cache.pkl
 
 # Experiment outputs
 SbatchMan/archive/
