@@ -2,7 +2,6 @@ variables:
   mtx: 'datasets/matrices_list_filtered.txt'
   perm:
     - GROOT_reorder
-    - SPARTA_reorder
     - SB_degree
     - SB_gray
     - SB_rcm

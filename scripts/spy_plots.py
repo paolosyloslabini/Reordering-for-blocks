@@ -230,8 +230,8 @@ def main():
         help="Maximum matrix dimension for plotting (default: 20000)"
     )
     parser.add_argument(
-        "--markersize", type=float, default=0.1,
-        help="Marker size for spy plot (default: 0.1)"
+        "--markersize", type=float, default=0.01,
+        help="Marker size for spy plot (default: 0.01)"
     )
     parser.add_argument(
         "--use-curated", action="store_true",

@@ -10,7 +10,6 @@ variables:
     - SB_patoh
     - SB_slashburn
     - GROOT_reorder
-    - SPARTA_reorder
     - TCA_reorder
   block_size:
     - 32
