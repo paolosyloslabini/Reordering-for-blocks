@@ -34,7 +34,7 @@ jobs:
           mtx_name=$(basename {mtx} .mtx)
           mkdir -p perms/SB_degree
           perm_path=perms/SB_degree/$mtx_name.perm
-        command: "./MtxPerm/SPARSEBASE/build/degree_perm {mtx} $perm_path"
+        command: "python3 MtxPerm/RANDOM/GB_degree_permutation.py {mtx} $perm_path"
 
       - tag: "SB_gray"
         preprocess: |
@@ -48,7 +48,7 @@ jobs:
           mtx_name=$(basename {mtx} .mtx)
           mkdir -p perms/SB_rcm
           perm_path=perms/SB_rcm/$mtx_name.perm
-        command: "./MtxPerm/SPARSEBASE/build/rcm_perm {mtx} $perm_path"
+        command: "python3 MtxPerm/RCM/rcm_perm.py {mtx} $perm_path"
 
       - tag: "SB_metis"
         preprocess: |

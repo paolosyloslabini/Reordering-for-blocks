@@ -53,7 +53,7 @@ jobs:
           temp_mtx=$(mktemp /tmp/pre_perm_XXXXXX.mtx) &&
           python3 MtxPerm/pre_permute.py {mtx} $temp_mtx
           --perm perms/random1D/$mtx_name.perm --perm-type SYMMETRIC &&
-          ./MtxPerm/SPARSEBASE/build/degree_perm $temp_mtx $perm_path;
+          python3 MtxPerm/RANDOM/GB_degree_permutation.py $temp_mtx $perm_path;
           rm -f $temp_mtx
 
       - tag: "SB_gray_RANDOM"
@@ -77,7 +77,7 @@ jobs:
           temp_mtx=$(mktemp /tmp/pre_perm_XXXXXX.mtx) &&
           python3 MtxPerm/pre_permute.py {mtx} $temp_mtx
           --perm perms/random1D/$mtx_name.perm --perm-type SYMMETRIC &&
-          ./MtxPerm/SPARSEBASE/build/rcm_perm $temp_mtx $perm_path;
+          python3 MtxPerm/RCM/rcm_perm.py $temp_mtx $perm_path;
           rm -f $temp_mtx
 
       - tag: "SB_metis_RANDOM"

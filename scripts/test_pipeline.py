@@ -77,8 +77,28 @@ module load GCC/13.3.0
 
 DTC_PREPROCESS = f"source {PROJECT_ROOT}/operators/dtc_preprocess.sh"
 FLASH_PREPROCESS = f"source {PROJECT_ROOT}/operators/flashsparse_preprocess.sh"
-GROOT_PREPROCESS = f"source {PROJECT_ROOT}/MtxPerm/GROOT/groot_preprocess.sh"
-TCA_PREPROCESS = f"source {PROJECT_ROOT}/MtxPerm/DTC-LSH/tca_preprocess.sh"
+CONDA_INIT = """\
+if [ -f /usr/lib/python3.9/site-packages/conda/shell/etc/profile.d/conda.sh ]; then
+    source /usr/lib/python3.9/site-packages/conda/shell/etc/profile.d/conda.sh
+elif [ -f "$HOME/miniconda3/etc/profile.d/conda.sh" ]; then
+    source "$HOME/miniconda3/etc/profile.d/conda.sh"
+elif [ -f "$HOME/anaconda3/etc/profile.d/conda.sh" ]; then
+    source "$HOME/anaconda3/etc/profile.d/conda.sh"
+elif [ -n "$CONDA_EXE" ]; then
+    source "$(dirname "$(dirname "$CONDA_EXE")")/etc/profile.d/conda.sh"
+else
+    echo "ERROR: conda.sh not found" >&2; exit 1
+fi"""
+
+GROOT_PREPROCESS = f"""\
+{CONDA_INIT}
+conda activate GROOT"""
+
+TCA_PREPROCESS = f"""\
+{CONDA_INIT}
+conda activate DTC-LSH
+module load CUDA/
+module load GCC/13.3.0"""
 
 
 def kernel_preprocess(kernel: str) -> str:
@@ -423,7 +443,7 @@ def run_pipeline(mtx_path: Path, check_only: bool) -> None:
         log = jobs_dir / f"perm_{algo}.log"
         write_job_script(script, perm_preprocess(algo),
                          perm_command(algo, str(mtx_abs), str(perm_out)))
-        jid = submit_job(script, log, gpu=False)
+        jid = submit_job(script, log, gpu=(algo == "TCA_reorder"))
         key = f"perm_{algo}"
         job_ids[key] = jid
         phase1_ids.append(jid)
