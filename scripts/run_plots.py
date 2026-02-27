@@ -231,6 +231,10 @@ def parse_cli() -> argparse.Namespace:
     parser.add_argument("--all", action="store_true", help="Run everything")
     parser.add_argument("--random", action="store_true",
         help="Use random-pipeline data (forwarded as --random to all scripts)")
+    parser.add_argument("--row", action="store_true",
+        help="Use ROW perm_type pipeline (forwarded as --row to all scripts)")
+    parser.add_argument("--symmetric", action="store_true",
+        help="Use SYMMETRIC perm_type pipeline (default, forwarded as --symmetric)")
 
     # Pass-through args (everything after --)
     parser.add_argument("extra", nargs=argparse.REMAINDER,
@@ -246,9 +250,13 @@ def main() -> None:
     if extra and extra[0] == "--":
         extra = extra[1:]
 
-    # Forward --random to all underlying scripts
+    # Forward --random and --row/--symmetric to all underlying scripts
     if args.random:
         extra = ["--random"] + extra
+    if args.row:
+        extra = ["--row"] + extra
+    elif args.symmetric:
+        extra = ["--symmetric"] + extra
 
     non_interactive = args.all or args.plots is not None or args.corr is not None or args.spy
 

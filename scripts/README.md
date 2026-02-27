@@ -28,15 +28,17 @@ Generates correlation and performance plots from parsed results.
 
 **Usage:**
 ```bash
-python scripts/plot.py [--one-per-family] [--n-cols N] [--kernel KERNEL]
+python scripts/plot.py [--one-per-family] [--row] [--random] [--n-cols N] [--kernel KERNEL]
 ```
 
 **Arguments:**
 - `--one-per-family`: Select one representative matrix per SuiteSparse family
+- `--row` / `--symmetric` (default): Select ROW or SYMMETRIC perm_type pipeline
+- `--random`: Use random-pipeline data
 - `--n-cols`: Filter by dense matrix width (32, 256, 1024)
 - `--kernel`: Filter by specific kernel name
 
-**Outputs to:** `plots/n_cols_{N}/{kernel}/`
+**Outputs to:** `plots/` (default), `plots_row/` (with `--row`), `plots_random/` (with `--random`), `plots_random_row/` (with `--random --row`)
 
 Break-even analysis plots (minimum SpMM operations for reordering to pay for itself) are generated per kernel under `plots/n_cols_{N}/{kernel}/breakeven/`. Cases where reordering is harmful are shown as × markers at a cap line.
 
@@ -75,9 +77,10 @@ SbatchMan/experiments/*/jobs/*/output.txt
     results/*.csv
             │
             ▼
-       plot.py
+       plot.py (--symmetric default, --row for ROW pipeline)
             │
             ├──> plots/n_cols_{N}/{kernel}/breakeven/   (break-even boxplots)
             ├──> plots/n_cols_{N}/{kernel}/speedup/      (speedup boxplots)
-            └──> plots/reorder_analysis/                 (structural analysis)
+            ├──> plots/reorder_analysis/                 (structural analysis)
+            └──> (or plots_row/, plots_random/, plots_random_row/)
 ```

@@ -13,7 +13,7 @@ import seaborn as sns
 import matplotlib as mpl
 mpl.use('Agg')
 import matplotlib.pyplot as plt
-from matplotlib.ticker import LogLocator, NullFormatter, NullLocator
+from matplotlib.ticker import LogLocator, NullFormatter, NullLocator, FuncFormatter
 from pathlib import Path
 from scipy import stats
 import re
@@ -75,16 +75,30 @@ def set_professional_style():
 
 
 
-def format_log_axes(ax, which='both'):
+def _log_scalar_formatter(x, pos):
+    """Format log-scale tick values as explicit numbers (0.1, 1, 10) instead of
+    powers of 10."""
+    if x == 0:
+        return '0'
+    # Show clean integers or decimals — avoid trailing zeros
+    if x >= 1 and x == int(x):
+        return f'{int(x)}'
+    return f'{x:g}'
+
+
+def format_log_axes(ax, which='both', dense=True):
     """Format log-scale axes with proper ticks and log-paper grid background.
 
-    Adds major ticks at powers of 10, minor ticks at intermediate values
-    (2, 3, …, 9 within each decade), and subtle minor gridlines to give the
-    characteristic 'log-paper' look.
+    Adds major ticks, minor ticks at intermediate values, and subtle minor
+    gridlines to give the characteristic 'log-paper' look.  Tick labels use
+    explicit numbers (0.1, 1, 10) instead of powers-of-10 notation.
 
     Args:
         ax: Matplotlib Axes object.
         which: ``'x'``, ``'y'``, or ``'both'`` — which axes to format.
+        dense: If True (default), label at 1, 2, 3, 5 per decade.
+               If False, label only at powers of 10 (less crowded for small
+               subplots).
     """
     targets = []
     if which in ('x', 'both') and ax.get_xscale() == 'log':
@@ -92,17 +106,24 @@ def format_log_axes(ax, which='both'):
     if which in ('y', 'both') and ax.get_yscale() == 'log':
         targets.append(ax.yaxis)
 
+    scalar_fmt = FuncFormatter(_log_scalar_formatter)
+    major_subs = [1.0, 2.0, 3.0, 5.0] if dense else [1.0]
+
     for axis in targets:
-        # Major ticks: powers of 10 AND intermediate values (1, 2, 3, 5)
-        axis.set_major_locator(LogLocator(base=10, subs=[1.0, 2.0, 3.0, 5.0], numticks=30))
+        axis.set_major_locator(LogLocator(base=10, subs=major_subs, numticks=30))
+        axis.set_major_formatter(scalar_fmt)
         # Minor ticks: all other values within each decade
         axis.set_minor_locator(
             LogLocator(base=10, subs=np.arange(1, 10), numticks=100))
         axis.set_minor_formatter(NullFormatter())
 
+    # Ensure minor ticks are visible as tick marks
+    ax.tick_params(which='major', length=5, width=0.8)
+    ax.tick_params(which='minor', length=3, width=0.5)
+
     # Grid: prominent major lines, subtle minor lines ("log paper")
-    ax.grid(True, which='major', alpha=0.5, linewidth=0.8)
-    ax.grid(True, which='minor', alpha=0.15, linewidth=0.3)
+    ax.grid(True, which='major', alpha=0.4, linewidth=0.7)
+    ax.grid(True, which='minor', alpha=0.08, linewidth=0.25)
 
 
 def get_display_name(col):
@@ -653,32 +674,73 @@ def apply_filters(df, df_analysis, matrices_list_path=None,
 
 
 def _apply_exclude_perms(df, df_analysis, exclude_perms):
-    """Drop rows whose perm matches the exclude_perms specification.
+    """Drop rows whose perm matches the exclude_perms list.
 
-    *exclude_perms* can be:
-      - a flat list  → exclude those perms regardless of perm_type
-      - a dict mapping perm_type → list of perms to exclude
+    *exclude_perms* must be a flat list of perm names to exclude globally.
+    Per-pipeline exclusions are handled by ``split_by_perm_type()``.
     """
-    if isinstance(exclude_perms, list):
-        # Flat list: exclude from all perm_types
+    if not exclude_perms:
+        return df, df_analysis
+    if isinstance(exclude_perms, dict):
+        # Legacy dict format — flatten all values into one set.
+        excluded = set()
+        for v in exclude_perms.values():
+            excluded.update(v)
+    else:
         excluded = set(exclude_perms)
-        n0 = len(df) + len(df_analysis)
-        if not df.empty:
-            df = df[~df['perm'].isin(excluded)]
-        df_analysis = df_analysis[~df_analysis['perm'].isin(excluded)]
-        n1 = len(df) + len(df_analysis)
-        print(f"  exclude_perms (all): removed {n0 - n1} rows for {excluded}")
-    elif isinstance(exclude_perms, dict):
-        for perm_type, perms in exclude_perms.items():
-            excluded = set(perms)
-            mask_ops = (df['perm'].isin(excluded) & (df['perm_type'] == perm_type)) if not df.empty else pd.Series(dtype=bool)
-            mask_ana = df_analysis['perm'].isin(excluded) & (df_analysis['perm_type'] == perm_type)
-            n_removed = mask_ops.sum() + mask_ana.sum()
-            if not df.empty:
-                df = df[~mask_ops]
-            df_analysis = df_analysis[~mask_ana]
-            print(f"  exclude_perms ({perm_type}): removed {n_removed} rows for {excluded}")
+    n0 = len(df) + len(df_analysis)
+    if not df.empty:
+        df = df[~df['perm'].isin(excluded)]
+    df_analysis = df_analysis[~df_analysis['perm'].isin(excluded)]
+    n1 = len(df) + len(df_analysis)
+    print(f"  exclude_perms: removed {n0 - n1} rows for {excluded}")
     return df, df_analysis
+
+
+def split_by_perm_type(df, df_analysis, perm_type, pipeline_cfg=None):
+    """Filter to a single perm_type, duplicating Original rows.
+
+    Original rows (perm='None') are copied and labelled with the chosen
+    *perm_type* so that downstream code works on a homogeneous DataFrame
+    with zero perm_type branching.
+
+    Pipeline-specific exclusions (from the ``pipelines`` section of the
+    filter config) are applied when *pipeline_cfg* is provided.
+
+    Returns:
+        (df_filtered, df_analysis_filtered)
+    """
+    def _filter(frame):
+        if frame.empty:
+            return frame
+        original = frame[frame['perm'] == 'None'].copy()
+        reordered = frame[(frame['perm'] != 'None')
+                          & (frame['perm_type'] == perm_type)]
+        original['perm_type'] = perm_type
+        return pd.concat([original, reordered], ignore_index=True)
+
+    df_out = _filter(df)
+    df_analysis_out = _filter(df_analysis)
+
+    # Apply pipeline-specific exclusions from config
+    if pipeline_cfg:
+        exclude_perms = set(pipeline_cfg.get('exclude_perms', []))
+        if exclude_perms:
+            n0 = len(df_out) + len(df_analysis_out)
+            if not df_out.empty:
+                df_out = df_out[~df_out['perm'].isin(exclude_perms)]
+            df_analysis_out = df_analysis_out[
+                ~df_analysis_out['perm'].isin(exclude_perms)]
+            n1 = len(df_out) + len(df_analysis_out)
+            print(f"  pipeline exclude_perms: removed {n0 - n1} rows "
+                  f"for {exclude_perms}")
+        exclude_kernels = set(pipeline_cfg.get('exclude_kernels', []))
+        if exclude_kernels and not df_out.empty:
+            df_out = df_out[~df_out['kernel_id'].isin(exclude_kernels)]
+
+    print(f"  After split_by_perm_type({perm_type}): "
+          f"{len(df_out)} ops rows, {len(df_analysis_out)} analysis rows")
+    return df_out, df_analysis_out
 
 
 def load_and_filter_data(config_path=None, cli_overrides=None):
@@ -699,7 +761,11 @@ def load_and_filter_data(config_path=None, cli_overrides=None):
         Tuple of (filtered_operations_df, filtered_analysis_df, cfg)
     """
     cfg = load_filter_config(config_path)
-    data_cfg = dict(cfg.get('data', {}))
+    # When --random is requested, swap to the data_random paths.
+    if cli_overrides and cli_overrides.get('random'):
+        data_cfg = dict(cfg.get('data_random', cfg.get('data', {})))
+    else:
+        data_cfg = dict(cfg.get('data', {}))
     filt_cfg = dict(cfg.get('filters', {}))
 
     # Apply CLI overrides --------------------------------------------------
@@ -958,7 +1024,7 @@ def scatter_with_correlation(df, x_col, y_col, output_path,
 
 def boxplot_by_category(df, x_col, y_col, output_path,
                          title=None, order=None,
-                         baseline=None, show_points=True,
+                         baseline=None, show_points=False,
                          clip_percentile=None,
                          log_y=False,
                          ylim=None,
@@ -1611,7 +1677,7 @@ def _correlation_for_scatter(x_vals, y_vals, method=None,
 def scatter_publication(df, x_col, y_col, output_path,
                         hue_col=None, log_x=None, log_y=None,
                         show_correlation=True, label=None,
-                        figsize=(3.5, 3.0)):
+                        ylim=None, figsize=(3.5, 3.0)):
     """Publication-ready scatter plot sized for 6-per-half-page layout.
 
     No title.  Large ticks and axis labels for readability at small print
@@ -1663,16 +1729,24 @@ def scatter_publication(df, x_col, y_col, output_path,
                 ha='right', va='bottom',
                 bbox=dict(boxstyle='round,pad=0.3', fc='wheat', alpha=0.8))
 
+    if ylim is not None:
+        ax.set_ylim(ylim)
+
     _save_figure(output_path)
 
 
 def scatter_presentation(df, x_col, y_col, output_path,
                          log_x=None, log_y=None,
                          show_correlation=True, label=None,
-                         baseline_y=1.0, trend_line=True,
+                         baseline_y=1.0, baseline_x=None, trend_line=True,
+                         ylim=None, xlim=None, quadrant_colors=False,
                          figsize=(7.0, 5.0)):
     """Presentation-ready scatter plot: larger size, clean axes, reference
     line at *baseline_y*, and an optional robust trend line.
+
+    When *quadrant_colors* is True and both baselines are set, points are
+    colored by quadrant: dark green (++) when both axes > baseline,
+    dark red (--) when both < baseline, gray otherwise.
     """
     plot_df = df.dropna(subset=[x_col, y_col])
     if len(plot_df) < 2:
@@ -1686,9 +1760,20 @@ def scatter_presentation(df, x_col, y_col, output_path,
 
     fig, ax = plt.subplots(figsize=figsize)
 
-    ax.scatter(plot_df[x_col], plot_df[y_col],
-               alpha=0.55, s=28, color=PALETTE[0],
-               edgecolor='white', linewidth=0.4, zorder=3)
+    if quadrant_colors and baseline_x is not None and baseline_y is not None:
+        xv = plot_df[x_col].values
+        yv = plot_df[y_col].values
+        colors = np.where(
+            (xv >= baseline_x) & (yv >= baseline_y), '#006400',   # dark green (++)
+            np.where(
+                (xv < baseline_x) & (yv < baseline_y), '#8B0000',  # dark red (--)
+                '#999999'))                                         # gray (mixed)
+        ax.scatter(xv, yv, alpha=0.55, s=28, c=colors,
+                   edgecolor='white', linewidth=0.4, zorder=3)
+    else:
+        ax.scatter(plot_df[x_col], plot_df[y_col],
+                   alpha=0.55, s=28, color=PALETTE[0],
+                   edgecolor='white', linewidth=0.4, zorder=3)
 
     # Scales (set before drawing lines so axis limits are established)
     if log_x:
@@ -1696,10 +1781,13 @@ def scatter_presentation(df, x_col, y_col, output_path,
     if log_y:
         ax.set_yscale('log')
 
-    # Reference line
+    # Reference lines
     if baseline_y is not None:
         ax.axhline(baseline_y, color='#CC0000', linestyle='--',
-                   linewidth=1.0, alpha=0.6, zorder=2, label=f'Speedup = {baseline_y}')
+                   linewidth=1.0, alpha=0.6, zorder=2)
+    if baseline_x is not None:
+        ax.axvline(baseline_x, color='#CC0000', linestyle='--',
+                   linewidth=1.0, alpha=0.6, zorder=2)
 
     # Trend line (fitted in data space; clipped to data range)
     if trend_line and len(plot_df) >= 5:
@@ -1732,11 +1820,13 @@ def scatter_presentation(df, x_col, y_col, output_path,
     ax.set_xlabel(get_display_name(x_col), fontsize=16)
     ax.set_ylabel(get_display_name(y_col), fontsize=16)
     ax.tick_params(axis='both', labelsize=13, which='major')
-    ax.tick_params(axis='both', which='minor', length=3, width=0.5)
-    ax.grid(True, which='major', alpha=0.25, linewidth=0.6)
-    ax.grid(False, which='minor')
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
+
+    if log_x or log_y:
+        format_log_axes(ax)
+    else:
+        ax.grid(True, which='major', alpha=0.25, linewidth=0.6)
 
     if show_correlation:
         method = get_correlation_method()
@@ -1752,6 +1842,11 @@ def scatter_presentation(df, x_col, y_col, output_path,
                 ha='right', va='bottom', fontstyle='italic',
                 bbox=dict(boxstyle='round,pad=0.3', fc='white', alpha=0.85))
 
+    if ylim is not None:
+        ax.set_ylim(ylim)
+    if xlim is not None:
+        ax.set_xlim(xlim)
+
     fig.tight_layout()
     fig.savefig(output_path, dpi=200, bbox_inches='tight', pad_inches=0.1)
     plt.close(fig)
@@ -1761,12 +1856,18 @@ def scatter_presentation(df, x_col, y_col, output_path,
 def grouped_scatter_publication(df, x_col, y_col, group_col, group_order,
                                 output_path, group_labels=None,
                                 hue_col=None, log_x=None, log_y=None,
-                                show_correlation=True,
+                                show_correlation=True, ylim=None, xlim=None,
+                                baseline_x=None, baseline_y=None,
+                                quadrant_colors=False,
                                 figsize=(7.0, 4.5)):
     """2x3 grouped scatter with shared axes.  One subplot per group.
 
     Designed for 6 kernels on half a page: y-labels only on the left
     column, x-labels only on the bottom row.
+
+    When *quadrant_colors* is True and both baselines are set, points are
+    colored by quadrant: dark green (++) when both axes > baseline,
+    dark red (--) when both < baseline, gray otherwise.
     """
     plot_df = df.dropna(subset=[x_col, y_col])
     if len(plot_df) < 2:
@@ -1796,7 +1897,17 @@ def grouped_scatter_publication(df, x_col, y_col, group_col, group_order,
             ax.text(0.5, 0.5, 'No data', transform=ax.transAxes,
                     ha='center', fontsize=8)
         else:
-            if hue_col and hue_col in df_g.columns:
+            if quadrant_colors and baseline_x is not None and baseline_y is not None:
+                xv = df_g[x_col].values
+                yv = df_g[y_col].values
+                colors = np.where(
+                    (xv >= baseline_x) & (yv >= baseline_y), '#006400',
+                    np.where(
+                        (xv < baseline_x) & (yv < baseline_y), '#8B0000',
+                        '#999999'))
+                ax.scatter(xv, yv, alpha=0.7, s=10, c=colors,
+                           edgecolor='none', zorder=3)
+            elif hue_col and hue_col in df_g.columns:
                 pal = get_strategy_palette() if hue_col == 'strategy' else "Set2"
                 sns.scatterplot(data=df_g, x=x_col, y=y_col, hue=hue_col,
                                 alpha=0.7, ax=ax, palette=pal, s=10,
@@ -1820,6 +1931,14 @@ def grouped_scatter_publication(df, x_col, y_col, group_col, group_order,
         if log_y:
             ax.set_yscale('log')
 
+        # Reference lines
+        if baseline_y is not None:
+            ax.axhline(baseline_y, color='#CC0000', linestyle='--',
+                       linewidth=0.8, alpha=0.6, zorder=2)
+        if baseline_x is not None:
+            ax.axvline(baseline_x, color='#CC0000', linestyle='--',
+                       linewidth=0.8, alpha=0.6, zorder=2)
+
         # Group label (kernel name)
         ax.text(0.97, 0.03, group_labels.get(group, group),
                 transform=ax.transAxes, fontsize=8, ha='right', va='bottom',
@@ -1838,7 +1957,10 @@ def grouped_scatter_publication(df, x_col, y_col, group_col, group_order,
         ax.tick_params(axis='both', labelsize=8)
 
         if log_x or log_y:
-            format_log_axes(ax)
+            if log_x:
+                format_log_axes(ax, which='x', dense=False)
+            if log_y:
+                format_log_axes(ax, which='y', dense=True)
         else:
             ax.grid(True, alpha=0.3)
 
@@ -1846,6 +1968,14 @@ def grouped_scatter_publication(df, x_col, y_col, group_col, group_order,
     for idx in range(n_groups, nrows * ncols):
         r, c = divmod(idx, ncols)
         axes[r][c].set_visible(False)
+
+    for row in axes:
+        for ax in row:
+            if ax.get_visible():
+                if ylim is not None:
+                    ax.set_ylim(ylim)
+                if xlim is not None:
+                    ax.set_xlim(xlim)
 
     fig.tight_layout()
     fig.savefig(output_path, dpi=300, bbox_inches='tight', pad_inches=0.05)

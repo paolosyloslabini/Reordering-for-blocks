@@ -786,20 +786,13 @@ def generate_improvement_tables(df_analysis, output_dir, metrics=None):
     n_matrices = df_analysis[df_analysis['perm'] == 'None']['matrix'].nunique()
     imp_cols = [f'{m}_imp' for m in used_metrics]
 
-    # Per perm_type tables + combined ("both")
-    table_specs = [(pt, imp_df[imp_df['perm_type'] == pt])
-                   for pt in sorted(imp_df['perm_type'].unique())]
-    table_specs.append(('both', imp_df))
-
-    for tag, df_subset in table_specs:
-        ptype_label = f"{tag} permutation" if tag != 'both' else "all permutation types"
-        caption = (f"Median structural improvement ratio per reordering algorithm "
-                   f"({ptype_label}, {n_matrices} matrices). "
-                   f"Values $>1$ indicate improvement over the original ordering.")
-        _write_improvement_table(
-            df_subset, imp_cols, used_metrics, ordered_perms,
-            caption=caption, label=f"tab:improvement_{tag.lower()}",
-            out_path=output_dir / f"improvement_{tag.lower()}.tex")
+    caption = (f"Median structural improvement ratio per reordering algorithm "
+               f"({n_matrices} matrices). "
+               f"Values $>1$ indicate improvement over the original ordering.")
+    _write_improvement_table(
+        imp_df, imp_cols, used_metrics, ordered_perms,
+        caption=caption, label="tab:improvement",
+        out_path=output_dir / "improvement.tex")
 
 
 # =============================================================================
@@ -813,7 +806,16 @@ def parse_args():
     # Random pipeline shortcut
     parser.add_argument(
         "--random", action="store_true",
-        help="Use random-pipeline data (filter_config_random.yaml, output to plots_random)"
+        help="Use random-pipeline data (data_random paths from filter_config.yaml)"
+    )
+    # Perm-type pipeline selection
+    parser.add_argument(
+        "--row", action="store_true",
+        help="Use ROW perm_type pipeline (output to plots_row/ or plots_random_row/)"
+    )
+    parser.add_argument(
+        "--symmetric", action="store_true",
+        help="Use SYMMETRIC perm_type pipeline (default)"
     )
     parser.add_argument(
         "--output", default=None,
@@ -881,14 +883,15 @@ def main():
 
     args = parse_args()
 
+    # Resolve perm_type pipeline
+    perm_type_filter = 'ROW' if args.row else 'SYMMETRIC'
+    pipeline_key = ('random_' if args.random else '') + perm_type_filter.lower()
+
     # Apply --random defaults
-    if args.random:
-        if args.filter_config is None:
-            args.filter_config = str(Path(__file__).resolve().parent / 'filter_config_random.yaml')
-        if args.output is None:
-            args.output = 'plots_random/correlation_tables'
     if args.output is None:
-        args.output = 'plots/correlation_tables'
+        data_label = 'random' if args.random else 'original'
+        perm_label = 'row' if args.row else 'symmetric'
+        args.output = f"plots/{data_label}_{perm_label}/correlation_tables"
 
     out_dir = Path(args.output)
 
@@ -907,12 +910,18 @@ def main():
         'analysis_csv': args.analysis,
         'matrices_list': args.matrices_list,
         'one_per_family': args.one_per_family,
+        'random': args.random,
     }
 
     df, df_analysis, _cfg = pu.load_and_filter_data(
         config_path=args.filter_config,
         cli_overrides=cli_overrides,
     )
+
+    # Split by perm_type — downstream code works on a single homogeneous DF
+    pipeline_cfg = _cfg.get('pipelines', {}).get(pipeline_key, {})
+    df, df_analysis = pu.split_by_perm_type(
+        df, df_analysis, perm_type_filter, pipeline_cfg)
 
     # Add gflops, kernel_id, and relative metrics for correlation tables
     df = pu.add_base_metrics(df)
