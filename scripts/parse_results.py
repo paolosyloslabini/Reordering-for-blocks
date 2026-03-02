@@ -44,7 +44,7 @@ PERM_TAGS = {
 RANDOM_PERM_TAGS = {f'{t}_RANDOM' for t in PERM_TAGS if t not in ('random1D', 'random2D')}
 
 # Cache format version — bump when parsed row schema changes
-CACHE_VERSION = 2
+CACHE_VERSION = 3
 
 
 def dedup_latest(df, key_cols):
@@ -175,6 +175,10 @@ def parse_one_analysis_job(job):
         # Flatten Locality
         for k, v in data.get('locality', {}).items():
             row[f"locality_{k}"] = v
+
+        # Flatten Access Distances
+        for k, v in data.get('access_distances', {}).items():
+            row[f"access_dist_{k}"] = v
 
         # Flatten Block Analysis
         for b in data.get('block_analysis', []):
