@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """
 Isolated pipeline tester — run the full reordering + SpMM pipeline on a single matrix.
 
@@ -44,9 +45,11 @@ KERNELS = {
     "DTC":           "python3 operators/dtc_spmm.py",
     "FlashSparse":   "python3 operators/flashsparse_spmm.py",
     "AccSpMM":       "python3 operators/accspmm_spmm.py",
+    "BLEST_BFS":     "python3 operators/blest_bfs.py",
 }
 
 BLOCK_SIZE_KERNELS = {"CUSPARSE_BSR", "SMAT"}  # kernels needing --blocksize 32
+BFS_KERNELS = {"BLEST_BFS"}  # kernels that use --n-sources instead of --n-cols
 
 SLURM_COMMON = (
     "--partition=short --time=00:02:00 --cpus-per-task=1 "
@@ -55,6 +58,7 @@ SLURM_COMMON = (
 
 N_COLS = 32
 BLOCK_SIZE = 32
+N_SOURCES = 64
 POLL_INTERVAL = 10  # seconds
 
 # ── Timing regex patterns (same as parse_results.py) ─────────────────────────
@@ -101,11 +105,19 @@ module load CUDA/
 module load GCC/13.3.0"""
 
 
+BLEST_PREPROCESS = f"""\
+source ~/.venv/bin/activate
+module load CUDA/
+module load GCC/13.3.0"""
+
+
 def kernel_preprocess(kernel: str) -> str:
     if kernel == "DTC":
         return DTC_PREPROCESS
     if kernel == "FlashSparse":
         return FLASH_PREPROCESS
+    if kernel == "BLEST_BFS":
+        return BLEST_PREPROCESS
     return DEFAULT_PREPROCESS
 
 
@@ -195,9 +207,12 @@ def spmm_command(kernel: str, mtx: str, perm_path: str | None = None,
                  perm_type: str | None = None) -> str:
     base = KERNELS[kernel]
     parts = [base, mtx]
-    if kernel in BLOCK_SIZE_KERNELS:
-        parts.append(f"--blocksize {BLOCK_SIZE}")
-    parts.append(f"--n-cols {N_COLS}")
+    if kernel in BFS_KERNELS:
+        parts.append(f"--n-sources {N_SOURCES}")
+    else:
+        if kernel in BLOCK_SIZE_KERNELS:
+            parts.append(f"--blocksize {BLOCK_SIZE}")
+        parts.append(f"--n-cols {N_COLS}")
     if perm_path and perm_type:
         parts.append(f"--perm {perm_path} --perm-type {perm_type}")
     return " ".join(parts)
@@ -523,7 +538,7 @@ def print_summary(run_dir: Path, mtx_name: str, job_ids: dict[str, str],
     short_names = {
         "ASPT": "ASPT", "CUSPARSE_CSR": "CSR", "CUSPARSE_BSR": "BSR",
         "SMAT": "SMAT", "DTC": "DTC", "FlashSparse": "FLASH",
-        "AccSpMM": "ACCSPMM",
+        "AccSpMM": "ACCSPMM", "BLEST_BFS": "BLEST",
     }
     COL_W = 10  # column width for grid tables
 
