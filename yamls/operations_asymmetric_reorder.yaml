@@ -29,7 +29,7 @@ jobs:
           module load GCC/13.3.0
           source ~/.conda/envs/DTCSpMM/bin/activate
           mtx_name=$(basename {mtx} .mtx)
-        command: "python3 operators/dtc_spmm.py {mtx} --perm perms/{perm}/$mtx_name.perm --perm-type ASYMMETRIC --n-cols {n_cols}"
+        command: "python3 operators/dtc_spmm.py {mtx} --perm perms/{perm}/$mtx_name.perm --perm-type ASYMMETRIC --n-cols {n_cols} --n-iterations 1"
 
 #      - tag: "CUSPARSE_SPMV_BSR_ASYMMETRIC"
 #        command: "python3 operators/cusparse_bsr_spmv.py {mtx} --perm perms/{perm}/$mtx_name.perm --blocksize {block_size} --perm-type ASYMMETRIC"
