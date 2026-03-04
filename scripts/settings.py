@@ -232,6 +232,7 @@ def get_perm_color(perm: str) -> str:
 KERNEL_NAMES = {
     'ACCSPMM_SPMM': 'AccSpMM',
     'ASPT_SPMM': 'ASPT',
+    'BLEST_BFS': 'BLEST-BFS',
     'CUSPARSE_SPMM_BSR_bs32': 'cuSparse BSR',
     'CUSPARSE_SPMM_CSR': 'cuSparse CSR',
     'DTC_SPMM': 'DTC-Spmm',

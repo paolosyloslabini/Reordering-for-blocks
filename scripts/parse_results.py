@@ -44,7 +44,7 @@ PERM_TAGS = {
 RANDOM_PERM_TAGS = {f'{t}_RANDOM' for t in PERM_TAGS if t not in ('random1D', 'random2D')}
 
 # Cache format version — bump when parsed row schema changes
-CACHE_VERSION = 3
+CACHE_VERSION = 4
 
 
 def dedup_latest(df, key_cols):
@@ -123,9 +123,9 @@ def _categorize_tag(tag):
         return 'random_analysis'
     elif tag.startswith("ANALYSIS_"):
         return 'analysis'
-    elif "SPMM" in tag and "RANDOM" in tag:
+    elif ("SPMM" in tag or "BLEST_BFS" in tag) and "RANDOM" in tag:
         return 'random_ops'
-    elif "SPMM" in tag:
+    elif "SPMM" in tag or "BLEST_BFS" in tag:
         return 'ops'
     elif tag in RANDOM_PERM_TAGS:
         return 'random_perms'
@@ -707,7 +707,10 @@ def main():
         new_cache = {'version': CACHE_VERSION, 'known_dirs': all_dirs}
         for cat in CATEGORIES:
             new_cache[cat] = rows[cat]
-        _save_cache(cache_path, new_cache)
+        try:
+            _save_cache(cache_path, new_cache)
+        except OSError as e:
+            print(f"WARNING: failed to save cache: {e}", file=sys.stderr)
 
         # Add random baselines (export-only, not cached)
         _add_random_baselines(rows)
@@ -732,8 +735,11 @@ def main():
         new_cache = {'version': CACHE_VERSION, 'known_dirs': all_dirs}
         for cat in CATEGORIES:
             new_cache[cat] = rows[cat]
-        _save_cache(cache_path, new_cache)
-        print(f"Cache saved ({time.perf_counter() - t0:.1f}s)", file=sys.stderr)
+        try:
+            _save_cache(cache_path, new_cache)
+            print(f"Cache saved ({time.perf_counter() - t0:.1f}s)", file=sys.stderr)
+        except OSError as e:
+            print(f"WARNING: failed to save cache: {e}", file=sys.stderr)
 
         # Add random baselines (export-only, not cached)
         _add_random_baselines(rows)
