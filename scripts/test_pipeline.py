@@ -429,7 +429,8 @@ def save_job_ids(run_dir: Path, job_ids: dict[str, str]) -> None:
             f.write(f"{k}={v}\n")
 
 
-def run_pipeline(mtx_path: Path, check_only: bool) -> None:
+def run_pipeline(mtx_path: Path, check_only: bool,
+                 only_perms: list[str] | None = None) -> None:
     mtx_abs = mtx_path.resolve()
     mtx_name = mtx_abs.stem
 
@@ -455,10 +456,12 @@ def run_pipeline(mtx_path: Path, check_only: bool) -> None:
 
     job_ids: dict[str, str] = {}  # key -> slurm job id
 
+    algos_to_run = only_perms if only_perms else PERM_ALGORITHMS
+
     # ── Phase 1: Permutations ─────────────────────────────────────────────
-    print(f"=== Phase 1: Permutation Generation ({len(PERM_ALGORITHMS)} CPU jobs) ===")
+    print(f"=== Phase 1: Permutation Generation ({len(algos_to_run)} CPU jobs) ===")
     phase1_ids = []
-    for algo in PERM_ALGORITHMS:
+    for algo in algos_to_run:
         perm_out = perms_dir / algo / f"{mtx_name}.perm"
         perm_out.parent.mkdir(parents=True, exist_ok=True)
         script = jobs_dir / f"perm_{algo}.sh"
@@ -473,6 +476,22 @@ def run_pipeline(mtx_path: Path, check_only: bool) -> None:
 
     wait_for_jobs(phase1_ids, "permutation")
     print()
+
+    if only_perms:
+        # Print perm-only summary and exit early
+        save_job_ids(run_dir, job_ids)
+        print(f"=== PERMUTATION RESULTS (--only-perms) ===")
+        print(f"  {'Algorithm':<20s} {'Status':<10s} {'Reorder (ms)':>14s} {'Load (ms)':>12s}")
+        print(f"  {'-'*20} {'-'*10} {'-'*14} {'-'*12}")
+        for algo in algos_to_run:
+            status = check_perm_result(algo, run_dir, mtx_name, job_ids, mtx_dim)
+            log = jobs_dir / f"perm_{algo}.log"
+            timers = parse_perm_timers(algo, log)
+            t_reorder = _fmt_ms(timers.get("reordering"))
+            t_load = _fmt_ms(timers.get("loading"))
+            print(f"  {algo:<20s} {status:<10s} {t_reorder:>14s} {t_load:>12s}")
+        print()
+        return
 
     # ── Phase 2: SpMM no reorder ──────────────────────────────────────────
     print("=== Phase 2: SpMM NO_REORDER (6 GPU jobs) ===")
@@ -670,9 +689,17 @@ def main():
     parser.add_argument("matrix", type=Path, help="Path to .mtx matrix file")
     parser.add_argument("--check-only", action="store_true",
                         help="Re-read logs from the most recent run, don't launch jobs")
+    parser.add_argument("--only-perms", nargs="+", metavar="ALGO",
+                        help="Only run these perm algorithms (skip SpMM phases)")
     args = parser.parse_args()
 
-    run_pipeline(args.matrix, args.check_only)
+    if args.only_perms:
+        # Validate algorithm names
+        for a in args.only_perms:
+            if a not in PERM_ALGORITHMS:
+                parser.error(f"Unknown algorithm '{a}'. Choose from: {', '.join(PERM_ALGORITHMS)}")
+
+    run_pipeline(args.matrix, args.check_only, only_perms=args.only_perms)
 
 
 if __name__ == "__main__":
