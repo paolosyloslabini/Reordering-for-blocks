@@ -34,6 +34,7 @@ PERM_ALGORITHMS = [
     "SB_patoh",
     "SB_slashburn",
     "SPARTA_reorder",
+    "ACCORDER_reorder",
     "TCA_reorder",
 ]
 
@@ -110,6 +111,9 @@ source ~/.venv/bin/activate
 module load CUDA/
 module load GCC/13.3.0"""
 
+ACCORDER_PREPROCESS = f"""\
+source {PROJECT_ROOT}/MtxPerm/ACCORDER/accorder_preprocess.sh"""
+
 
 def kernel_preprocess(kernel: str) -> str:
     if kernel == "DTC":
@@ -137,6 +141,7 @@ def perm_command(algo: str, mtx: str, perm_path: str) -> str:
         "SB_patoh":        f"./MtxPerm/SPARSEBASE/build/patoh_perm {mtx} {perm_path} --nparts 128",
         "SB_slashburn":    f"./MtxPerm/SPARSEBASE/build/slashburn_perm {mtx} {perm_path}",
         "SPARTA_reorder":  f"python3 MtxPerm/SPARTA/reorder.py {mtx} {perm_path} --block-size 32 --tau 0.5",
+        "ACCORDER_reorder": f"./MtxPerm/ACCORDER/build/accorder_perm {mtx} {perm_path}",
         "TCA_reorder":     f"python3 MtxPerm/DTC-LSH/reorder.py {mtx} {perm_path}",
     }
     return cmds[algo]
@@ -147,6 +152,8 @@ def perm_preprocess(algo: str) -> str:
         return GROOT_PREPROCESS
     if algo == "TCA_reorder":
         return TCA_PREPROCESS
+    if algo == "ACCORDER_reorder":
+        return ACCORDER_PREPROCESS
     return "source ~/.venv/bin/activate"
 
 

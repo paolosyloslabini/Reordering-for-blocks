@@ -92,6 +92,14 @@ jobs:
           perm_path=perms/SB_slashburn/$mtx_name.perm
         command: "./MtxPerm/SPARSEBASE/build/slashburn_perm {mtx} $perm_path"
 
+      - tag: "ACCORDER_reorder"
+        preprocess: |
+          source MtxPerm/ACCORDER/accorder_preprocess.sh
+          mtx_name=$(basename {mtx} .mtx)
+          mkdir -p perms/ACCORDER_reorder
+          perm_path=perms/ACCORDER_reorder/$mtx_name.perm
+        command: "./MtxPerm/ACCORDER/build/accorder_perm {mtx} $perm_path"
+
   - config: "gpu"
     config_jobs:
       - tag: "TCA_reorder"
