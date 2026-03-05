@@ -11,6 +11,7 @@ variables:
     - SB_patoh
     - SB_slashburn
     - TCA_reorder
+    - ACCORDER_reorder
 
 preprocess: |
   source ~/.venv/bin/activate

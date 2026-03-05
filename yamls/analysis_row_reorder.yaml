@@ -12,6 +12,7 @@ variables:
     - SB_slashburn
     - GROOT_reorder
     - TCA_reorder
+    - ACCORDER_reorder
 
 preprocess: |
   source ~/.venv/bin/activate
