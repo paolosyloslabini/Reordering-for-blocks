@@ -32,17 +32,17 @@ jobs:
           python3 MtxPerm/GROOT/reorder.py $temp_mtx $perm_path;
           rm -f $temp_mtx
 
-      - tag: "SPARTA_reorder_RANDOM"
-        preprocess: |
-          mtx_name=$(basename {mtx} .mtx)
-          mkdir -p perms_random/SPARTA_reorder
-          perm_path=perms_random/SPARTA_reorder/$mtx_name.perm
-        command: >
-          temp_mtx=$(mktemp /tmp/pre_perm_XXXXXX.mtx) &&
-          python3 MtxPerm/pre_permute.py {mtx} $temp_mtx
-          --perm perms/random1D/$mtx_name.perm --perm-type SYMMETRIC &&
-          python3 MtxPerm/SPARTA/reorder.py $temp_mtx $perm_path --block-size 32 --tau 0.5;
-          rm -f $temp_mtx
+      # - tag: "SPARTA_reorder_RANDOM"  # disabled
+      #   preprocess: |
+      #     mtx_name=$(basename {mtx} .mtx)
+      #     mkdir -p perms_random/SPARTA_reorder
+      #     perm_path=perms_random/SPARTA_reorder/$mtx_name.perm
+      #   command: >
+      #     temp_mtx=$(mktemp /tmp/pre_perm_XXXXXX.mtx) &&
+      #     python3 MtxPerm/pre_permute.py {mtx} $temp_mtx
+      #     --perm perms/random1D/$mtx_name.perm --perm-type SYMMETRIC &&
+      #     python3 MtxPerm/SPARTA/reorder.py $temp_mtx $perm_path --block-size 32 --tau 0.5;
+      #     rm -f $temp_mtx
 
       - tag: "SB_degree_RANDOM"
         preprocess: |
@@ -140,18 +140,18 @@ jobs:
           ./MtxPerm/SPARSEBASE/build/slashburn_perm $temp_mtx $perm_path;
           rm -f $temp_mtx
 
-      - tag: "ACCORDER_reorder_RANDOM"
-        preprocess: |
-          source MtxPerm/ACCORDER/accorder_preprocess.sh
-          mtx_name=$(basename {mtx} .mtx)
-          mkdir -p perms_random/ACCORDER_reorder
-          perm_path=perms_random/ACCORDER_reorder/$mtx_name.perm
-        command: >
-          temp_mtx=$(mktemp /tmp/pre_perm_XXXXXX.mtx) &&
-          python3 MtxPerm/pre_permute.py {mtx} $temp_mtx
-          --perm perms/random1D/$mtx_name.perm --perm-type SYMMETRIC &&
-          ./MtxPerm/ACCORDER/build/accorder_perm $temp_mtx $perm_path;
-          rm -f $temp_mtx
+      # - tag: "ACCORDER_reorder_RANDOM"  # disabled
+      #   preprocess: |
+      #     source MtxPerm/ACCORDER/accorder_preprocess.sh
+      #     mtx_name=$(basename {mtx} .mtx)
+      #     mkdir -p perms_random/ACCORDER_reorder
+      #     perm_path=perms_random/ACCORDER_reorder/$mtx_name.perm
+      #   command: >
+      #     temp_mtx=$(mktemp /tmp/pre_perm_XXXXXX.mtx) &&
+      #     python3 MtxPerm/pre_permute.py {mtx} $temp_mtx
+      #     --perm perms/random1D/$mtx_name.perm --perm-type SYMMETRIC &&
+      #     ./MtxPerm/ACCORDER/build/accorder_perm $temp_mtx $perm_path;
+      #     rm -f $temp_mtx
 
   - config: "gpu"
     config_jobs:

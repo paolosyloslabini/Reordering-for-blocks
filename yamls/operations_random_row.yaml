@@ -11,7 +11,7 @@ variables:
     - SB_slashburn
     - GROOT_reorder
     - TCA_reorder
-    - ACCORDER_reorder
+    # - ACCORDER_reorder  # disabled
   block_size:
     - 32
   n_cols:
@@ -55,5 +55,5 @@ jobs:
       - tag: "ACCSPMM_SPMM_ROW_RANDOM"
         command: "python3 operators/accspmm_spmm.py {mtx} --base-perm perms/random1D/$mtx_name.perm --base-perm-type SYMMETRIC --perm perms_random/{perm}/$mtx_name.perm --perm-type ROW --n-cols {n_cols}"
 
-      - tag: "BLEST_BFS_RANDOM_ROW"
-        command: "python3 operators/blest_bfs.py {mtx} --base-perm perms/random1D/$mtx_name.perm --base-perm-type SYMMETRIC --perm perms_random/{perm}/$mtx_name.perm --perm-type ROW --n-sources 64"
+      # - tag: "BLEST_BFS_RANDOM_ROW"  # disabled
+      #   command: "python3 operators/blest_bfs.py {mtx} --base-perm perms/random1D/$mtx_name.perm --base-perm-type SYMMETRIC --perm perms_random/{perm}/$mtx_name.perm --perm-type ROW --n-sources 64"

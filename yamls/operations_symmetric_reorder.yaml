@@ -12,7 +12,7 @@ variables:
     - SB_slashburn
     - GROOT_reorder
     - TCA_reorder
-    - ACCORDER_reorder
+    # - ACCORDER_reorder  # disabled
   block_size:
     - 32
   n_cols:
@@ -61,5 +61,5 @@ jobs:
           mtx_name=$(basename {mtx} .mtx)
         command: "python3 operators/flashsparse_spmm.py {mtx} --perm perms/{perm}/$mtx_name.perm --perm-type SYMMETRIC --n-cols {n_cols}"
 
-      - tag: "BLEST_BFS_SYMMETRIC"
-        command: "python3 operators/blest_bfs.py {mtx} --perm perms/{perm}/$mtx_name.perm --perm-type SYMMETRIC --n-sources 64"
+      # - tag: "BLEST_BFS_SYMMETRIC"  # disabled
+      #   command: "python3 operators/blest_bfs.py {mtx} --perm perms/{perm}/$mtx_name.perm --perm-type SYMMETRIC --n-sources 64"

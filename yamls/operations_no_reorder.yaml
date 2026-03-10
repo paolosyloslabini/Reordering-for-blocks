@@ -48,5 +48,5 @@ jobs:
           mtx_name=$(basename {mtx} .mtx)
         command: "python3 operators/flashsparse_spmm.py {mtx} --n-cols {n_cols}"
 
-      - tag: "BLEST_BFS_NO_REORDER"
-        command: "python3 operators/blest_bfs.py {mtx} --n-sources 64"
+      # - tag: "BLEST_BFS_NO_REORDER"  # disabled
+      #   command: "python3 operators/blest_bfs.py {mtx} --n-sources 64"

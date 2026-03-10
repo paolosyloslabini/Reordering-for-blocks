@@ -57,12 +57,12 @@ jobs:
           perm_path=perms/SB_metis/$mtx_name.perm
         command: "./MtxPerm/SPARSEBASE/build/metis_part_perm {mtx} $perm_path --nparts 128"
 
-      - tag: "SPARTA_reorder"
-        preprocess: |
-          mtx_name=$(basename {mtx} .mtx)
-          mkdir -p perms/SPARTA_reorder
-          perm_path=perms/SPARTA_reorder/$mtx_name.perm
-        command: "python3 MtxPerm/SPARTA/reorder.py {mtx} $perm_path --block-size 32 --tau 0.5"
+      # - tag: "SPARTA_reorder"  # disabled
+      #   preprocess: |
+      #     mtx_name=$(basename {mtx} .mtx)
+      #     mkdir -p perms/SPARTA_reorder
+      #     perm_path=perms/SPARTA_reorder/$mtx_name.perm
+      #   command: "python3 MtxPerm/SPARTA/reorder.py {mtx} $perm_path --block-size 32 --tau 0.5"
 
       - tag: "SB_amd"
         preprocess: |
@@ -92,13 +92,13 @@ jobs:
           perm_path=perms/SB_slashburn/$mtx_name.perm
         command: "./MtxPerm/SPARSEBASE/build/slashburn_perm {mtx} $perm_path"
 
-      - tag: "ACCORDER_reorder"
-        preprocess: |
-          source MtxPerm/ACCORDER/accorder_preprocess.sh
-          mtx_name=$(basename {mtx} .mtx)
-          mkdir -p perms/ACCORDER_reorder
-          perm_path=perms/ACCORDER_reorder/$mtx_name.perm
-        command: "./MtxPerm/ACCORDER/build/accorder_perm {mtx} $perm_path"
+      # - tag: "ACCORDER_reorder"  # disabled
+      #   preprocess: |
+      #     source MtxPerm/ACCORDER/accorder_preprocess.sh
+      #     mtx_name=$(basename {mtx} .mtx)
+      #     mkdir -p perms/ACCORDER_reorder
+      #     perm_path=perms/ACCORDER_reorder/$mtx_name.perm
+      #   command: "./MtxPerm/ACCORDER/build/accorder_perm {mtx} $perm_path"
 
   - config: "gpu"
     config_jobs:
