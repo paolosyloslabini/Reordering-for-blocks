@@ -44,7 +44,7 @@ PERM_TAGS = {
 RANDOM_PERM_TAGS = {f'{t}_RANDOM' for t in PERM_TAGS if t not in ('random1D', 'random2D')}
 
 # Cache format version — bump when parsed row schema changes
-CACHE_VERSION = 4
+CACHE_VERSION = 5
 
 
 def dedup_latest(df, key_cols):
@@ -134,8 +134,25 @@ def _categorize_tag(tag):
     return None
 
 
+def _make_error(job, category, error_type, error_message=''):
+    """Build an error dict for a failed parse."""
+    job_id = getattr(job, 'id', getattr(job, 'job_id', 'unknown'))
+    mtx_path = safe_get_var(job, 'mtx', '')
+    return {
+        'job_id': job_id,
+        'tag': getattr(job, 'tag', ''),
+        'matrix': get_matrix_name(mtx_path),
+        'perm': safe_get_var(job, 'perm', ''),
+        'perm_type': _get_perm_type(getattr(job, 'tag', '')),
+        'category': category,
+        'error_type': error_type,
+        'error_message': str(error_message),
+    }
+
+
 def parse_one_analysis_job(job):
-    """Parse a single analysis job. Returns a dict row or None."""
+    """Parse a single analysis job. Returns (row, error) — exactly one is non-None."""
+    category = 'analysis'
     try:
         mtx_path = safe_get_var(job, 'mtx', '')
         matrix_name = get_matrix_name(mtx_path)
@@ -144,13 +161,13 @@ def parse_one_analysis_job(job):
 
         stdout = job.get_stdout()
         if stdout is None:
-            return None
+            return None, _make_error(job, category, 'no_stdout')
 
         start = stdout.find('{')
         end = stdout.rfind('}')
 
         if start == -1 or end == -1:
-            return None
+            return None, _make_error(job, category, 'no_json', 'No JSON object found in stdout')
 
         json_str = stdout[start:end+1]
         data = json.loads(json_str)
@@ -190,16 +207,17 @@ def parse_one_analysis_job(job):
                 row[f'max_blocks_per_row_{bs}'] = b.get('max_blocks_per_row')
                 row[f'avg_blocks_per_row_{bs}'] = b.get('avg_blocks_per_row')
 
-        return row
+        return row, None
 
     except Exception as e:
         job_id = getattr(job, 'id', getattr(job, 'job_id', 'unknown'))
         print(f"Error parsing analysis job {job_id}: {e}", file=sys.stderr)
-        return None
+        return None, _make_error(job, category, 'exception', e)
 
 
 def parse_one_perm_job(job):
-    """Parse a single permutation-generation job. Returns a dict row or None."""
+    """Parse a single permutation-generation job. Returns (row, error)."""
+    category = 'perms'
     try:
         mtx_path = safe_get_var(job, 'mtx', '')
         matrix_name = get_matrix_name(mtx_path)
@@ -207,7 +225,7 @@ def parse_one_perm_job(job):
 
         stdout = job.get_stdout()
         if stdout is None:
-            return None
+            return None, _make_error(job, category, 'no_stdout')
 
         # Clean ANSI codes
         clean = ANSI_ESCAPE.sub('', stdout) if ('\x1b' in stdout or '\x1B' in stdout) else stdout
@@ -240,7 +258,7 @@ def parse_one_perm_job(job):
 
         # Skip jobs that didn't produce any timing data
         if time_reordering_ms is None:
-            return None
+            return None, _make_error(job, category, 'no_timers', 'No reordering timer found in stdout')
 
         job_id = getattr(job, 'id', getattr(job, 'job_id', 'unknown'))
 
@@ -251,49 +269,47 @@ def parse_one_perm_job(job):
             'perm': tag,
             'time_reordering_ms': time_reordering_ms,
             'time_loading_ms': time_loading_ms,
-        }
+        }, None
 
     except Exception as e:
         job_id = getattr(job, 'id', getattr(job, 'job_id', 'unknown'))
         print(f"Error parsing perm job {job_id}: {e}", file=sys.stderr)
-        return None
+        return None, _make_error(job, category, 'exception', e)
+
+
+def _strip_random_suffix(row_and_error):
+    """Strip _RANDOM suffix from perm/tag/algo on both row and error dicts."""
+    row, error = row_and_error
+    for d in (row, error):
+        if d is None:
+            continue
+        for key in ('perm', 'tag', 'algo'):
+            if isinstance(d.get(key), str) and d[key].endswith('_RANDOM'):
+                d[key] = d[key][:-len('_RANDOM')]
+        # Fix category for errors from random pipeline
+        if d is error and isinstance(d.get('category'), str) and not d['category'].startswith('random_'):
+            d['category'] = 'random_' + d['category']
+    return row, error
 
 
 def parse_one_random_analysis_job(job):
     """Parse a random-pipeline analysis job, stripping _RANDOM suffix from perm/tag/algo."""
-    row = parse_one_analysis_job(job)
-    if row is None:
-        return None
-    for key in ('perm', 'tag', 'algo'):
-        if isinstance(row.get(key), str) and row[key].endswith('_RANDOM'):
-            row[key] = row[key][:-len('_RANDOM')]
-    return row
+    return _strip_random_suffix(parse_one_analysis_job(job))
 
 
 def parse_one_random_perm_job(job):
     """Parse a random-pipeline perm job, stripping the _RANDOM suffix from perm/tag."""
-    row = parse_one_perm_job(job)
-    if row is None:
-        return None
-    for key in ('perm', 'tag'):
-        if row[key].endswith('_RANDOM'):
-            row[key] = row[key][:-len('_RANDOM')]
-    return row
+    return _strip_random_suffix(parse_one_perm_job(job))
 
 
 def parse_one_random_operation_job(job):
     """Parse a random-pipeline operation job, stripping _RANDOM from perm/tag/algo."""
-    row = parse_one_operation_job(job)
-    if row is None:
-        return None
-    for key in ('perm', 'tag', 'algo'):
-        if isinstance(row.get(key), str) and row[key].endswith('_RANDOM'):
-            row[key] = row[key][:-len('_RANDOM')]
-    return row
+    return _strip_random_suffix(parse_one_operation_job(job))
 
 
 def parse_one_operation_job(job):
-    """Parse a single operation job. Returns a dict row or None."""
+    """Parse a single operation job. Returns (row, error)."""
+    category = 'ops'
     try:
         mtx_path = safe_get_var(job, 'mtx', '')
         matrix_name = get_matrix_name(mtx_path)
@@ -304,9 +320,12 @@ def parse_one_operation_job(job):
         block_size = safe_get_var(job, 'block_size', DEFAULT_BLOCK_SIZE, int)
         n_cols = safe_get_var(job, 'n_cols', DEFAULT_N_COLS, int)
 
-        timers = parse_timers(job.get_stdout())
+        stdout = job.get_stdout()
+        timers = parse_timers(stdout)
         if not timers:
-            return None
+            error_type = 'no_stdout' if stdout is None else 'no_timers'
+            error_msg = '' if stdout is None else 'No Timer lines found in stdout'
+            return None, _make_error(job, category, error_type, error_msg)
 
         job_id = getattr(job, 'id', getattr(job, 'job_id', 'unknown'))
 
@@ -320,12 +339,12 @@ def parse_one_operation_job(job):
             'block_size': block_size if block_size > 0 else None,
             'n_cols': n_cols,
             **timers
-        }
+        }, None
 
     except Exception as e:
         job_id = getattr(job, 'id', getattr(job, 'job_id', 'unknown'))
         print(f"Error parsing operation job {job_id}: {e}", file=sys.stderr)
-        return None
+        return None, _make_error(job, category, 'exception', e)
 
 
 # ---------------------------------------------------------------------------
@@ -423,10 +442,24 @@ def _scan_job_dirs():
     return dirs
 
 
+def _read_stderr_snippet(job_dir, max_chars=500):
+    """Read the last max_chars of stderr.log for error context."""
+    stderr_path = Path(job_dir) / "stderr.log"
+    try:
+        with open(stderr_path, 'r') as f:
+            content = f.read()
+        if not content.strip():
+            return ''
+        # Return last max_chars (most relevant part of stderr)
+        return content[-max_chars:].strip()
+    except Exception:
+        return ''
+
+
 def _load_and_parse_one(job_dir_str):
     """
     Load metadata.yaml from a job dir, check it's COMPLETED, parse stdout,
-    and return (category, parsed_row) or None.
+    and return ('row', category, parsed_row) or ('error', error_dict) or None.
     Bypasses sbatchman's jobs_list entirely.
     """
     job_dir = Path(job_dir_str)
@@ -438,9 +471,10 @@ def _load_and_parse_one(job_dir_str):
     except Exception:
         return None
 
-    if not meta or str(meta.get('status', '')) != 'COMPLETED':
+    if not meta:
         return None
 
+    status = str(meta.get('status', ''))
     tag = meta.get('tag', '')
     category = _categorize_tag(tag)
     if category is None:
@@ -456,6 +490,20 @@ def _load_and_parse_one(job_dir_str):
     job.id = job.job_id
     job.variables = meta.get('variables') or {}
 
+    # Non-COMPLETED jobs are errors (FAILED, TIMEOUT, CANCELLED, etc.)
+    if status != 'COMPLETED':
+        error = _make_error(job, category, f'job_{status.lower()}',
+                            _read_stderr_snippet(job_dir_str))
+        error['job_dir'] = job_dir_str
+        # Strip _RANDOM suffix for random categories
+        if category.startswith('random_'):
+            for key in ('perm', 'tag', 'algo', 'category'):
+                if isinstance(error.get(key), str) and error[key].endswith('_RANDOM'):
+                    error[key] = error[key][:-len('_RANDOM')]
+            if not error.get('category', '').startswith('random_'):
+                error['category'] = category
+        return ('error', error)
+
     # Read stdout directly
     stdout_path = job_dir / "stdout.log"
     try:
@@ -467,24 +515,31 @@ def _load_and_parse_one(job_dir_str):
 
     # Parse according to category
     if category in ('analysis', 'random_analysis'):
-        row = parse_one_analysis_job(job)
+        parse_fn = parse_one_random_analysis_job if category.startswith('random_') else parse_one_analysis_job
     elif category in ('ops', 'random_ops'):
-        row = parse_one_operation_job(job)
+        parse_fn = parse_one_random_operation_job if category.startswith('random_') else parse_one_operation_job
     elif category in ('perms', 'random_perms'):
-        row = parse_one_perm_job(job)
+        parse_fn = parse_one_random_perm_job if category.startswith('random_') else parse_one_perm_job
     else:
         return None
+
+    row, error = parse_fn(job)
+
+    if error is not None:
+        # Enrich error with stderr snippet and job_dir
+        stderr_snippet = _read_stderr_snippet(job_dir_str)
+        if stderr_snippet and not error.get('error_message'):
+            error['error_message'] = stderr_snippet
+        elif stderr_snippet:
+            error['error_message'] += '\n---stderr---\n' + stderr_snippet
+        error['job_dir'] = job_dir_str
+        return ('error', error)
 
     if row is None:
         return None
 
-    # Strip _RANDOM suffix for random categories
-    if category.startswith('random_'):
-        for key in ('perm', 'tag', 'algo'):
-            if isinstance(row.get(key), str) and row[key].endswith('_RANDOM'):
-                row[key] = row[key][:-len('_RANDOM')]
-
-    return (category, row)
+    row['_job_dir'] = job_dir_str
+    return ('row', category, row)
 
 
 # ---------------------------------------------------------------------------
@@ -498,11 +553,11 @@ def _empty_rows():
     return {c: [] for c in CATEGORIES}
 
 
-def _backfill_job_dirs(rows, all_dirs):
+def _backfill_job_dirs(rows, errors, all_dirs):
     """
-    Populate '_job_dir' on rows produced by the uncached path (which lack it).
-    Scans metadata.yaml in each dir to build a job_id -> dir mapping, then
-    stamps each row.  Rows that can't be matched get _job_dir = None.
+    Populate '_job_dir' / 'job_dir' on rows and errors produced by the uncached
+    path (which lack it).  Scans metadata.yaml in each dir to build a
+    job_id -> dir mapping, then stamps each row/error.
     """
     # Build job_id -> dir mapping
     job_id_to_dir = {}
@@ -525,6 +580,12 @@ def _backfill_job_dirs(rows, all_dirs):
             if row['_job_dir'] is not None:
                 matched += 1
 
+    # Also stamp errors so they can be evicted from cache when dirs are removed
+    for error in errors:
+        jid = str(error.get('job_id', ''))
+        if 'job_dir' not in error or error['job_dir'] is None:
+            error['job_dir'] = job_id_to_dir.get(jid)
+
     total = sum(len(rows[c]) for c in CATEGORIES)
     print(f"  Backfilled _job_dir: {matched}/{total} rows matched", file=sys.stderr)
 
@@ -545,8 +606,8 @@ def _add_random_baselines(rows):
             rows['random_ops'].append(baseline)
 
 
-def _export_csvs(rows, out_dir):
-    """Export all category DataFrames to CSV files."""
+def _export_csvs(rows, errors, out_dir):
+    """Export all category DataFrames and errors to CSV files."""
     csv_map = {
         'analysis':        ('results_analysis.csv',          ['matrix', 'perm', 'perm_type']),
         'random_analysis': ('results_analysis_random.csv',   ['matrix', 'perm', 'perm_type']),
@@ -566,13 +627,33 @@ def _export_csvs(rows, out_dir):
         else:
             print(f"No {cat} results found.")
 
+    # Export errors CSV
+    if errors:
+        error_cols = ['job_id', 'tag', 'matrix', 'perm', 'perm_type', 'category', 'error_type', 'error_message']
+        df_errors = pd.DataFrame(errors)
+        # Ensure column order; extra cols appended
+        ordered = [c for c in error_cols if c in df_errors.columns]
+        extra = [c for c in df_errors.columns if c not in error_cols]
+        df_errors = df_errors[ordered + extra]
+        # Dedup: keep latest error per (job_id)
+        if 'job_id' in df_errors.columns:
+            df_errors = df_errors.drop_duplicates(subset=['job_id'], keep='last')
+        out_file = out_dir / 'results_errors.csv'
+        df_errors.to_csv(out_file, index=False)
+        # Summary by category and error_type
+        summary = df_errors.groupby(['category', 'error_type']).size()
+        print(f"\nExported {len(df_errors)} errors to {out_file}")
+        print(f"Error summary:\n{summary.to_string()}", file=sys.stderr)
+    else:
+        print("No errors found.")
+
 
 # ---------------------------------------------------------------------------
 # Main: uncached path (first run / --no-cache)
 # ---------------------------------------------------------------------------
 
 def _run_uncached(workers):
-    """Original approach: fetch all jobs via sbatchman, parse, return rows dict."""
+    """Original approach: fetch all jobs via sbatchman, parse, return rows dict and errors."""
     from sbatchman import jobs_list
 
     print("Fetching jobs (this may take a while)...", file=sys.stderr)
@@ -597,6 +678,7 @@ def _run_uncached(workers):
             categorized[cat].append(j)
 
     rows = _empty_rows()
+    errors = []
     parse_fn = {
         'analysis':        parse_one_analysis_job,
         'random_analysis': parse_one_random_analysis_job,
@@ -617,10 +699,14 @@ def _run_uncached(workers):
                 pool.map(parse_fn[cat], jobs, chunksize=256),
                 total=len(jobs), desc=f"  {cat}"
             ))
-        rows[cat] = [r for r in results if r is not None]
+        for row, error in results:
+            if row is not None:
+                rows[cat].append(row)
+            if error is not None:
+                errors.append(error)
         print(f"  {cat}: {time.perf_counter() - t0:.1f}s, {len(rows[cat])} parsed", file=sys.stderr)
 
-    return rows
+    return rows, errors
 
 
 # ---------------------------------------------------------------------------
@@ -631,6 +717,7 @@ def _run_cached(cache, workers):
     """
     Incremental path: scan directories, diff against cache, only process new
     job dirs, merge with cached rows.
+    Returns (rows, errors, all_dirs).
     """
     t0 = time.perf_counter()
     all_dirs = _scan_job_dirs()
@@ -653,6 +740,11 @@ def _run_cached(cache, workers):
         for cat in CATEGORIES:
             rows[cat] = list(cache.get(cat, []))
 
+    # Start from cached errors, removing deleted dirs
+    errors = list(cache.get('errors', []))
+    if removed_dirs:
+        errors = [e for e in errors if e.get('job_dir') not in removed_dirs]
+
     # Process new dirs
     if new_dirs:
         new_dirs_list = list(new_dirs)
@@ -664,18 +756,24 @@ def _run_cached(cache, workers):
                 total=len(new_dirs_list), desc="  new jobs"
             ))
         new_count = 0
-        for i, result in enumerate(results):
-            if result is not None:
-                cat, row = result
-                row['_job_dir'] = new_dirs_list[i]
+        new_errors = 0
+        for result in results:
+            if result is None:
+                continue
+            if result[0] == 'row':
+                _, cat, row = result
                 rows[cat].append(row)
                 new_count += 1
+            elif result[0] == 'error':
+                _, error = result
+                errors.append(error)
+                new_errors += 1
         t_parse = time.perf_counter() - t0
-        print(f"  Parsed {new_count} new rows ({t_parse:.1f}s)", file=sys.stderr)
+        print(f"  Parsed {new_count} new rows, {new_errors} errors ({t_parse:.1f}s)", file=sys.stderr)
     else:
         print("No new jobs to process.", file=sys.stderr)
 
-    return rows, all_dirs
+    return rows, errors, all_dirs
 
 
 def main():
@@ -701,10 +799,10 @@ def main():
 
     if cache is not None:
         # --- Fast incremental path ---
-        rows, all_dirs = _run_cached(cache, workers)
+        rows, errors, all_dirs = _run_cached(cache, workers)
 
         # Save cache BEFORE adding baselines (baselines are export-only)
-        new_cache = {'version': CACHE_VERSION, 'known_dirs': all_dirs}
+        new_cache = {'version': CACHE_VERSION, 'known_dirs': all_dirs, 'errors': errors}
         for cat in CATEGORIES:
             new_cache[cat] = rows[cat]
         try:
@@ -719,11 +817,11 @@ def main():
         export_rows = _empty_rows()
         for cat in CATEGORIES:
             export_rows[cat] = [{k: v for k, v in r.items() if k != '_job_dir'} for r in rows[cat]]
-        _export_csvs(export_rows, out_dir)
+        _export_csvs(export_rows, errors, out_dir)
 
     else:
         # --- Full parse path (first run or --no-cache) ---
-        rows = _run_uncached(workers)
+        rows, errors = _run_uncached(workers)
 
         # Build and save cache BEFORE adding baselines.
         # Scan dirs to populate known_dirs; rows from uncached path need
@@ -731,8 +829,8 @@ def main():
         print("Building cache for next run...", file=sys.stderr)
         t0 = time.perf_counter()
         all_dirs = _scan_job_dirs()
-        _backfill_job_dirs(rows, all_dirs)
-        new_cache = {'version': CACHE_VERSION, 'known_dirs': all_dirs}
+        _backfill_job_dirs(rows, errors, all_dirs)
+        new_cache = {'version': CACHE_VERSION, 'known_dirs': all_dirs, 'errors': errors}
         for cat in CATEGORIES:
             new_cache[cat] = rows[cat]
         try:
@@ -748,7 +846,7 @@ def main():
         export_rows = _empty_rows()
         for cat in CATEGORIES:
             export_rows[cat] = [{k: v for k, v in r.items() if k != '_job_dir'} for r in rows[cat]]
-        _export_csvs(export_rows, out_dir)
+        _export_csvs(export_rows, errors, out_dir)
 
     t_total = time.perf_counter() - t_total_start
     print(f"\nTotal time: {t_total:.1f}s", file=sys.stderr)
