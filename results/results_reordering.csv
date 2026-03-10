@@ -13407,3 +13407,4 @@ job_id,tag,matrix,perm,time_reordering_ms,time_loading_ms
 1161699,SB_rcm,cage13.mtx,SB_rcm,100.646004,653.009953
 1161704,SB_rcm,cage14.mtx,SB_rcm,388.541078,2038.898392
 1161709,SB_rcm,cage15.mtx,SB_rcm,1848.13077,6644.520881
+1255223,SB_metis,p2p-Gnutella09.mtx,SB_metis,65.484787,24.577244
