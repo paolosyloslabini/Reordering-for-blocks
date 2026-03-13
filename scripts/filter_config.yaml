@@ -73,12 +73,20 @@ pipelines:
   symmetric:                # --symmetric (default) on main data
     exclude_perms:
       - SPARTA_reorder
+    exclude_kernels:
+      - BLEST_BFS
   row:                      # --row on main data
     exclude_perms: []
+    exclude_kernels:
+      - BLEST_BFS
   random_symmetric:         # --symmetric on random data
     exclude_perms: []
+    exclude_kernels:
+      - BLEST_BFS
   random_row:               # --row on random data
     exclude_perms: []
+    exclude_kernels:
+      - BLEST_BFS
 
 # ---- Display / Analysis Settings ------------------------------------------
 display:

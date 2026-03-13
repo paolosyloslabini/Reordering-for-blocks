@@ -533,6 +533,8 @@ def _enabled_improvement_metrics():
         'col_spread_improvement',
         'vertical_adjacency_improvement',
         'profile_improvement',
+        'reuse_distance_improvement',
+        'index_distance_improvement',
     ]
     # Mirror the block densities enabled in settings
     bd = [f'density_improvement_{bs}' for bs in BLOCK_SIZES

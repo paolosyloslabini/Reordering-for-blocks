@@ -9,7 +9,7 @@ Shared settings and display-name dictionaries for plots and tables."""
 PALETTE = [
     '#332288', '#88CCEE', '#44AA99', '#117733',
     '#999933', '#DDCC77', '#CC6677', '#882255',
-    '#AA4499', '#DDDDDD', '#000000', '#661100',
+    '#AA4499', '#DDDDDD', '#661100', '#000000',
 ]
 
 # =============================================================================
@@ -98,6 +98,20 @@ ALL_METRICS = {
         'display': 'Vertical Adjacency Improvement', 'short': 'VAI',
     },
 
+    # ── Access distance improvements ──────────────────────────────────
+    'reuse_distance_improvement': {
+        'display': 'Reuse Distance Reduction', 'short': 'RDR',
+    },
+    'reuse_distance_median_improvement': {
+        'display': 'Median Reuse Dist. Reduction', 'short': 'MdRDR',
+    },
+    'index_distance_improvement': {
+        'display': 'Index Distance Reduction', 'short': 'IDR',
+    },
+    'index_distance_median_improvement': {
+        'display': 'Median Index Dist. Reduction', 'short': 'MdIDR',
+    },
+
     # ── NNZ distribution ─────────────────────────────────────────────────
     'locality_avg_nnz_per_row': {
         'display': 'Average NNZ per Row', 'short': 'ANR',
@@ -116,6 +130,52 @@ ALL_METRICS = {
     'locality_profile': {
         'display': 'Profile', 'short': 'Prof',
         'log_scale': True, 'enabled': True, 'higher_is_better': False,
+    },
+
+    # ── Access distance (reuse distance — temporal locality) ─────────────
+    'access_dist_reuse_distance_mean': {
+        'display': 'Reuse Distance', 'short': 'RD',
+        'log_scale': True, 'enabled': True, 'higher_is_better': False,
+    },
+    'access_dist_reuse_distance_median': {
+        'display': 'Median Reuse Distance', 'short': 'MdRD',
+        'log_scale': True, 'higher_is_better': False,
+    },
+    'access_dist_reuse_distance_max': {
+        'display': 'Max Reuse Distance', 'short': 'XRD',
+        'log_scale': True, 'higher_is_better': False,
+    },
+    'access_dist_reuse_distance_std': {
+        'display': 'Reuse Distance Std', 'short': 'SRD',
+        'higher_is_better': False,
+    },
+
+    # ── Access distance (index distance — spatial locality) ───────────
+    'access_dist_index_distance_mean': {
+        'display': 'Index Distance', 'short': 'ID',
+        'log_scale': True, 'enabled': True, 'higher_is_better': False,
+    },
+    'access_dist_index_distance_median': {
+        'display': 'Median Index Distance', 'short': 'MdID',
+        'log_scale': True, 'higher_is_better': False,
+    },
+    'access_dist_index_distance_max': {
+        'display': 'Max Index Distance', 'short': 'XID',
+        'log_scale': True, 'higher_is_better': False,
+    },
+    'access_dist_index_distance_std': {
+        'display': 'Index Distance Std', 'short': 'SID',
+        'higher_is_better': False,
+    },
+
+    # ── Relative access distance (normalized by cols) ─────────────────
+    'rel_reuse_distance': {
+        'display': 'Relative Reuse Distance', 'short': 'RRD',
+        'log_scale': True, 'higher_is_better': False,
+    },
+    'rel_index_distance': {
+        'display': 'Relative Index Distance', 'short': 'RID',
+        'log_scale': True, 'higher_is_better': False,
     },
 
     # ── Overall density ──────────────────────────────────────────────────
@@ -194,18 +254,18 @@ def block_density_metrics() -> list[str]:
 
 PERMS = {
     'None':            {'display': 'Original',  'color': '#333333'},
-    'SB_amd':          {'display': 'AMD',       'color': PALETTE[0]},
-    'SB_degree':       {'display': 'Degree',    'color': PALETTE[1]},
-    'GROOT_reorder':   {'display': 'GROOT',    'color': PALETTE[2]},
-    'SB_gray':         {'display': 'Gray',     'color': PALETTE[3]},
-    'SB_metis':        {'display': 'Metis',    'color': PALETTE[4]},
-    'SB_patoh':        {'display': 'PaToH',    'color': PALETTE[5]},
-    'SB_rabbit':       {'display': 'Rabbit',   'color': PALETTE[6]},
-    'random1D':        {'display': 'Random',   'color': PALETTE[7]},
-    'SB_rcm':          {'display': 'RCM',      'color': PALETTE[8]},
-    'SB_slashburn':    {'display': 'SlashBurn', 'color': PALETTE[9]},
-    'SPARTA_reorder':  {'display': 'SPARTA',   'color': PALETTE[10]},
-    'TCA_reorder':     {'display': 'DTC-LSH',  'color': PALETTE[11]},
+    'SB_rcm':          {'display': 'RCM',      'color': PALETTE[0]},
+    'SB_amd':          {'display': 'AMD',       'color': PALETTE[1]},
+    'SB_rabbit':       {'display': 'Rabbit',   'color': PALETTE[2]},
+    'GROOT_reorder':   {'display': 'GROOT',    'color': PALETTE[3]},
+    'SB_gray':         {'display': 'Gray',     'color': PALETTE[4]},
+    'SB_metis':        {'display': 'Metis',    'color': PALETTE[5]},
+    'SB_patoh':        {'display': 'PaToH',    'color': PALETTE[6]},
+    'SB_slashburn':    {'display': 'SlashBurn', 'color': PALETTE[7]},
+    'SPARTA_reorder':  {'display': 'SPARTA',   'color': PALETTE[8]},
+    'TCA_reorder':     {'display': 'DTC-LSH',  'color': PALETTE[9]},
+    'SB_degree':       {'display': 'Degree',    'color': PALETTE[10]},
+    'random1D':        {'display': 'Random',   'color': '#000000'},
 }
 
 

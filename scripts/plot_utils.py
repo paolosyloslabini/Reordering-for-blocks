@@ -240,7 +240,13 @@ def add_relative_metrics(df):
     
     if 'locality_avg_row_spread' in df.columns and 'cols' in df.columns:
         df['rel_row_spread'] = df['locality_avg_row_spread'] / df['cols']
-    
+
+    if 'access_dist_reuse_distance_mean' in df.columns and 'cols' in df.columns:
+        df['rel_reuse_distance'] = df['access_dist_reuse_distance_mean'] / df['cols']
+
+    if 'access_dist_index_distance_mean' in df.columns and 'cols' in df.columns:
+        df['rel_index_distance'] = df['access_dist_index_distance_mean'] / df['cols']
+
     return df
 
 
@@ -280,6 +286,10 @@ def build_metrics_config(df, include_extended=False):
         'locality_avg_col_spread': {'improvement_name': 'col_spread_improvement', 'higher_is_better': False},
         'locality_vertical_adjacency_ratio': {'improvement_name': 'vertical_adjacency_improvement', 'higher_is_better': True},
         'locality_profile': {'improvement_name': 'profile_improvement', 'higher_is_better': False},
+        'access_dist_reuse_distance_mean': {'improvement_name': 'reuse_distance_improvement', 'higher_is_better': False},
+        'access_dist_reuse_distance_median': {'improvement_name': 'reuse_distance_median_improvement', 'higher_is_better': False},
+        'access_dist_index_distance_mean': {'improvement_name': 'index_distance_improvement', 'higher_is_better': False},
+        'access_dist_index_distance_median': {'improvement_name': 'index_distance_median_improvement', 'higher_is_better': False},
     }
 
     if include_extended:
@@ -348,9 +358,9 @@ def compute_improvements(df, metrics_config):
         orig_col = f'{metric}_original'
         imp_col = config['improvement_name']
         if config['higher_is_better']:
-            df[imp_col] = df[metric] / df[orig_col]
+            df[imp_col] = df[metric] / df[orig_col].replace(0, np.nan)
         else:
-            df[imp_col] = df[orig_col] / df[metric]
+            df[imp_col] = df[orig_col] / df[metric].replace(0, np.nan)
 
     return df
 
@@ -736,7 +746,16 @@ def split_by_perm_type(df, df_analysis, perm_type, pipeline_cfg=None):
                   f"for {exclude_perms}")
         exclude_kernels = set(pipeline_cfg.get('exclude_kernels', []))
         if exclude_kernels and not df_out.empty:
-            df_out = df_out[~df_out['kernel_id'].isin(exclude_kernels)]
+            # kernel_id may not exist yet (added by prepare_full_dataframe);
+            # derive it on the fly from algo by stripping reorder suffixes.
+            if 'kernel_id' in df_out.columns:
+                df_out = df_out[~df_out['kernel_id'].isin(exclude_kernels)]
+            elif 'algo' in df_out.columns:
+                import re
+                _strip = lambda a: re.sub(
+                    r'_(NO_REORDER|ROW|SYMMETRIC|ASYMMETRIC)', '', a)
+                mask = df_out['algo'].apply(_strip).isin(exclude_kernels)
+                df_out = df_out[~mask]
 
     print(f"  After split_by_perm_type({perm_type}): "
           f"{len(df_out)} ops rows, {len(df_analysis_out)} analysis rows")
@@ -1029,7 +1048,7 @@ def boxplot_by_category(df, x_col, y_col, output_path,
                          log_y=False,
                          ylim=None,
                          palette=None,
-                         figsize=(12, 8)):
+                         figsize=(12, 4.8)):
     """Create boxplot with optional stripplot overlay.
     
     Args:
@@ -1082,7 +1101,7 @@ def boxplot_by_category(df, x_col, y_col, output_path,
     sns.boxplot(data=plot_df, x=x_col, y=y_col, order=order,
                 showfliers=False, whis=(5, 95), palette=palette, width=0.6,
                 boxprops={'alpha': 0.6},
-                medianprops={'color': 'red', 'linewidth': 2},
+                medianprops={'color': 'red', 'linewidth': 0.8},
                 ax=ax)
     
     if baseline is not None:
@@ -1195,24 +1214,13 @@ def breakeven_boxplot(df_valid, df_harmful, x_col, y_col, output_path,
 
     # ===== Top subplot: breakeven boxplot =====
     if has_valid:
-        rng = np.random.default_rng(0)
-        for i, cat in enumerate(cats):
-            cat_data = plot_df[plot_df[x_col] == cat]
-            if cat_data.empty:
-                continue
-            half_w = BOX_WIDTH / 2 * 0.8
-            x_jitter = rng.uniform(-half_w, half_w, size=len(cat_data))
-            ax_box.scatter(i + x_jitter, cat_data[y_col].values,
-                           color='black', alpha=0.4, s=9, zorder=2,
-                           edgecolors='none', rasterized=True)
-
         box_data = [plot_df[plot_df[x_col] == cat][y_col].dropna().values
                     for cat in cats]
         bp = ax_box.boxplot(box_data, positions=positions,
                             widths=BOX_WIDTH, showfliers=False,
                             whis=(5, 95),
                             patch_artist=True,
-                            medianprops={'color': 'red', 'linewidth': 2},
+                            medianprops={'color': 'red', 'linewidth': 0.8},
                             zorder=3)
 
         for patch, cat in zip(bp['boxes'], cats):
@@ -1237,10 +1245,10 @@ def breakeven_boxplot(df_valid, df_harmful, x_col, y_col, output_path,
     # Red (harmful) on bottom, green (beneficial) on top
     ax_bar.bar(positions, harm_pcts, width=bar_w,
                color='#d9534f', edgecolor='white', linewidth=0.5,
-               label='Harmful (never breaks even)')
+               label='Harmful')
     ax_bar.bar(positions, valid_pcts, width=bar_w, bottom=harm_pcts,
                color='#5cb85c', edgecolor='white', linewidth=0.5,
-               label='Beneficial (finite break-even)')
+               label='Beneficial')
 
     # Annotate percentages inside the bars
     for i, (vp, hp) in enumerate(zip(valid_pcts, harm_pcts)):
@@ -1338,7 +1346,7 @@ def binned_boxplot(df, bin_col, value_col, output_path,
                     title=None, baseline=None,
                     min_count=5,
                     show_points=False,
-                    figsize=(10, 6)):
+                    figsize=(10, 3.6)):
     """Create boxplot showing distribution of values per bin.
     
     Args:
@@ -1391,7 +1399,7 @@ def binned_boxplot(df, bin_col, value_col, output_path,
     sns.boxplot(data=plot_df, x='bin', y=value_col, order=bin_order,
                 showfliers=False, whis=(5, 95), palette="viridis", width=0.6,
                 boxprops={'alpha': 0.6},
-                medianprops={'color': 'red', 'linewidth': 2},
+                medianprops={'color': 'red', 'linewidth': 0.8},
                 ax=ax)
 
     # Add count labels positioned just above the top whisker (95th percentile)
