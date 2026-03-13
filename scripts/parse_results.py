@@ -456,6 +456,107 @@ def _read_stderr_snippet(job_dir, max_chars=500):
         return ''
 
 
+# Patterns for classifying errors from stderr content.
+# Order matters: more specific patterns must come before broader ones.
+_ERROR_CLASSIFIERS = [
+    (re.compile(r'DUE TO TIME LIMIT|TIMEOUT|TimeoutExpired', re.IGNORECASE), 'timeout'),
+    (re.compile(r'cudaMalloc|CUDA_ERROR_OUT_OF_MEMORY|CUDA.*out of memory', re.IGNORECASE), 'oom_gpu'),
+    (re.compile(r'MemoryError|Cannot allocate memory|Killed', re.IGNORECASE), 'oom_cpu'),
+    (re.compile(r'CUDA error.*?:\s*(.+)', re.IGNORECASE), 'cuda_error'),
+    (re.compile(r'SIGSEGV|Segmentation fault|segfault', re.IGNORECASE), 'segfault'),
+    (re.compile(r'SIGABRT|Aborted', re.IGNORECASE), 'aborted'),
+    (re.compile(r'FileNotFoundError|No such file or directory', re.IGNORECASE), 'file_not_found'),
+    (re.compile(r'Traceback \(most recent call last\)', re.IGNORECASE), 'python_exception'),
+]
+
+
+def _classify_stderr(stderr_text):
+    """Classify an error based on stderr content. Returns (error_type, summary)."""
+    if not stderr_text:
+        return 'empty_output', 'No stdout or stderr output'
+    for pattern, label in _ERROR_CLASSIFIERS:
+        m = pattern.search(stderr_text)
+        if m:
+            # Extract a short summary around the match
+            start = max(0, m.start() - 20)
+            end = min(len(stderr_text), m.end() + 80)
+            snippet = stderr_text[start:end].strip().replace('\n', ' ')
+            return label, snippet
+    return 'unknown', stderr_text[-200:].strip().replace('\n', ' ')
+
+
+def _build_error_for_dir(job_dir_str):
+    """
+    Build an error dict for a job dir that didn't produce a parsed row.
+    Reads metadata.yaml and stderr.log to classify the failure.
+    Returns an error dict, or None if the dir is not a valid/categorizable job.
+    """
+    job_dir = Path(job_dir_str)
+    metadata_path = job_dir / "metadata.yaml"
+
+    try:
+        with open(metadata_path, 'r') as f:
+            meta = yaml.load(f, Loader=SafeLoader)
+    except Exception:
+        return None
+
+    if not meta:
+        return None
+
+    tag = meta.get('tag', '')
+    category = _categorize_tag(tag)
+    if category is None:
+        return None
+
+    status = str(meta.get('status', ''))
+    job_id = meta.get('job_id', 'unknown')
+    variables = meta.get('variables') or {}
+    mtx_path = variables.get('mtx', '')
+
+    stderr_text = _read_stderr_snippet(job_dir_str, max_chars=1000)
+
+    # Non-COMPLETED jobs: use status as error type
+    if status != 'COMPLETED':
+        error_type = f'job_{status.lower()}'
+        error_message = stderr_text if stderr_text else f'Job status: {status}'
+    else:
+        # COMPLETED but no timers — classify from stderr
+        if stderr_text:
+            error_type, error_message = _classify_stderr(stderr_text)
+        else:
+            # Check stdout for clues
+            stdout_path = job_dir / "stdout.log"
+            try:
+                with open(stdout_path, 'r') as f:
+                    stdout_text = f.read().strip()
+            except Exception:
+                stdout_text = ''
+            if not stdout_text:
+                error_type, error_message = 'empty_output', 'No stdout or stderr output'
+            else:
+                error_type, error_message = 'no_timers', 'Completed but no parseable timer output'
+
+    error = {
+        'job_id': job_id,
+        'tag': tag,
+        'matrix': get_matrix_name(mtx_path),
+        'perm': variables.get('perm', ''),
+        'perm_type': _get_perm_type(tag),
+        'category': category,
+        'error_type': error_type,
+        'error_message': error_message,
+        'job_dir': job_dir_str,
+    }
+
+    # Strip _RANDOM suffix for random categories
+    if category.startswith('random_'):
+        for key in ('perm', 'tag'):
+            if isinstance(error.get(key), str) and error[key].endswith('_RANDOM'):
+                error[key] = error[key][:-len('_RANDOM')]
+
+    return error
+
+
 def _load_and_parse_one(job_dir_str):
     """
     Load metadata.yaml from a job dir, check it's COMPLETED, parse stdout,
@@ -526,12 +627,13 @@ def _load_and_parse_one(job_dir_str):
     row, error = parse_fn(job)
 
     if error is not None:
-        # Enrich error with stderr snippet and job_dir
-        stderr_snippet = _read_stderr_snippet(job_dir_str)
-        if stderr_snippet and not error.get('error_message'):
-            error['error_message'] = stderr_snippet
-        elif stderr_snippet:
-            error['error_message'] += '\n---stderr---\n' + stderr_snippet
+        # Reclassify using stderr for better error types
+        stderr_snippet = _read_stderr_snippet(job_dir_str, max_chars=1000)
+        if stderr_snippet:
+            error['error_type'], error['error_message'] = _classify_stderr(stderr_snippet)
+        elif not job._stdout:
+            error['error_type'] = 'empty_output'
+            error['error_message'] = 'No stdout or stderr output'
         error['job_dir'] = job_dir_str
         return ('error', error)
 
@@ -709,6 +811,28 @@ def _run_uncached(workers):
     return rows, errors
 
 
+def _rebuild_errors(rows, candidate_dirs, workers):
+    """
+    Classify errors for dirs that didn't produce a parsed row.
+    Reads metadata.yaml + stderr.log for each candidate dir.
+    """
+    row_dirs = set()
+    for cat in CATEGORIES:
+        for r in rows[cat]:
+            jd = r.get('_job_dir')
+            if jd:
+                row_dirs.add(jd)
+    error_dirs = candidate_dirs - row_dirs
+
+    print(f"Classifying {len(error_dirs)} error/non-row dirs...", file=sys.stderr)
+    t0 = time.perf_counter()
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        error_results = list(pool.map(_build_error_for_dir, error_dirs, chunksize=256))
+    errors = [e for e in error_results if e is not None]
+    print(f"  Classified {len(errors)} errors ({time.perf_counter() - t0:.1f}s)", file=sys.stderr)
+    return errors
+
+
 # ---------------------------------------------------------------------------
 # Main: cached path (fast incremental)
 # ---------------------------------------------------------------------------
@@ -740,12 +864,9 @@ def _run_cached(cache, workers):
         for cat in CATEGORIES:
             rows[cat] = list(cache.get(cat, []))
 
-    # Start from cached errors, removing deleted dirs
-    errors = list(cache.get('errors', []))
-    if removed_dirs:
-        errors = [e for e in errors if e.get('job_dir') not in removed_dirs]
-
-    # Process new dirs
+    # Process new dirs: keep both rows and errors from _load_and_parse_one
+    # to avoid re-reading metadata+stderr in the error rebuild step.
+    new_errors = []
     if new_dirs:
         new_dirs_list = list(new_dirs)
         print(f"Processing {len(new_dirs_list)} new jobs...", file=sys.stderr)
@@ -756,7 +877,6 @@ def _run_cached(cache, workers):
                 total=len(new_dirs_list), desc="  new jobs"
             ))
         new_count = 0
-        new_errors = 0
         for result in results:
             if result is None:
                 continue
@@ -766,12 +886,15 @@ def _run_cached(cache, workers):
                 new_count += 1
             elif result[0] == 'error':
                 _, error = result
-                errors.append(error)
-                new_errors += 1
+                new_errors.append(error)
         t_parse = time.perf_counter() - t0
-        print(f"  Parsed {new_count} new rows, {new_errors} errors ({t_parse:.1f}s)", file=sys.stderr)
+        print(f"  Parsed {new_count} new rows ({t_parse:.1f}s)", file=sys.stderr)
     else:
         print("No new jobs to process.", file=sys.stderr)
+
+    # Rebuild errors: classify old cached non-row dirs + keep new errors as-is
+    errors = _rebuild_errors(rows, all_dirs - new_dirs, workers)
+    errors.extend(new_errors)
 
     return rows, errors, all_dirs
 
@@ -802,7 +925,8 @@ def main():
         rows, errors, all_dirs = _run_cached(cache, workers)
 
         # Save cache BEFORE adding baselines (baselines are export-only)
-        new_cache = {'version': CACHE_VERSION, 'known_dirs': all_dirs, 'errors': errors}
+        # Errors are NOT cached — they are rebuilt fresh each run for better classification.
+        new_cache = {'version': CACHE_VERSION, 'known_dirs': all_dirs}
         for cat in CATEGORIES:
             new_cache[cat] = rows[cat]
         try:
@@ -830,7 +954,8 @@ def main():
         t0 = time.perf_counter()
         all_dirs = _scan_job_dirs()
         _backfill_job_dirs(rows, errors, all_dirs)
-        new_cache = {'version': CACHE_VERSION, 'known_dirs': all_dirs, 'errors': errors}
+        # Errors are NOT cached — they are rebuilt fresh each run.
+        new_cache = {'version': CACHE_VERSION, 'known_dirs': all_dirs}
         for cat in CATEGORIES:
             new_cache[cat] = rows[cat]
         try:
@@ -838,6 +963,9 @@ def main():
             print(f"Cache saved ({time.perf_counter() - t0:.1f}s)", file=sys.stderr)
         except OSError as e:
             print(f"WARNING: failed to save cache: {e}", file=sys.stderr)
+
+        # Rebuild errors with proper classification from stderr
+        errors = _rebuild_errors(rows, all_dirs, workers)
 
         # Add random baselines (export-only, not cached)
         _add_random_baselines(rows)
