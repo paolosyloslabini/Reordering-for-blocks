@@ -9,7 +9,7 @@ Shared settings and display-name dictionaries for plots and tables."""
 PALETTE = [
     '#332288', '#88CCEE', '#44AA99', '#117733',
     '#999933', '#DDCC77', '#CC6677', '#882255',
-    '#AA4499', '#DDDDDD', '#661100', '#000000',
+    '#AA4499', '#DDDDDD', '#4477AA', '#000000',
 ]
 
 # =============================================================================
@@ -49,6 +49,7 @@ ALL_METRICS = {
     },
     'bandwidth_improvement': {
         'display': 'Bandwidth Reduction', 'short': 'BWR',
+        'color': '#6B9AC4', 'hatch': '',
     },
     'bandwidth_avg_improvement': {
         'display': 'Avg Bandwidth Reduction', 'short': 'ABWR',
@@ -68,11 +69,15 @@ ALL_METRICS = {
         'log_scale': True, 'enabled': True, 'higher_is_better': False,
     },
     'row_spread_improvement':  {'display': 'Row Spread Reduction', 'short': 'RSR'},
-    'col_spread_improvement':  {'display': 'Col Spread Reduction', 'short': 'CSR'},
+    'col_spread_improvement':  {
+        'display': 'Col Spread Reduction', 'short': 'CSR',
+        'color': '#D4A574', 'hatch': '///',
+    },
 
     # ── Profile improvement ──────────────────────────────────────────────
     'profile_improvement': {
         'display': 'Profile Reduction', 'short': 'ProfR',
+        'color': '#C47A7A', 'hatch': 'xxx',
     },
 
     # ── Column spread ────────────────────────────────────────────────────
@@ -96,17 +101,20 @@ ALL_METRICS = {
     },
     'vertical_adjacency_improvement': {
         'display': 'Vertical Adjacency Improvement', 'short': 'VAI',
+        'color': '#7DB58A', 'hatch': '...',
     },
 
     # ── Access distance improvements ──────────────────────────────────
     'reuse_distance_improvement': {
         'display': 'Reuse Distance Reduction', 'short': 'RDR',
+        'color': '#E8A838', 'hatch': '\\\\',
     },
     'reuse_distance_median_improvement': {
         'display': 'Median Reuse Dist. Reduction', 'short': 'MdRDR',
     },
     'index_distance_improvement': {
         'display': 'Index Distance Reduction', 'short': 'IDR',
+        'color': '#E05858', 'hatch': '+++',
     },
     'index_distance_median_improvement': {
         'display': 'Median Index Dist. Reduction', 'short': 'MdIDR',
@@ -188,7 +196,11 @@ ALL_METRICS = {
 # ── Block-size-dependent metrics (generated from BLOCK_SIZES) ────────────
 _BLOCK_DENSITY_ENABLED = {16}  # which block densities show in tables
 
-for _bs in BLOCK_SIZES:
+# Color/hatch sequences for density-improvement metrics (one per block size)
+_DENSITY_IMPROVEMENT_COLORS  = ['#e8c8e8', '#d4a0d4', '#b06cb0', '#8c3f8c', '#6a1b6a', '#3d003d']
+_DENSITY_IMPROVEMENT_HATCHES = ['#', '#', '#', '#', '#', '#']
+
+for _i, _bs in enumerate(BLOCK_SIZES):
     ALL_METRICS[f'block_density_{_bs}'] = {
         'display': f'Block Density ${_bs}{{\\times}}{_bs}$',
         'short':   f'BD{_bs}',
@@ -199,6 +211,8 @@ for _bs in BLOCK_SIZES:
     ALL_METRICS[f'density_improvement_{_bs}'] = {
         'display': f'Density Improvement ${_bs}{{\\times}}{_bs}$',
         'short': f'DI{_bs}',
+        'color': _DENSITY_IMPROVEMENT_COLORS[_i],
+        'hatch': _DENSITY_IMPROVEMENT_HATCHES[_i],
     }
     ALL_METRICS[f'avg_blocks_per_row_improvement_{_bs}'] = {
         'display': f'Avg Blocks/Row Reduction ${_bs}{{\\times}}{_bs}$',
@@ -246,6 +260,16 @@ def enabled_metrics() -> list[str]:
 def block_density_metrics() -> list[str]:
     """Ordered list of ``block_density_<bs>`` keys."""
     return [f'block_density_{bs}' for bs in BLOCK_SIZES]
+
+
+def get_metric_color(col: str) -> str:
+    """Bar/box color for metric *col*. Falls back to muted grey."""
+    return ALL_METRICS.get(col, {}).get('color', '#9B9B9B')
+
+
+def get_metric_hatch(col: str) -> str:
+    """Hatch pattern for metric *col*. Falls back to no hatch."""
+    return ALL_METRICS.get(col, {}).get('hatch', '')
 
 
 # =============================================================================

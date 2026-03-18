@@ -9,6 +9,7 @@ plots/*
 !plots/spy_plots/
 !plots/spy_quick/
 plots_random/
+plots_[0-9][0-9]_[0-9][0-9]/
 *.pyc
 __pycache__/
 test/groot_test.perm

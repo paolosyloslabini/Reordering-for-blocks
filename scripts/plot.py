@@ -12,9 +12,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
-from scipy import stats
 import plot_utils as pu
-from settings import get_perm_display, get_perm_color, KERNEL_NAMES, GROUPED_SCATTER_EXCLUDE, PERMS, ALL_METRICS, BLOCK_SIZES, PALETTE, enabled_metrics, get_metric_display
+from settings import get_perm_display, KERNEL_NAMES, GROUPED_SCATTER_EXCLUDE, PERMS, ALL_METRICS, BLOCK_SIZES, get_metric_display, get_metric_color, get_metric_hatch
 from correlation_table import (compute_imp_correlations,
                                _enabled_improvement_metrics,
                                _density_improvement_metrics, _corr_method_tag,
@@ -70,15 +69,15 @@ def parse_args():
     
     # Fine-grained section selection (used by run_plots.py wrapper)
     SECTION_CHOICES = [
-        'kernels', 'breakeven', 'original-scatter',
-        'reorder-analysis', 'reorderability', 'improvability', 'per-matrix', 'timing',
-        'singular-improvement',
+        'grouped-scatter',
+        'breakeven',
+        'reorder-analysis',
         'profiles',
         'speedup-profiles',
         'aggregate-improvement',
-        'pairwise',
         'imp-correlation',
         'partial-correlation',
+        'feature-importance',
     ]
     parser.add_argument(
         "--sections", nargs="+", choices=SECTION_CHOICES, default=None,
@@ -98,11 +97,11 @@ def parse_args():
     return parser.parse_args()
 
 
-def generate_kernel_plots(df, out_dir, args):
-    """Generate performance plots for kernel operations."""
+def generate_grouped_scatter_plots(df, out_dir, args):
+    """Grouped 2x3 scatter: improvement metric vs speedup (log-log) per n_cols."""
+    print("\n=== Grouped Improvement vs Speedup Scatter ===")
     n_jobs = getattr(args, 'jobs', None)
 
-    # Get unique n_cols values
     n_cols_values = sorted(df['n_cols'].unique())
     if args.n_cols is not None:
         if args.n_cols in n_cols_values:
@@ -111,15 +110,12 @@ def generate_kernel_plots(df, out_dir, args):
             print(f"Warning: n_cols={args.n_cols} not found. Available: {n_cols_values}")
             return
 
-    # Get density and improvement columns
-    density_cols = pu.get_density_columns(df)
     tasks = []
 
     for n_cols in n_cols_values:
-        print(f"\n=== n_cols = {n_cols} ===")
+        print(f"\n--- n_cols = {n_cols} ---")
         df_nc = df[df['n_cols'] == n_cols]
 
-        # Get unique kernels
         kernels = sorted(df_nc['kernel_id'].unique())
         if args.kernel:
             kernels = [k for k in kernels if args.kernel.lower() in k.lower()]
@@ -127,184 +123,26 @@ def generate_kernel_plots(df, out_dir, args):
                 print(f"No kernels matching '{args.kernel}'")
                 continue
 
-        for kernel in kernels:
-            print(f"  Collecting tasks for kernel: {kernel}")
-            df_k = df_nc[df_nc['kernel_id'] == kernel]
-
-            kernel_safe = pu.safe_filename(kernel)
-            base_dir = out_dir / f"n_cols_{int(n_cols)}" / kernel_safe
-            kernel_label = KERNEL_NAMES.get(kernel, kernel)
-
-            # Create directories upfront
-            gflops_dir = base_dir / "gflops_correlations"
-            gflops_dir.mkdir(parents=True, exist_ok=True)
-            linear_dir = base_dir / "gflops_vs_density_linear"
-            linear_dir.mkdir(parents=True, exist_ok=True)
-            speedup_dir = base_dir / "speedup"
-            speedup_dir.mkdir(parents=True, exist_ok=True)
-            binned_dir = base_dir / "binned_speedup"
-            binned_dir.mkdir(parents=True, exist_ok=True)
-
-            # 1. GFLOPS vs Metrics (log-log)
-            for dens_col in density_cols:
-                bs = dens_col.split('_')[-1]
-                tasks.append((pu.scatter_publication, dict(
-                    df=df_k, x_col=dens_col, y_col='gflops',
-                    output_path=gflops_dir / f"gflops_vs_density_bs{bs}.png",
-                    label=kernel_label)))
-
-            if 'rel_bandwidth' in df_k.columns:
-                tasks.append((pu.scatter_publication, dict(
-                    df=df_k, x_col='rel_bandwidth', y_col='gflops',
-                    output_path=gflops_dir / f"gflops_vs_rel_bandwidth.png",
-                    label=kernel_label)))
-
-            for loc_col in ['rel_row_spread', 'locality_vertical_adjacency_ratio',
-                            'access_dist_reuse_distance_mean',
-                            'access_dist_index_distance_mean']:
-                if loc_col in df_k.columns:
-                    tasks.append((pu.scatter_publication, dict(
-                        df=df_k, x_col=loc_col, y_col='gflops',
-                        output_path=gflops_dir / f"gflops_vs_{loc_col}.png",
-                        label=kernel_label)))
-
-            # 1b. GFLOPS vs Density (linear-linear)
-            for dens_col in density_cols:
-                bs = dens_col.split('_')[-1]
-                tasks.append((pu.scatter_publication, dict(
-                    df=df_k, x_col=dens_col, y_col='gflops',
-                    output_path=linear_dir / f"gflops_vs_density_bs{bs}_linear.png",
-                    log_x=False, log_y=False, label=kernel_label)))
-
-            if 'rel_bandwidth' in df_k.columns:
-                tasks.append((pu.scatter_publication, dict(
-                    df=df_k, x_col='rel_bandwidth', y_col='gflops',
-                    output_path=linear_dir / f"gflops_vs_rel_bandwidth_linear.png",
-                    log_x=False, log_y=False, label=kernel_label)))
-
-            for loc_col in ['rel_row_spread', 'locality_vertical_adjacency_ratio',
-                            'access_dist_reuse_distance_mean',
-                            'access_dist_index_distance_mean']:
-                if loc_col in df_k.columns:
-                    tasks.append((pu.scatter_publication, dict(
-                        df=df_k, x_col=loc_col, y_col='gflops',
-                        output_path=linear_dir / f"gflops_vs_{loc_col}_linear.png",
-                        log_x=False, log_y=False, label=kernel_label)))
-
-            # 2. Speedup Distribution
-            df_reordered = df_k[df_k['strategy'] != 'Original']
-            if not df_reordered.empty:
-                tasks.append((pu.boxplot_by_category, dict(
-                    df=df_reordered, x_col='strategy', y_col='speedup',
-                    output_path=speedup_dir / f"speedup_boxplot.png",
-                    title=f"Speedup — {kernel}",
-                    order=pu.get_strategy_order(df_reordered),
-                    baseline=1.0, log_y=True, ylim=(0.5, 5))))
-
-            # 3. Binned Speedup Charts (best reorder per matrix, by the binned metric)
-            df_valid = df_reordered.dropna(subset=['speedup'])
-            if not df_valid.empty:
-                for bs in [4, 8, 16, 32, 64, 128]:
-                    imp_col = f'density_improvement_{bs}'
-                    if imp_col in df_valid.columns:
-                        df_imp = df_valid.dropna(subset=[imp_col])
-                        if not df_imp.empty:
-                            df_best = df_imp.loc[df_imp.groupby('matrix')[imp_col].idxmax()]
-                            tasks.append((pu.binned_boxplot, dict(
-                                df=df_best, bin_col=imp_col, value_col='speedup',
-                                output_path=binned_dir / f"speedup_by_density_imp_bs{bs}.png",
-                                title=f"Speedup by Density Improvement (BS {bs})\n{kernel}",
-                                baseline=1.0)))
-
-                for imp_col in ['row_spread_improvement', 'vertical_adjacency_improvement', 'bandwidth_improvement']:
-                    if imp_col in df_valid.columns:
-                        df_imp = df_valid.dropna(subset=[imp_col])
-                        if not df_imp.empty:
-                            df_best = df_imp.loc[df_imp.groupby('matrix')[imp_col].idxmax()]
-                            tasks.append((pu.binned_boxplot, dict(
-                                df=df_best, bin_col=imp_col, value_col='speedup',
-                                output_path=binned_dir / f"speedup_by_{imp_col}.png",
-                                title=f"Speedup by {pu.get_display_name(imp_col)}\n{kernel}",
-                                baseline=1.0)))
-
-        # -----------------------------------------------------------------
-        # 4. Grouped Scatter Plots (all kernels in 2x3 grid)
-        # -----------------------------------------------------------------
         grouped_kernels = [k for k in kernels if k not in GROUPED_SCATTER_EXCLUDE]
         kernel_labels = {k: KERNEL_NAMES.get(k, k) for k in grouped_kernels}
-
-        grouped_dir = out_dir / f"n_cols_{int(n_cols)}" / "grouped_scatter"
-        grouped_dir.mkdir(parents=True, exist_ok=True)
-        grouped_linear_dir = out_dir / f"n_cols_{int(n_cols)}" / "grouped_scatter_linear"
-        grouped_linear_dir.mkdir(parents=True, exist_ok=True)
-
-        for dens_col in density_cols:
-            bs = dens_col.split('_')[-1]
-            tasks.append((pu.grouped_scatter_publication, dict(
-                df=df_nc, x_col=dens_col, y_col='gflops', group_col='kernel_id',
-                group_order=grouped_kernels,
-                output_path=grouped_dir / f"gflops_vs_density_bs{bs}.png",
-                group_labels=kernel_labels)))
-            tasks.append((pu.grouped_scatter_publication, dict(
-                df=df_nc, x_col=dens_col, y_col='gflops', group_col='kernel_id',
-                group_order=grouped_kernels,
-                output_path=grouped_linear_dir / f"gflops_vs_density_bs{bs}_linear.png",
-                group_labels=kernel_labels, log_x=False, log_y=False)))
-
-        if 'rel_bandwidth' in df_nc.columns:
-            tasks.append((pu.grouped_scatter_publication, dict(
-                df=df_nc, x_col='rel_bandwidth', y_col='gflops', group_col='kernel_id',
-                group_order=grouped_kernels,
-                output_path=grouped_dir / f"gflops_vs_rel_bandwidth.png",
-                group_labels=kernel_labels)))
-            tasks.append((pu.grouped_scatter_publication, dict(
-                df=df_nc, x_col='rel_bandwidth', y_col='gflops', group_col='kernel_id',
-                group_order=grouped_kernels,
-                output_path=grouped_linear_dir / f"gflops_vs_rel_bandwidth_linear.png",
-                group_labels=kernel_labels, log_x=False, log_y=False)))
-
-        for loc_col in ['rel_row_spread', 'locality_vertical_adjacency_ratio',
-                        'access_dist_reuse_distance_mean',
-                        'access_dist_index_distance_mean']:
-            if loc_col in df_nc.columns:
-                tasks.append((pu.grouped_scatter_publication, dict(
-                    df=df_nc, x_col=loc_col, y_col='gflops', group_col='kernel_id',
-                    group_order=grouped_kernels,
-                    output_path=grouped_dir / f"gflops_vs_{loc_col}.png",
-                    group_labels=kernel_labels)))
-                tasks.append((pu.grouped_scatter_publication, dict(
-                    df=df_nc, x_col=loc_col, y_col='gflops', group_col='kernel_id',
-                    group_order=grouped_kernels,
-                    output_path=grouped_linear_dir / f"gflops_vs_{loc_col}_linear.png",
-                    group_labels=kernel_labels, log_x=False, log_y=False)))
-
-        # 5. Grouped Scatter: Improvement vs Speedup
         df_nc_reordered = df_nc[df_nc['strategy'] != 'Original']
 
-        grouped_imp_dir = out_dir / f"n_cols_{int(n_cols)}" / "grouped_improvement_vs_speedup"
-        grouped_imp_dir.mkdir(parents=True, exist_ok=True)
-        grouped_imp_log_dir = out_dir / f"n_cols_{int(n_cols)}" / "grouped_improvement_vs_speedup_loglog"
-        grouped_imp_log_dir.mkdir(parents=True, exist_ok=True)
+        grouped_dir = out_dir / f"n_cols_{int(n_cols)}" / "grouped_improvement_vs_speedup_loglog"
+        grouped_dir.mkdir(parents=True, exist_ok=True)
 
-        _ratio_scatter_kw = dict(ylim=RATIO_YLIM, xlim=RATIO_XLIM,
-                                  baseline_x=1.0, baseline_y=1.0,
-                                  quadrant_colors=True)
+        _kw = dict(ylim=RATIO_YLIM, xlim=RATIO_XLIM,
+                    baseline_x=1.0, baseline_y=1.0,
+                    quadrant_colors=True)
 
-        for bs in [4, 8, 16, 32, 64, 128]:
+        for bs in BLOCK_SIZES:
             imp_col = f'density_improvement_{bs}'
             if imp_col in df_nc_reordered.columns:
                 tasks.append((pu.grouped_scatter_publication, dict(
                     df=df_nc_reordered, x_col=imp_col, y_col='speedup',
                     group_col='kernel_id', group_order=grouped_kernels,
-                    output_path=grouped_imp_dir / f"speedup_vs_density_imp_bs{bs}.png",
-                    group_labels=kernel_labels, log_x=False, log_y=False,
-                    **_ratio_scatter_kw)))
-                tasks.append((pu.grouped_scatter_publication, dict(
-                    df=df_nc_reordered, x_col=imp_col, y_col='speedup',
-                    group_col='kernel_id', group_order=grouped_kernels,
-                    output_path=grouped_imp_log_dir / f"speedup_vs_density_imp_bs{bs}_loglog.png",
+                    output_path=grouped_dir / f"speedup_vs_density_imp_bs{bs}_loglog.png",
                     group_labels=kernel_labels, log_x=True, log_y=True,
-                    **_ratio_scatter_kw)))
+                    **_kw)))
 
         for imp_col in ['bandwidth_improvement', 'row_spread_improvement',
                         'vertical_adjacency_improvement',
@@ -314,729 +152,12 @@ def generate_kernel_plots(df, out_dir, args):
                 tasks.append((pu.grouped_scatter_publication, dict(
                     df=df_nc_reordered, x_col=imp_col, y_col='speedup',
                     group_col='kernel_id', group_order=grouped_kernels,
-                    output_path=grouped_imp_dir / f"speedup_vs_{imp_col}.png",
-                    group_labels=kernel_labels, log_x=False, log_y=False,
-                    **_ratio_scatter_kw)))
-                tasks.append((pu.grouped_scatter_publication, dict(
-                    df=df_nc_reordered, x_col=imp_col, y_col='speedup',
-                    group_col='kernel_id', group_order=grouped_kernels,
-                    output_path=grouped_imp_log_dir / f"speedup_vs_{imp_col}_loglog.png",
+                    output_path=grouped_dir / f"speedup_vs_{imp_col}_loglog.png",
                     group_labels=kernel_labels, log_x=True, log_y=True,
-                    **_ratio_scatter_kw)))
+                    **_kw)))
 
-    print(f"\n  Collected {len(tasks)} kernel plot tasks")
+    print(f"\n  Collected {len(tasks)} grouped scatter tasks")
     pu.parallel_execute(tasks, n_jobs=n_jobs)
-
-
-def generate_singular_improvement_plots(df, out_dir, args):
-    """Improvement-vs-speedup scatter for each kernel individually.
-
-    Produces one ``scatter_publication`` per (kernel, improvement metric)
-    pair, in both linear and log-log variants.  Disabled by default;
-    invoke with ``--sections singular-improvement``.
-    """
-    print("\n=== Singular Kernel Improvement vs Speedup ===")
-    n_jobs = args.jobs
-
-    n_cols_values = sorted(df['n_cols'].unique())
-    if args.n_cols is not None:
-        if args.n_cols in n_cols_values:
-            n_cols_values = [args.n_cols]
-        else:
-            print(f"Warning: n_cols={args.n_cols} not found. Available: {n_cols_values}")
-            return
-
-    tasks = []
-
-    for n_cols in n_cols_values:
-        print(f"\n--- n_cols = {n_cols} ---")
-        df_nc = df[df['n_cols'] == n_cols]
-
-        kernels = sorted(df_nc['kernel_id'].unique())
-        if args.kernel:
-            kernels = [k for k in kernels if args.kernel.lower() in k.lower()]
-            if not kernels:
-                print(f"No kernels matching '{args.kernel}'")
-                continue
-
-        for kernel in kernels:
-            df_k = df_nc[df_nc['kernel_id'] == kernel]
-            df_reordered = df_k[df_k['strategy'] != 'Original']
-            if len(df_reordered) < 2:
-                continue
-
-            kernel_safe = pu.safe_filename(kernel)
-            kernel_label = KERNEL_NAMES.get(kernel, kernel)
-            base = out_dir / f"n_cols_{int(n_cols)}" / kernel_safe
-
-            imp_dir = base / "improvement_vs_speedup"
-            imp_dir.mkdir(parents=True, exist_ok=True)
-            imp_log_dir = base / "improvement_vs_speedup_loglog"
-            imp_log_dir.mkdir(parents=True, exist_ok=True)
-
-            print(f"  Collecting tasks for kernel: {kernel}")
-
-            _ratio_pres_kw = dict(ylim=RATIO_YLIM, xlim=RATIO_XLIM,
-                                   baseline_x=1.0, baseline_y=1.0,
-                                   quadrant_colors=True)
-
-            for bs in [4, 8, 16, 32, 64, 128]:
-                imp_col = f'density_improvement_{bs}'
-                if imp_col in df_reordered.columns:
-                    tasks.append((pu.scatter_presentation, dict(
-                        df=df_reordered, x_col=imp_col, y_col='speedup',
-                        output_path=imp_dir / f"speedup_vs_density_imp_bs{bs}.png",
-                        log_x=False, log_y=False, label=kernel_label,
-                        **_ratio_pres_kw)))
-                    tasks.append((pu.scatter_presentation, dict(
-                        df=df_reordered, x_col=imp_col, y_col='speedup',
-                        output_path=imp_log_dir / f"speedup_vs_density_imp_bs{bs}_loglog.png",
-                        log_x=True, log_y=True, label=kernel_label,
-                        **_ratio_pres_kw)))
-
-            for imp_col in ['bandwidth_improvement', 'row_spread_improvement',
-                            'vertical_adjacency_improvement',
-                            'reuse_distance_improvement',
-                            'index_distance_improvement']:
-                if imp_col in df_reordered.columns:
-                    tasks.append((pu.scatter_presentation, dict(
-                        df=df_reordered, x_col=imp_col, y_col='speedup',
-                        output_path=imp_dir / f"speedup_vs_{imp_col}.png",
-                        log_x=False, log_y=False, label=kernel_label,
-                        **_ratio_pres_kw)))
-                    tasks.append((pu.scatter_presentation, dict(
-                        df=df_reordered, x_col=imp_col, y_col='speedup',
-                        output_path=imp_log_dir / f"speedup_vs_{imp_col}_loglog.png",
-                        log_x=True, log_y=True, label=kernel_label,
-                        **_ratio_pres_kw)))
-
-    print(f"\n  Collected {len(tasks)} singular improvement plot tasks")
-    pu.parallel_execute(tasks, n_jobs=n_jobs)
-
-
-def generate_original_scatter_plots(df, out_dir, args):
-    """Generate grouped scatter plots using only original (unreordered) matrices.
-
-    For each n_cols value, produces 2x3 grids (one subplot per kernel) showing
-    how the original matrix structure relates to kernel performance.
-    """
-    print("\n=== Original-Only Grouped Scatter Plots ===")
-
-    df_orig = df[df['strategy'] == 'Original'].copy()
-    if df_orig.empty:
-        print("No original (perm=None) data found — skipping.")
-        return
-
-    n_cols_values = sorted(df_orig['n_cols'].unique())
-    if args.n_cols is not None:
-        if args.n_cols in n_cols_values:
-            n_cols_values = [args.n_cols]
-        else:
-            print(f"Warning: n_cols={args.n_cols} not found. Available: {n_cols_values}")
-            return
-
-    density_cols = pu.get_density_columns(df_orig)
-
-    # Structural x-metrics to plot against GFLOPS
-    structural_metrics = []
-    for dc in density_cols:
-        structural_metrics.append(dc)
-    for col in ['rel_bandwidth', 'rel_row_spread',
-                'locality_vertical_adjacency_ratio', 'density']:
-        if col in df_orig.columns:
-            structural_metrics.append(col)
-
-    for n_cols in n_cols_values:
-        print(f"\n--- n_cols = {n_cols} ---")
-        df_nc = df_orig[df_orig['n_cols'] == n_cols]
-
-        kernels = sorted(df_nc['kernel_id'].unique())
-        if args.kernel:
-            kernels = [k for k in kernels if args.kernel.lower() in k.lower()]
-            if not kernels:
-                print(f"No kernels matching '{args.kernel}'")
-                continue
-
-        grouped_kernels_orig = [k for k in kernels if k not in GROUPED_SCATTER_EXCLUDE]
-        kernel_labels = {k: KERNEL_NAMES.get(k, k) for k in grouped_kernels_orig}
-
-        # Log-log grouped scatter (original only)
-        scatter_dir = out_dir / f"n_cols_{int(n_cols)}" / "grouped_scatter_original"
-        scatter_dir.mkdir(parents=True, exist_ok=True)
-
-        for x_col in structural_metrics:
-            safe = pu.safe_filename(x_col)
-            pu.grouped_scatter_publication(
-                df_nc, x_col, 'gflops', 'kernel_id', grouped_kernels_orig,
-                scatter_dir / f"gflops_vs_{safe}.png",
-                group_labels=kernel_labels,
-            )
-
-        # Linear-linear grouped scatter (original only)
-        scatter_linear_dir = out_dir / f"n_cols_{int(n_cols)}" / "grouped_scatter_original_linear"
-        scatter_linear_dir.mkdir(parents=True, exist_ok=True)
-
-        for x_col in structural_metrics:
-            safe = pu.safe_filename(x_col)
-            pu.grouped_scatter_publication(
-                df_nc, x_col, 'gflops', 'kernel_id', grouped_kernels_orig,
-                scatter_linear_dir / f"gflops_vs_{safe}_linear.png",
-                group_labels=kernel_labels,
-                log_x=False, log_y=False,
-            )
-
-    print(f"  Original-only scatter plots saved under {out_dir}/n_cols_*/grouped_scatter_original*/")
-
-
-def generate_reorderability_plots(df_analysis, out_dir):
-    """Generate plots analyzing which matrices are easy/hard to reorder.
-    
-    Compares baseline (original) metrics against maximum improvement ratio achieved
-    by any reordering algorithm. This helps identify structural predictors of reorderability.
-    """
-    print("\n=== Reorderability Analysis ===")
-    
-    reorder_dir = out_dir / "reorder_analysis" / "reorderability"
-    reorder_dir.mkdir(parents=True, exist_ok=True)
-    
-    df = df_analysis.copy()
-    df['perm'] = df['perm'].fillna('None').astype(str)
-    
-    # Metrics to analyze: (metric_name, higher_is_better)
-    # higher_is_better means improvement = best_reordered / baseline
-    # higher_is_better=False means improvement = baseline / best_reordered
-    metrics_to_analyze = [
-        ('block_density_32', True, 'Block Density (32×32)'),
-        ('block_density_64', True, 'Block Density (64×64)'),
-        ('locality_vertical_adjacency_ratio', True, 'Vertical Adjacency Ratio'),
-        ('bandwidth_max', False, 'Bandwidth'),
-        ('locality_avg_row_spread', False, 'Avg Row Spread'),
-        ('access_dist_reuse_distance_mean', False, 'Mean Reuse Distance'),
-        ('access_dist_index_distance_mean', False, 'Mean Index Distance'),
-    ]
-    
-    # Baseline metrics to correlate against
-    baseline_features = [
-        ('density', 'Matrix Density'),
-        ('rows', 'Matrix Size (rows)'),
-        ('nnz', 'Nonzeros'),
-        ('locality_avg_nnz_per_row', 'Avg NNZ per Row'),
-    ]
-    
-    results_list = []
-    
-    for metric, higher_is_better, metric_display in metrics_to_analyze:
-        if metric not in df.columns:
-            print(f"  Skipping {metric}: not in data")
-            continue
-        
-        print(f"\n  Processing: {metric}")
-        
-        # For each matrix, get baseline and best reordering
-        for matrix in df['matrix'].unique():
-            df_m = df[df['matrix'] == matrix]
-            
-            baseline = df_m[df_m['perm'] == 'None']
-            reordered = df_m[df_m['perm'] != 'None']
-            
-            if baseline.empty or reordered.empty:
-                continue
-            
-            baseline_val = baseline[metric].iloc[0]
-            if pd.isna(baseline_val) or baseline_val == 0:
-                continue
-            
-            if higher_is_better:
-                best_val = reordered[metric].max()
-                best_perm = reordered.loc[reordered[metric].idxmax(), 'perm']
-                improvement = best_val / baseline_val
-            else:
-                best_val = reordered[metric].min()
-                best_perm = reordered.loc[reordered[metric].idxmin(), 'perm']
-                improvement = baseline_val / best_val if best_val > 0 else np.nan
-            
-            row_data = {
-                'matrix': matrix,
-                'metric': metric,
-                'metric_display': metric_display,
-                'baseline_value': baseline_val,
-                'best_value': best_val,
-                'best_perm': best_perm,
-                'improvement_ratio': improvement,
-            }
-            
-            # Add baseline features
-            for feat, _ in baseline_features:
-                if feat in baseline.columns:
-                    row_data[f'baseline_{feat}'] = baseline[feat].iloc[0]
-            
-            results_list.append(row_data)
-    
-    if not results_list:
-        print("  No reorderability data to plot")
-        return
-    
-    results_df = pd.DataFrame(results_list)
-    
-    # Save results to CSV
-    results_df.to_csv(reorder_dir / "reorderability_summary.csv", index=False)
-    print(f"  Saved summary to reorderability_summary.csv")
-    
-    # Generate plots for each metric
-    for metric, _, metric_display in metrics_to_analyze:
-        if metric not in df.columns:
-            continue
-        
-        df_metric = results_df[results_df['metric'] == metric].copy()
-        if df_metric.empty:
-            continue
-        
-        metric_safe = pu.safe_filename(metric)
-        y_label = f'Max {metric_display} Improvement Ratio'
-        
-        # No clipping by default (can be enabled by setting apply_clipping=True)
-        apply_clipping = False
-        if apply_clipping:
-            upper_bound = df_metric['improvement_ratio'].quantile(0.99)
-            df_metric_clipped = df_metric[df_metric['improvement_ratio'] <= upper_bound].copy()
-            n_outliers = len(df_metric) - len(df_metric_clipped)
-            clip_note = f'\n(99th percentile, {n_outliers} outliers removed)' if n_outliers > 0 else ''
-        else:
-            df_metric_clipped = df_metric.copy()
-            clip_note = ''
-        
-        # 1. Histogram of improvement ratios
-        fig, ax = plt.subplots(figsize=(12, 7))
-        ax.hist(df_metric_clipped['improvement_ratio'].dropna(), bins=30, edgecolor='black', alpha=0.7)
-        ax.axvline(x=1.0, color='red', linestyle='--', linewidth=2, label='No improvement')
-        ax.set_xlabel(y_label)
-        ax.set_ylabel('Number of Matrices')
-        ax.set_title(f'Distribution of Reorderability\n{metric_display}{clip_note}')
-        ax.legend()
-        ax.grid(True, alpha=0.3)
-        plt.tight_layout()
-        plt.savefig(reorder_dir / f"improvement_hist_{metric_safe}.png", dpi=150)
-        plt.close()
-        print(f"  Saved: improvement_hist_{metric_safe}.png")
-        
-        # 2. Baseline value vs Improvement (can we predict from original structure?)
-        fig, ax = plt.subplots(figsize=(11, 8))
-        ax.scatter(df_metric_clipped['baseline_value'], df_metric_clipped['improvement_ratio'], alpha=0.5)
-        
-        # Add correlation (use full data for correlation)
-        valid = df_metric[['baseline_value', 'improvement_ratio']].dropna()
-        if len(valid) > 10:
-            tau, p = stats.kendalltau(valid['baseline_value'], valid['improvement_ratio'])
-            pearson_r, _ = stats.pearsonr(valid['baseline_value'], valid['improvement_ratio'])
-            ax.set_title(f'Improvement vs {metric_display}\nτ = {tau:.3f}, r = {pearson_r:.3f}{clip_note}')
-        else:
-            ax.set_title(f'Improvement vs {metric_display}{clip_note}')
-        
-        ax.set_xlabel(f'{metric_display}')
-        ax.set_ylabel(y_label)
-        ax.axhline(y=1.0, color='#CC0000', linestyle='--', linewidth=1.0, alpha=0.6)
-        ax.set_xscale('log')
-        ax.set_yscale('log')
-        ax.set_ylim(RATIO_YLIM)
-        pu.format_log_axes(ax, which='x', dense=False)
-        pu.format_log_axes(ax, which='y', dense=True)
-        ax.legend()
-        plt.tight_layout()
-        plt.savefig(reorder_dir / f"baseline_vs_improvement_{metric_safe}.png", dpi=150)
-        plt.close()
-        print(f"  Saved: baseline_vs_improvement_{metric_safe}.png")
-        
-        # 3-6. Baseline features vs Improvement
-        feature_scatter_specs = [
-            ('baseline_density', 'Matrix Density', 'density_vs_improvement'),
-            ('baseline_rows', 'Matrix Size (rows)', 'size_vs_improvement'),
-            ('baseline_nnz', 'Nonzeros', 'nnz_vs_improvement'),
-            ('baseline_locality_avg_nnz_per_row', 'Avg Nonzeros per Row', 'nnz_per_row_vs_improvement'),
-        ]
-        for x_col, x_label, filename_prefix in feature_scatter_specs:
-            _reorderability_scatter(
-                df_metric, df_metric_clipped, x_col, x_label, y_label,
-                metric_display, clip_note,
-                reorder_dir / f"{filename_prefix}_{metric_safe}.png")
-    
-    print(f"\n  All reorderability plots saved to {reorder_dir}")
-
-
-def _reorderability_scatter(df_full, df_clipped, x_col, x_label, y_label,
-                            metric_display, clip_note, output_path):
-    """Scatter plot: x_col vs improvement_ratio with Kendall/Pearson annotation."""
-    if x_col not in df_clipped.columns:
-        return
-    fig, ax = plt.subplots(figsize=(11, 8))
-    ax.scatter(df_clipped[x_col], df_clipped['improvement_ratio'], alpha=0.5)
-
-    valid = df_full[[x_col, 'improvement_ratio']].dropna()
-    if len(valid) > 10:
-        tau, _ = stats.kendalltau(valid[x_col], valid['improvement_ratio'])
-        pearson_r, _ = stats.pearsonr(valid[x_col], valid['improvement_ratio'])
-        ax.set_title(f'{metric_display} Improvement vs {x_label}\n'
-                     f'\u03c4 = {tau:.3f}, r = {pearson_r:.3f}{clip_note}')
-    else:
-        ax.set_title(f'{metric_display} Improvement vs {x_label}{clip_note}')
-
-    ax.set_xlabel(x_label)
-    ax.set_ylabel(y_label)
-    ax.axhline(y=1.0, color='red', linestyle='--', alpha=0.7)
-    ax.set_xscale('log')
-    ax.set_yscale('log')
-    ax.set_ylim(RATIO_YLIM)
-    pu.format_log_axes(ax, which='x', dense=False)
-    pu.format_log_axes(ax, which='y', dense=True)
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=150)
-    plt.close()
-    print(f"  Saved: {output_path.name}")
-
-
-def generate_improvability_summary_plots(df_analysis, out_dir):
-    """CDF of best improvement per metric.
-
-    For each structural metric, compute the best improvement ratio any
-    reordering algorithm achieves for each matrix.  Plot a single CDF
-    with one line per metric showing the fraction of matrices that achieve
-    at least a given best-improvement ratio.
-    """
-    imp_dir = Path(out_dir) / "reorder_analysis" / "improvability"
-    imp_dir.mkdir(parents=True, exist_ok=True)
-
-    df = df_analysis.copy()
-    df['perm'] = df['perm'].fillna('None').astype(str)
-
-    metrics_to_analyze = [
-        ('block_density_16', True, 'Block Density (16×16)'),
-        ('locality_vertical_adjacency_ratio', True, 'Vertical Adjacency Ratio'),
-        ('bandwidth_max', False, 'Bandwidth'),
-        ('locality_avg_row_spread', False, 'Avg Row Spread'),
-        ('access_dist_reuse_distance_mean', False, 'Mean Reuse Distance'),
-        ('access_dist_index_distance_mean', False, 'Mean Index Distance'),
-    ]
-
-    # Compute best improvement per matrix per metric
-    records = []
-    for metric, higher_is_better, metric_display in metrics_to_analyze:
-        if metric not in df.columns:
-            print(f"  Skipping {metric}: not in data")
-            continue
-
-        for matrix in df['matrix'].unique():
-            df_m = df[df['matrix'] == matrix]
-            baseline = df_m[df_m['perm'] == 'None']
-            reordered = df_m[df_m['perm'] != 'None']
-
-            if baseline.empty or reordered.empty:
-                continue
-
-            baseline_val = baseline[metric].iloc[0]
-            if pd.isna(baseline_val) or baseline_val == 0:
-                continue
-
-            if higher_is_better:
-                best_val = reordered[metric].max()
-                improvement = best_val / baseline_val
-            else:
-                best_val = reordered[metric].min()
-                improvement = baseline_val / best_val if best_val > 0 else np.nan
-
-            if pd.isna(improvement):
-                continue
-
-            records.append({
-                'matrix': matrix,
-                'metric_display': metric_display,
-                'best_improvement': improvement,
-            })
-
-    if not records:
-        print("  No improvability data to plot")
-        return
-
-    results_df = pd.DataFrame(records)
-
-    # Plot CDF — one line per metric
-    fig, ax = plt.subplots(figsize=(10, 6))
-
-    # Consistent metric colors (matching imp-correlation plots)
-    _metric_color_map = {
-        'bandwidth_max':                       '#6B9AC4',  # steel blue
-        'locality_avg_row_spread':             '#D4A574',  # warm sand
-        'locality_vertical_adjacency_ratio':   '#7DB58A',  # sage green
-        'access_dist_reuse_distance_mean':     '#E8A838',  # amber
-        'access_dist_index_distance_mean':     '#E05858',  # coral red
-        'block_density_16':                    '#9B82B0',  # muted purple
-    }
-
-    for metric, _, metric_display in metrics_to_analyze:
-        vals = np.sort(results_df.loc[
-            results_df['metric_display'] == metric_display, 'best_improvement'
-        ].dropna().values)
-        if len(vals) == 0:
-            continue
-        # CCDF: fraction of matrices with improvement >= x
-        fractions = np.arange(len(vals), 0, -1) / len(vals)
-        color = _metric_color_map.get(metric, '#333333')
-        ax.step(vals, fractions, where='post', label=metric_display, color=color,
-                linewidth=1.8)
-
-    ax.axvline(x=1.0, color='grey', linestyle='--', linewidth=1, alpha=0.7,
-               label='No improvement')
-    ax.set_xscale('log')
-    pu.format_log_axes(ax, which='x', dense=False)
-    ax.set_xlabel('Best Improvement Ratio (any algorithm)')
-    ax.set_ylabel('Fraction of Matrices ≥ x')
-    ax.set_title('Improvability CDF — Best Improvement per Metric')
-    ax.set_ylim(0, 1.05)
-    ax.legend(fontsize=8, loc='upper right')
-    ax.grid(True, alpha=0.3)
-    plt.tight_layout()
-    output_path = imp_dir / "cdf_best_improvement.png"
-    plt.savefig(output_path, dpi=150)
-    plt.close()
-    print(f"  Saved: {output_path}")
-
-
-def generate_per_matrix_study(df_analysis, out_dir):
-    """Per-matrix difficulty study.
-
-    For each structural metric, compute the improvement ratio of every
-    reordering relative to the original.  Then, per matrix, summarise
-    across all reorderings:
-        * geometric mean of improvement ratios  (= exp(mean(log(ratio))))
-        * max improvement ratio                 (best single reordering)
-        * variance of log-improvement           (spread across reorderings)
-
-    Produces scatter plots in (geomean, variance) and (max, variance)
-    space so that easy/hard matrices can be identified visually.
-    """
-    print("\n=== Per-Matrix Difficulty Study ===")
-
-    study_dir = out_dir / "reorder_analysis" / "per_matrix_study"
-    study_dir.mkdir(parents=True, exist_ok=True)
-
-    df = df_analysis.copy()
-    df['perm'] = df['perm'].fillna('None').astype(str)
-
-    # Metrics to study: (column, higher_is_better, display_name)
-    metrics_to_study = [
-        ('block_density_32',  True,  'Block Density (32×32)'),
-        ('block_density_64',  True,  'Block Density (64×64)'),
-        ('locality_vertical_adjacency_ratio', True,  'Vertical Adjacency Ratio'),
-        ('bandwidth_max',     False, 'Bandwidth'),
-        ('locality_avg_row_spread', False, 'Avg Row Spread'),
-    ]
-
-    for metric, higher_is_better, metric_display in metrics_to_study:
-        if metric not in df.columns:
-            print(f"  Skipping {metric}: not in data")
-            continue
-
-        print(f"  Processing: {metric}")
-
-        rows = []
-        for matrix in df['matrix'].unique():
-            df_m = df[df['matrix'] == matrix]
-            baseline = df_m[df_m['perm'] == 'None']
-            reordered = df_m[df_m['perm'] != 'None']
-
-            if baseline.empty or reordered.empty:
-                continue
-
-            baseline_val = baseline[metric].iloc[0]
-            if pd.isna(baseline_val) or baseline_val == 0:
-                continue
-
-            # Compute improvement ratio for every reordering
-            if higher_is_better:
-                ratios = reordered[metric] / baseline_val
-            else:
-                ratios = baseline_val / reordered[metric]
-
-            ratios = ratios.replace([np.inf, -np.inf], np.nan).dropna()
-            ratios = ratios[ratios > 0]
-
-            if len(ratios) < 2:
-                continue
-
-            log_ratios = np.log(ratios)
-            geomean = np.exp(log_ratios.mean())
-            max_improvement = ratios.max()
-            variance = log_ratios.var()
-
-            rows.append({
-                'matrix': matrix,
-                'geomean_improvement': geomean,
-                'max_improvement': max_improvement,
-                'log_variance': variance,
-                'n_reorderings': len(ratios),
-            })
-
-        if not rows:
-            print(f"    No data for {metric}")
-            continue
-
-        res = pd.DataFrame(rows)
-
-        # Save CSV
-        metric_safe = pu.safe_filename(metric)
-        res.to_csv(study_dir / f"per_matrix_{metric_safe}.csv", index=False)
-
-        # ── Scatter plot ─────────────────────────────────────────────
-        fig, ax = plt.subplots(figsize=(11, 8))
-
-        ax.scatter(res['geomean_improvement'], res['log_variance'],
-                   alpha=0.55, edgecolors='k', linewidths=0.3, s=36)
-
-        # Reference line at geomean = 1 (no average improvement)
-        ax.axvline(x=1.0, color='red', linestyle='--', linewidth=1.2,
-                   label='No avg. improvement')
-
-        ax.set_xlabel('Geometric Mean of Improvement Ratio')
-        ax.set_ylabel('Variance of log(Improvement Ratio)')
-        ax.set_title(f'Per-Matrix Difficulty — {metric_display}\n'
-                     f'({len(res)} matrices, improvement > 1 = beneficial)')
-        ax.legend()
-        ax.grid(True, alpha=0.3)
-
-        # Log scale on x if range is large
-        if res['geomean_improvement'].max() / max(res['geomean_improvement'].min(), 1e-9) > 20:
-            ax.set_xscale('log')
-            pu.format_log_axes(ax)
-
-        plt.tight_layout()
-        plt.savefig(study_dir / f"geomean_vs_variance_{metric_safe}.png", dpi=150)
-        plt.close()
-        print(f"    Saved: geomean_vs_variance_{metric_safe}.png")
-
-        # ── Max improvement vs variance scatter ──────────────────────
-        fig, ax = plt.subplots(figsize=(11, 8))
-
-        ax.scatter(res['max_improvement'], res['log_variance'],
-                   alpha=0.55, edgecolors='k', linewidths=0.3, s=36)
-
-        ax.axvline(x=1.0, color='red', linestyle='--', linewidth=1.2,
-                   label='No improvement')
-
-        ax.set_xlabel('Max Improvement Ratio (Best Reordering)')
-        ax.set_ylabel('Variance of log(Improvement Ratio)')
-        ax.set_title(f'Per-Matrix Difficulty (Max) — {metric_display}\n'
-                     f'({len(res)} matrices, improvement > 1 = beneficial)')
-        ax.legend()
-        ax.grid(True, alpha=0.3)
-
-        if res['max_improvement'].max() / max(res['max_improvement'].min(), 1e-9) > 20:
-            ax.set_xscale('log')
-            pu.format_log_axes(ax)
-
-        plt.tight_layout()
-        plt.savefig(study_dir / f"max_vs_variance_{metric_safe}.png", dpi=150)
-        plt.close()
-        print(f"    Saved: max_vs_variance_{metric_safe}.png")
-
-        # ── Annotate extreme matrices (optional info) ────────────────
-        top_easy = res.nlargest(5, 'geomean_improvement')[['matrix', 'geomean_improvement', 'log_variance']]
-        top_hard = res.nsmallest(5, 'geomean_improvement')[['matrix', 'geomean_improvement', 'log_variance']]
-        top_max  = res.nlargest(5, 'max_improvement')[['matrix', 'max_improvement', 'log_variance']]
-        top_variable = res.nlargest(5, 'log_variance')[['matrix', 'geomean_improvement', 'log_variance']]
-        print(f"    Top-5 easiest (highest geomean): {top_easy['matrix'].tolist()}")
-        print(f"    Top-5 hardest (lowest geomean):  {top_hard['matrix'].tolist()}")
-        print(f"    Top-5 best max improvement:      {top_max['matrix'].tolist()}")
-        print(f"    Top-5 most variable:             {top_variable['matrix'].tolist()}")
-
-    print(f"\n  Per-matrix study saved to {study_dir}")
-
-
-def generate_reorder_timing_plots(df_analysis, out_dir, reordering_csv='results/results_reordering.csv', cfg=None):
-    """Generate reordering timing analysis plots (nnz vs reordering time).
-
-    Loads ``results_reordering.csv`` (produced by ``parse_results.py``) and
-    joins it with the analysis DataFrame to get nnz per matrix. Then creates
-    scatter plots of nnz vs reordering time, coloured by algorithm.
-    """
-    print("\n=== Reordering Timing Analysis ===")
-
-    reorder_csv_path = Path(reordering_csv)
-    if not reorder_csv_path.exists():
-        print(f"  Reordering CSV not found at {reorder_csv_path} — skipping timing plots. "
-              "Run  python scripts/parse_results.py  first to generate it.")
-        return
-
-    df_time = pd.read_csv(reorder_csv_path)
-    # Apply the same exclude_perms filter used for ops/analysis data
-    exclude_perms = (cfg or {}).get('filters', {}).get('exclude_perms', [])
-    if exclude_perms:
-        df_time = df_time[~df_time['perm'].isin(exclude_perms)]
-    print(f"  Loaded {len(df_time)} reordering timing rows")
-
-    if df_time.empty or 'time_reordering_ms' not in df_time.columns:
-        print("  No reordering timing data available — skipping.")
-        return
-
-    # Get nnz from analysis data (use the Original / baseline row for each matrix)
-    df_base = df_analysis[df_analysis['perm'] == 'None'][['matrix', 'nnz', 'rows']].drop_duplicates('matrix')
-    df_time = df_time.merge(df_base, on='matrix', how='inner')
-
-    if df_time.empty:
-        print("  No matching matrices between timing and analysis data — skipping.")
-        return
-
-    # Map perm tag to display name
-    df_time['strategy'] = df_time['perm'].apply(
-        lambda x: get_perm_display(x) if x != 'None' else 'Original'
-    )
-    # Drop any Original rows (shouldn't be any, but just in case)
-    df_time = df_time[df_time['strategy'] != 'Original']
-
-    timing_dir = out_dir / "reorder_analysis" / "timing"
-    timing_dir.mkdir(parents=True, exist_ok=True)
-
-    strategies = sorted(df_time['strategy'].unique())
-    palette = pu.get_strategy_palette(strategies)
-
-    # --- Scatter: nnz vs reordering time (all algorithms, coloured) ---
-    pu.scatter_with_correlation(
-        df_time, 'nnz', 'time_reordering_ms',
-        timing_dir / "nnz_vs_reordering_time.png",
-        title="Reordering Time vs Matrix NNZ",
-        hue_col='strategy',
-        log_x=True, log_y=True,
-    )
-
-    # --- Per-algorithm scatter: nnz vs reordering time ---
-    for strat in strategies:
-        df_s = df_time[df_time['strategy'] == strat]
-        if len(df_s) < 2:
-            continue
-        pu.scatter_with_correlation(
-            df_s, 'nnz', 'time_reordering_ms',
-            timing_dir / f"nnz_vs_time_{pu.safe_filename(strat)}.png",
-            title=f"Reordering Time vs NNZ — {strat}",
-            log_x=True, log_y=True,
-        )
-
-    # --- Boxplot: reordering time by algorithm ---
-    pu.boxplot_by_category(
-        df_time, 'strategy', 'time_reordering_ms',
-        timing_dir / "reordering_time_boxplot.png",
-        title="Reordering Time by Algorithm",
-        order=strategies,
-        log_y=True,
-        palette=palette,
-    )
-
-    # --- Scatter: rows vs reordering time ---
-    pu.scatter_with_correlation(
-        df_time, 'rows', 'time_reordering_ms',
-        timing_dir / "rows_vs_reordering_time.png",
-        title="Reordering Time vs Matrix Rows",
-        hue_col='strategy',
-        log_x=True, log_y=True,
-    )
-
-    print(f"  Timing plots saved to {timing_dir}")
 
 
 def generate_breakeven_plots(df, out_dir, reordering_csv='results/results_reordering.csv', args=None):
@@ -1189,43 +310,13 @@ def generate_reorder_analysis_plots(df_analysis, out_dir, n_jobs=None):
     # -----------------------------------------------------------------
     # All boxplot sections: (imp_col, title_template, subdir, filename_template)
     # -----------------------------------------------------------------
-    boxplot_specs = [
-        ('bandwidth_improvement',
-         "Bandwidth Reduction (Original / Reordered)",
-         "bandwidth", "bandwidth_reduction.png"),
-        ('bandwidth_avg_improvement',
-         "Avg Bandwidth Reduction (Original / Reordered)",
-         "bandwidth", "bandwidth_avg_reduction.png"),
-    ]
+    boxplot_specs = []
 
     for bs in [4, 8, 16, 32, 64, 128]:
         boxplot_specs.append((
             f'density_improvement_{bs}',
             f"Density Improvement (BS {bs})",
             "density", f"density_improvement_bs{bs}.png"))
-
-    for bs in [4, 8, 16, 32, 64, 128]:
-        for prefix, name in [('avg', 'Avg'), ('max', 'Max')]:
-            boxplot_specs.append((
-                f'{prefix}_blocks_per_row_improvement_{bs}',
-                f"{name} Blocks/Row Reduction (BS {bs})",
-                "blocks_per_row",
-                f"{prefix}_blocks_per_row_improvement_bs{bs}.png"))
-
-    for imp_col, name in [
-        ('row_spread_improvement', 'Row Spread Reduction'),
-        ('max_row_spread_improvement', 'Max Row Spread Reduction'),
-        ('col_spread_improvement', 'Col Spread Reduction'),
-        ('max_col_spread_improvement', 'Max Col Spread Reduction'),
-        ('vertical_adjacency_improvement', 'Vertical Adjacency Improvement'),
-        ('reuse_distance_improvement', 'Reuse Distance Reduction'),
-        ('reuse_distance_median_improvement', 'Median Reuse Distance Reduction'),
-        ('index_distance_improvement', 'Index Distance Reduction'),
-        ('index_distance_median_improvement', 'Median Index Distance Reduction'),
-    ]:
-        boxplot_specs.append((
-            imp_col, name,
-            "locality", f"{imp_col}.png"))
 
     # Collect all boxplot tasks
     tasks = []
@@ -1237,74 +328,12 @@ def generate_reorder_analysis_plots(df_analysis, out_dir, n_jobs=None):
         tasks.append((pu.boxplot_by_category, dict(
             df=df_reordered, x_col='strategy', y_col=imp_col,
             output_path=output_dir / filename,
-            title=title_text,
+            title=None,
             order=[s for s in strategies if s in df_reordered['strategy'].unique()],
             baseline=1.0, log_y=True)))
 
     print(f"  Collected {len(tasks)} reorder analysis plot tasks")
     pu.parallel_execute(tasks, n_jobs=n_jobs)
-
-
-def _profile_perm_order(perm_values):
-    """Canonical perm order for profile plots — Original drawn last (on top)."""
-    seen = set()
-    order = [p for p in list(PERMS)
-             if p != 'None' and p in perm_values
-             and not (p in seen or seen.add(p))]
-    if 'None' in perm_values:
-        order.append('None')
-    return order
-
-
-def _draw_profile_curve(ax, taus_asc, n_matrices, perm, xlim_lo, xlim_hi,
-                         higher_is_better):
-    """Draw one perm's Dolan-Moré profile curve on *ax*.
-
-    *taus_asc* must be sorted ascending.  For higher_is_better metrics the
-    survival function is plotted (x from 1→0); for lower_is_better the CDF
-    is plotted (x from 1→∞).
-    """
-    n = len(taus_asc)
-    color = get_perm_color(perm)
-    label = get_perm_display(perm)
-    ls = ':' if perm == 'None' else '-'
-    lw = 2.5 if perm == 'None' else 1.5
-    if perm == 'None':
-        color = 'red'
-
-    if higher_is_better:
-        taus = taus_asc[::-1]                       # descending
-        fracs = np.arange(1, n + 1) / n_matrices
-        n_best = (taus >= 1.0 - 1e-9).sum()
-        y_at_1 = n_best / n_matrices
-        taus_rest = taus[n_best:]
-        fracs_rest = fracs[n_best:]
-        if len(taus_rest) > 0:
-            ax.step(taus_rest, fracs_rest, where='pre',
-                    label=label, color=color, linewidth=lw, linestyle=ls)
-            ax.plot([xlim_hi, taus_rest[0]], [y_at_1, y_at_1],
-                    color=color, linewidth=lw, linestyle=ls)
-            ax.plot([taus_rest[-1], xlim_lo], [fracs_rest[-1], fracs_rest[-1]],
-                    color=color, linewidth=lw, linestyle=ls)
-        else:
-            ax.plot([xlim_hi, xlim_lo], [y_at_1, y_at_1],
-                    label=label, color=color, linewidth=lw, linestyle=ls)
-    else:
-        fracs = np.arange(1, n + 1) / n_matrices
-        n_best = (taus_asc <= 1.0 + 1e-9).sum()
-        y_at_1 = n_best / n_matrices
-        taus_rest = taus_asc[n_best:]
-        fracs_rest = fracs[n_best:]
-        if len(taus_rest) > 0:
-            ax.step(taus_rest, fracs_rest, where='pre',
-                    label=label, color=color, linewidth=lw, linestyle=ls)
-            ax.plot([xlim_lo, taus_rest[0]], [y_at_1, y_at_1],
-                    color=color, linewidth=lw, linestyle=ls)
-            ax.plot([taus_rest[-1], xlim_hi], [fracs_rest[-1], fracs_rest[-1]],
-                    color=color, linewidth=lw, linestyle=ls)
-        else:
-            ax.plot([xlim_lo, xlim_hi], [y_at_1, y_at_1],
-                    label=label, color=color, linewidth=lw, linestyle=ls)
 
 
 def generate_profile_plots(df_analysis, out_dir):
@@ -1398,7 +427,7 @@ def generate_profile_plots(df_analysis, out_dir):
     fig, axes = plt.subplots(nrows, ncols, figsize=(5 * ncols, 4 * nrows),
                              squeeze=False)
 
-    perm_order = _profile_perm_order(set(group_df['perm'].unique()))
+    perm_order = pu.profile_perm_order(set(group_df['perm'].unique()))
 
     for idx, m in enumerate(profile_metrics):
         ax = axes[idx // ncols][idx % ncols]
@@ -1418,7 +447,7 @@ def generate_profile_plots(df_analysis, out_dir):
         for perm in perm_order:
             if perm not in data or len(data[perm]) == 0:
                 continue
-            _draw_profile_curve(ax, data[perm], n_matrices, perm,
+            pu.draw_profile_curve(ax, data[perm], n_matrices, perm,
                                 xlim_lo, xlim_hi, hib)
 
         ax.set_title(get_metric_display(m), fontsize=10)
@@ -1476,7 +505,7 @@ def generate_profile_plots(df_analysis, out_dir):
             for perm in perm_order:
                 if perm not in data_bd or len(data_bd[perm]) == 0:
                     continue
-                _draw_profile_curve(ax_bd, data_bd[perm], n_matrices_bd, perm,
+                pu.draw_profile_curve(ax_bd, data_bd[perm], n_matrices_bd, perm,
                                     xlim_lo_bd, xlim_hi_bd, higher_is_better=True)
             ax_bd.set_xlabel(f'{get_metric_display(bd_metric)} relative to the best')
             ax_bd.set_ylabel('Fraction of matrices')
@@ -1577,32 +606,25 @@ def generate_profile_aggregate_boxplot(df_analysis, out_dir):
         print("  No improvement data — skipping aggregate boxplot.")
         return
 
-    # Metric color map (consistent with imp-correlation plots)
-    _metric_color_map = {
-        'bandwidth_improvement': '#6B9AC4',
-        'col_spread_improvement': '#D4A574',
-        'vertical_adjacency_improvement': '#7DB58A',
-        'profile_improvement': '#C47A7A',
-        'reuse_distance_improvement': '#E8A838',
-        'index_distance_improvement': '#E05858',
-        'density_improvement_16': '#9B82B0',
-    }
-    metric_palette = {imp_display[k]: _metric_color_map[k]
-                      for k in imp_cols if k in _metric_color_map}
-
-    # Strategy order (exclude Original)
+    # Strategy order & palette (exclude Original) — same as aggregate speedup
     strat_order = [get_perm_display(p) for p in PERMS if p != 'None']
     strat_order = [s for s in strat_order if s in df_long['strategy'].unique()]
+    strat_palette = pu.get_strategy_palette()
+    strat_palette = {k: v for k, v in strat_palette.items() if k != 'Original'}
 
     metric_order = [imp_display[c] for c in imp_cols if c in imp_display]
 
-    n_strategies = len(strat_order)
-    fig, ax = plt.subplots(figsize=(max(14, n_strategies * 1.5), 6))
-
     import seaborn as sns
+    agg_dir = out_dir / 'reorder_analysis' / 'aggregate_improvement'
+    agg_dir.mkdir(parents=True, exist_ok=True)
+
+    # Metrics on x-axis, reordering algorithms as hue (mirrors aggregate speedup by kernel)
+    n_metrics = len(metric_order)
+    fig, ax = plt.subplots(figsize=(max(14, n_metrics * 2.0), 6))
+
     sns.boxplot(
-        data=df_long, x='strategy', y='improvement', hue='metric_display',
-        order=strat_order, hue_order=metric_order, palette=metric_palette,
+        data=df_long, x='metric_display', y='improvement', hue='strategy',
+        order=metric_order, hue_order=strat_order, palette=strat_palette,
         ax=ax, fliersize=1.5, linewidth=0.8,
         whis=(5, 95), showfliers=False,
         medianprops=dict(color='red', linewidth=0.8),
@@ -1611,7 +633,6 @@ def generate_profile_aggregate_boxplot(df_analysis, out_dir):
     ax.axhline(y=1.0, color='black', linestyle='--', linewidth=0.8, alpha=0.6)
     ax.set_xlabel('')
     ax.set_ylabel('Improvement ratio')
-    ax.set_title('Structural Metric Improvement by Reordering Algorithm')
 
     ax.set_yscale('log')
     p05 = df_long['improvement'].quantile(0.02)
@@ -1619,15 +640,13 @@ def generate_profile_aggregate_boxplot(df_analysis, out_dir):
     ax.set_ylim(p05 / 1.3, p95 * 1.3)
     pu.format_log_axes(ax, which='y')
 
-    ax.legend(title=None, bbox_to_anchor=(0.5, -0.18), loc='upper center',
-              ncol=len(metric_order), fontsize=8, frameon=False)
+    ax.legend(title=None, bbox_to_anchor=(0.5, 1.02), loc='lower center',
+              ncol=len(strat_order), fontsize=10, frameon=False)
     ax.tick_params(axis='x', rotation=30)
     ax.grid(True, axis='y', alpha=0.3)
 
     fig.tight_layout()
 
-    agg_dir = out_dir / 'reorder_analysis' / 'aggregate_improvement'
-    agg_dir.mkdir(parents=True, exist_ok=True)
     for ext in ('pdf', 'png'):
         fig.savefig(agg_dir / f'aggregate_improvement_boxplot.{ext}',
                     bbox_inches='tight', dpi=150)
@@ -1638,11 +657,10 @@ def generate_profile_aggregate_boxplot(df_analysis, out_dir):
 def generate_speedup_aggregate_boxplot(df, out_dir, args=None):
     """Generate aggregated boxplot of kernel speedups by reordering algorithm.
 
-    For each algorithm and each kernel, shows a boxplot of the speedup
-    across all matrices. Algorithms on x-axis, one colored box per kernel.
+    Kernels on x-axis, reordering algorithms as hue.
     One figure per n_cols value.
     """
-    print("\n=== Aggregated Speedup Boxplot ===")
+    print("\n=== Aggregated Speedup Boxplot (by kernel) ===")
 
     if 'speedup' not in df.columns:
         print("  No speedup column — skipping aggregate speedup boxplot.")
@@ -1661,67 +679,10 @@ def generate_speedup_aggregate_boxplot(df, out_dir, args=None):
     # Kernel order and display names
     kernels = sorted(df_reord['kernel_id'].unique())
     kernel_display = {k: KERNEL_NAMES.get(k, k) for k in kernels}
-
-    # Distinct kernel palette (deliberately different from the reorder-analysis
-    # aggregate improvement palette so the two chart types are easy to tell apart)
-    _kernel_colors = [
-        '#1B9E77', '#D95F02', '#7570B3', '#E7298A',
-        '#66A61E', '#E6AB02', '#A6761D', '#666666',
-    ]
     kernel_names_ordered = [kernel_display[k] for k in kernels]
-    kernel_palette = {name: _kernel_colors[i % len(_kernel_colors)]
-                      for i, name in enumerate(kernel_names_ordered)}
 
     agg_dir = out_dir / 'aggregate_speedup'
     agg_dir.mkdir(parents=True, exist_ok=True)
-
-    for nc in sorted(df_reord['n_cols'].unique()):
-        df_nc = df_reord[df_reord['n_cols'] == nc].copy()
-        df_nc['kernel_display'] = df_nc['kernel_id'].map(kernel_display)
-
-        df_nc = df_nc.dropna(subset=['speedup'])
-        df_nc = df_nc[np.isfinite(df_nc['speedup'])]
-        if df_nc.empty:
-            continue
-
-        n_strategies = len(strat_order)
-        fig, ax = plt.subplots(figsize=(max(14, n_strategies * 1.5), 6))
-
-        sns.boxplot(
-            data=df_nc, x='strategy', y='speedup', hue='kernel_display',
-            order=strat_order, hue_order=kernel_names_ordered,
-            palette=kernel_palette,
-            ax=ax, fliersize=1.5, linewidth=0.8,
-            whis=(5, 95), showfliers=False,
-            medianprops=dict(color='red', linewidth=0.8),
-        )
-
-        ax.axhline(y=1.0, color='black', linestyle='--', linewidth=0.8, alpha=0.6)
-        ax.set_xlabel('')
-        ax.set_ylabel('Speedup')
-        ax.set_title(f'Kernel Speedup by Reordering Algorithm (n_cols={int(nc)})')
-
-        ax.set_yscale('log')
-        p05 = df_nc['speedup'].quantile(0.02)
-        p95 = df_nc['speedup'].quantile(0.98)
-        ax.set_ylim(p05 / 1.3, p95 * 1.3)
-        pu.format_log_axes(ax, which='y')
-
-        ax.legend(title=None, bbox_to_anchor=(0.5, -0.18), loc='upper center',
-                  ncol=len(kernel_names_ordered), fontsize=8, frameon=False)
-        ax.tick_params(axis='x', rotation=30)
-        ax.grid(True, axis='y', alpha=0.3)
-
-        fig.tight_layout()
-
-        for ext in ('pdf', 'png'):
-            fig.savefig(agg_dir / f'aggregate_speedup_boxplot_nc{int(nc)}.{ext}',
-                        bbox_inches='tight', dpi=150)
-        plt.close(fig)
-        print(f"  Saved aggregate_speedup_boxplot_nc{int(nc)}.pdf/png")
-
-    # --- Alternative: kernels on x-axis, reordering algorithms as hue ---
-    print("\n=== Aggregated Speedup Boxplot (by kernel) ===")
     strat_palette = pu.get_strategy_palette()
     # Remove Original from palette
     strat_palette = {k: v for k, v in strat_palette.items() if k != 'Original'}
@@ -1750,7 +711,6 @@ def generate_speedup_aggregate_boxplot(df, out_dir, args=None):
         ax.axhline(y=1.0, color='black', linestyle='--', linewidth=0.8, alpha=0.6)
         ax.set_xlabel('')
         ax.set_ylabel('Speedup')
-        ax.set_title(f'Reordering Speedup by Kernel (n_cols={int(nc)})')
 
         ax.set_yscale('log')
         p05 = df_nc['speedup'].quantile(0.02)
@@ -1758,8 +718,8 @@ def generate_speedup_aggregate_boxplot(df, out_dir, args=None):
         ax.set_ylim(p05 / 1.3, p95 * 1.3)
         pu.format_log_axes(ax, which='y')
 
-        ax.legend(title=None, bbox_to_anchor=(0.5, -0.18), loc='upper center',
-                  ncol=min(len(strat_order), 6), fontsize=8, frameon=False)
+        ax.legend(title=None, bbox_to_anchor=(0.5, 1.02), loc='lower center',
+                  ncol=len(strat_order), fontsize=10, frameon=False)
         ax.tick_params(axis='x', rotation=30)
         ax.grid(True, axis='y', alpha=0.3)
 
@@ -1791,12 +751,13 @@ def generate_speedup_profile_plots(df, out_dir, args=None):
     prof_dir = out_dir / 'speedup_profiles'
     prof_dir.mkdir(parents=True, exist_ok=True)
 
-    perm_order = _profile_perm_order(set(df['perm'].unique()))
+    perm_order = pu.profile_perm_order(set(df['perm'].unique()))
     strategy_order = [get_perm_display(p) for p in perm_order]
 
     for nc in sorted(df['n_cols'].unique()):
         df_nc = df[df['n_cols'] == nc]
-        kernel_ids = sorted(df_nc['kernel_id'].unique())
+        kernel_ids = sorted(k for k in df_nc['kernel_id'].unique()
+                            if k != 'ASPT_SPMM')
         if not kernel_ids:
             continue
 
@@ -1841,7 +802,7 @@ def generate_speedup_profile_plots(df, out_dir, args=None):
                 if sub.empty:
                     continue
                 taus_asc = np.sort(sub['tau'].values)
-                _draw_profile_curve(ax, taus_asc, n_matrices, perm,
+                pu.draw_profile_curve(ax, taus_asc, n_matrices, perm,
                                     xlim_lo=-0.02, xlim_hi=1.05,
                                     higher_is_better=True)
 
@@ -1875,7 +836,7 @@ def generate_speedup_profile_plots(df, out_dir, args=None):
         if pairs:
             all_handles, all_labels = zip(*pairs)
         fig.legend(all_handles, all_labels, loc='upper center',
-                   ncol=min(6, len(all_handles)), fontsize=9,
+                   ncol=len(all_handles), fontsize=9,
                    bbox_to_anchor=(0.5, 1.02))
 
         fig.tight_layout()
@@ -1885,103 +846,6 @@ def generate_speedup_profile_plots(df, out_dir, args=None):
                         bbox_inches='tight', dpi=150)
         plt.close(fig)
         print(f"  Saved speedup_profiles_nc{nc}.pdf/png")
-
-
-def _pairwise_for_group(df, order, metrics, group_label, output_dir):
-    """Build per-metric and aggregate pairwise heatmaps for one group of rows.
-
-    Uses pairwise-complete logic: for each cell (i, j), only matrices where
-    both algorithms i and j have data are considered.
-    """
-    for metric in metrics:
-        hib = ALL_METRICS[metric]['higher_is_better']
-        metric_display = get_metric_display(metric)
-
-        # Pivot without dropping NaN — each column may have different coverage
-        pivot = df.pivot_table(index='matrix', columns='strategy', values=metric)
-        if pivot.empty:
-            print(f"    Skipping {metric}: no data")
-            continue
-
-        win_frac = pd.DataFrame(np.nan, index=order, columns=order)
-        n_pairs = pd.DataFrame(0, index=order, columns=order)
-
-        for i, si in enumerate(order):
-            if si not in pivot.columns:
-                continue
-            for j, sj in enumerate(order):
-                if i == j or sj not in pivot.columns:
-                    continue
-                # Only matrices where both si and sj have values
-                mask = pivot[si].notna() & pivot[sj].notna()
-                n = mask.sum()
-                if n < 2:
-                    continue
-                if hib:
-                    wins = (pivot.loc[mask, si] > pivot.loc[mask, sj]).sum()
-                else:
-                    wins = (pivot.loc[mask, si] < pivot.loc[mask, sj]).sum()
-                win_frac.loc[si, sj] = wins / n
-                n_pairs.loc[si, sj] = n
-
-        n_min = int(n_pairs.values[n_pairs.values > 0].min()) if (n_pairs.values > 0).any() else 0
-        n_max = int(n_pairs.values.max())
-
-        pu.pairwise_heatmap(
-            win_frac,
-            output_dir / f"pairwise_{pu.safe_filename(metric)}_{group_label}.png",
-            title=f"Pairwise Win Rate — {metric_display} ({group_label})\n({n_min}–{n_max} matrices per pair)",
-        )
-
-
-def generate_pairwise_heatmap(df_analysis, out_dir):
-    """Generate pairwise win/loss heatmaps comparing reordering algorithms.
-
-    For each structural metric, builds a matrix where cell (i, j) is the
-    fraction of test matrices on which algorithm i strictly beats algorithm j.
-    Uses pairwise-complete logic. Random reordering is excluded.
-    """
-    print("\n=== Pairwise Win/Loss Heatmaps ===")
-
-    pairwise_dir = out_dir / "reorder_analysis" / "pairwise"
-    pairwise_dir.mkdir(parents=True, exist_ok=True)
-
-    df = df_analysis.copy()
-    df['perm'] = df['perm'].fillna('None').astype(str)
-
-    df['strategy'] = df['perm'].apply(
-        lambda x: 'Original' if x == 'None' else get_perm_display(x)
-    )
-
-    # Exclude Random
-    df = df[df['strategy'] != 'Random']
-
-    # Metrics to compare
-    profile_metrics = enabled_metrics()
-    if 'bandwidth_max' not in profile_metrics:
-        profile_metrics = ['bandwidth_max'] + profile_metrics
-    profile_metrics = [m for m in profile_metrics
-                       if m in df.columns
-                       and ALL_METRICS.get(m, {}).get('higher_is_better') is not None]
-
-    if not profile_metrics:
-        print("  No usable metrics — skipping.")
-        return
-
-    # Data is already homogeneous (single perm_type) with Original rows
-    # duplicated by split_by_perm_type — no per-perm_type loop needed.
-    n_matrices = df['matrix'].nunique()
-    n_strategies = df['strategy'].nunique()
-    print(f"  {n_matrices} matrices, {n_strategies} strategies (pairwise-complete)")
-
-    if df.empty:
-        print("  No data — skipping.")
-        return
-
-    order = list(dict.fromkeys(s for s in pu.get_strategy_order(df) if s != 'Random'))
-    _pairwise_for_group(df, order, profile_metrics, 'all', pairwise_dir)
-
-    print(f"  Pairwise heatmaps saved to {pairwise_dir}")
 
 
 def generate_imp_correlation_plots(df, out_dir):
@@ -2004,23 +868,6 @@ def generate_imp_correlation_plots(df, out_dir):
     metric_order = [get_metric_display(m) for m in imp_metrics]
     n_metrics = len(metric_order)
     n_kernels = len(kernel_order)
-
-    # Muted palette: each metric gets a distinct hue, density = purple
-    _metric_color_map = {
-        'bandwidth_improvement': '#6B9AC4',          # steel blue
-        'col_spread_improvement': '#D4A574',          # warm sand
-        'vertical_adjacency_improvement': '#7DB58A',  # sage green
-        'profile_improvement': '#C47A7A',             # dusty rose
-        'reuse_distance_improvement': '#E8A838',      # amber
-        'index_distance_improvement': '#E05858',      # coral red
-    }
-    # Any density_improvement_* metric gets muted purple
-    metric_colors = {}
-    for m, display in zip(imp_metrics, metric_order):
-        if m in _metric_color_map:
-            metric_colors[display] = _metric_color_map[m]
-        else:
-            metric_colors[display] = '#9B82B0'  # muted purple for density
 
     plot_dir = Path(out_dir) / 'imp_correlation'
     plot_dir.mkdir(parents=True, exist_ok=True)
@@ -2051,7 +898,7 @@ def generate_imp_correlation_plots(df, out_dir):
                         vals.append(row.iloc[0][col])
                 offset = (mi - (n_metrics - 1) / 2) * bar_width
                 ax.bar(x + offset, vals, bar_width * 0.9,
-                       label=display, color=metric_colors[display],
+                       label=display, color=get_metric_color(mc),
                        edgecolor='black', linewidth=0.4)
 
             ax.axhline(0, color='grey', linestyle='--', alpha=0.5,
@@ -2059,10 +906,8 @@ def generate_imp_correlation_plots(df, out_dir):
             ax.set_xticks(x)
             ax.set_xticklabels(kernel_order, rotation=30, ha='right')
             ax.set_xlabel('')
-            ax.set_ylabel(f'{corr_display} Correlation with Speedup')
-            ax.set_title(f'Improvement–Speedup Correlation{scale_label}  '
-                         f'(n_cols={int(n_cols)})')
-            ax.legend(title='Metric', fontsize=9, title_fontsize=10)
+            ax.set_ylabel('Correlation with Speedup')
+            ax.legend(title='Metric', fontsize=10, title_fontsize=11)
             ax.grid(True, axis='y', alpha=0.3)
 
             fname = (f'imp_correlation_bars_{tag}{scale_suffix}'
@@ -2143,10 +988,8 @@ def generate_imp_ncols_correlation_plots(df, out_dir):
             ax.set_xticks(x)
             ax.set_xticklabels(kernel_order, rotation=30, ha='right')
             ax.set_xlabel('')
-            ax.set_ylabel(f'{corr_display} Correlation with Speedup')
-            ax.set_title(f'{metric_display} — Improvement–Speedup Correlation'
-                         f' across n_cols{scale_label}')
-            ax.legend(title='$n_{cols}$', fontsize=9, title_fontsize=10)
+            ax.set_ylabel(f'Correlation of {metric_display} with Speedup')
+            ax.legend(title='$n_{cols}$', fontsize=10, title_fontsize=11)
             ax.grid(True, axis='y', alpha=0.3)
 
             fname = (f'imp_ncols_bars_{tag}{scale_suffix}_{metric_safe}.png')
@@ -2177,12 +1020,6 @@ def generate_imp_blocksize_correlation_plots(df, out_dir):
     n_block_sizes = len(bd_imp_metrics)
     block_labels = [f'{bs}' for bs in BLOCK_SIZES[:n_block_sizes]]
 
-    # Purple/pink shades from light to dark, with distinct hatches
-    _purple_shades = ['#e8c8e8', '#d4a0d4', '#b06cb0', '#8c3f8c', '#6a1b6a', '#3d003d']
-    _hatches = ['', '///', '...', 'xxx', '\\\\\\', '+++']
-    bs_colors = dict(zip(block_labels, _purple_shades[:n_block_sizes]))
-    bs_hatches = dict(zip(block_labels, _hatches[:n_block_sizes]))
-
     plot_dir = Path(out_dir) / 'imp_correlation'
     plot_dir.mkdir(parents=True, exist_ok=True)
 
@@ -2212,8 +1049,7 @@ def generate_imp_blocksize_correlation_plots(df, out_dir):
                 offset = (bi - (n_block_sizes - 1) / 2) * bar_width
                 ax.bar(x + offset, vals, bar_width * 0.9,
                        label=f'{label}×{label}',
-                       color=bs_colors[label],
-                       hatch=bs_hatches[label],
+                       color=get_metric_color(metric),
                        edgecolor='black', linewidth=0.4)
 
             ax.axhline(0, color='grey', linestyle='--', alpha=0.5,
@@ -2221,11 +1057,8 @@ def generate_imp_blocksize_correlation_plots(df, out_dir):
             ax.set_xticks(x)
             ax.set_xticklabels(kernel_order, rotation=30, ha='right')
             ax.set_xlabel('')
-            ax.set_ylabel(f'{corr_display} Correlation with Speedup')
-            ax.set_title(f'Block Density Improvement–Speedup Correlation '
-                         f'across Block Sizes{scale_label}  '
-                         f'(n_cols={int(n_cols)})')
-            ax.legend(title='Block Size', fontsize=9, title_fontsize=10)
+            ax.set_ylabel('Correlation of Block Density Improvement with Speedup')
+            ax.legend(title='Block Size', fontsize=10, title_fontsize=11)
             ax.grid(True, axis='y', alpha=0.3)
 
             fname = (f'imp_blocksize_bars_{tag}{scale_suffix}'
@@ -2235,61 +1068,6 @@ def generate_imp_blocksize_correlation_plots(df, out_dir):
             plt.savefig(out_path, dpi=300)
             plt.close()
             print(f"  Saved: {out_path}")
-
-
-def _compute_partial_imp_matrix(df, n_cols, imp_metrics, kernel, method=None):
-    """Compute partial correlation matrix for one kernel.
-
-    Returns a DataFrame of shape (n_metrics, n_metrics).
-    Cell [i, j] = r(speedup, metric_i | metric_j).
-    Diagonal = marginal r(speedup, metric_i).
-    """
-    if method is None:
-        method = pu.get_correlation_method()
-
-    df_k = df[(df['n_cols'] == n_cols)
-              & (df['strategy'] != 'Original')
-              & (df['kernel_id'] == kernel)]
-
-    n = len(imp_metrics)
-    mat = pd.DataFrame(np.full((n, n), np.nan),
-                       index=imp_metrics, columns=imp_metrics)
-
-    for i, m_target in enumerate(imp_metrics):
-        if m_target not in df_k.columns:
-            continue
-
-        for j, m_control in enumerate(imp_metrics):
-            if i == j or m_control not in df_k.columns:
-                continue
-
-            cols = [m_target, m_control, 'speedup']
-            sub = df_k[cols].dropna()
-            sub = sub[np.isfinite(sub).all(axis=1)]
-            if len(sub) < 10:
-                continue
-
-            # Partial correlation via OLS residuals
-            y = sub['speedup'].values
-            x = sub[m_target].values
-            z = sub[m_control].values
-            z_aug = np.column_stack([z, np.ones(len(z))])
-            try:
-                coef_y = np.linalg.lstsq(z_aug, y, rcond=None)[0]
-                coef_x = np.linalg.lstsq(z_aug, x, rcond=None)[0]
-            except np.linalg.LinAlgError:
-                continue
-
-            ry = y - z_aug @ coef_y
-            rx = x - z_aug @ coef_x
-
-            if np.std(ry) < 1e-12 or np.std(rx) < 1e-12:
-                continue
-
-            r, _ = pu.compute_correlation(pd.Series(rx), pd.Series(ry), method)
-            mat.iloc[i, j] = r
-
-    return mat
 
 
 def generate_partial_correlation_heatmaps(df, out_dir):
@@ -2322,7 +1100,7 @@ def generate_partial_correlation_heatmaps(df, out_dir):
         n_cols_int = int(n_cols)
 
         for kernel in kernels:
-            mat = _compute_partial_imp_matrix(
+            mat = pu.compute_partial_imp_matrix(
                 df, n_cols, imp_metrics, kernel, method=method)
 
             if mat.isna().all().all():
@@ -2367,7 +1145,7 @@ def generate_partial_correlation_heatmaps(df, out_dir):
         # to show which metrics are globally redundant
         all_mats = []
         for kernel in kernels:
-            mat = _compute_partial_imp_matrix(
+            mat = pu.compute_partial_imp_matrix(
                 df, n_cols, imp_metrics, kernel, method=method)
             if not mat.isna().all().all():
                 all_mats.append(mat)
@@ -2408,6 +1186,115 @@ def generate_partial_correlation_heatmaps(df, out_dir):
             print(f"  Saved: {plot_dir / fname}")
 
 
+def generate_feature_importance_plots(df, out_dir):
+    """Random Forest feature importance: which structural improvement metrics
+    best predict speedup, per (kernel, n_cols).
+
+    Produces per n_cols:
+      feature_importance/rf_importance_heatmap_ncols_{N}.png  — metric × kernel heatmap
+      feature_importance/rf_importance_bars_ncols_{N}.png     — grouped bar chart
+    """
+    from sklearn.ensemble import RandomForestRegressor
+    import seaborn as sns
+
+    imp_metrics = _enabled_improvement_metrics()
+    kernels = _ordered_kernels(df, KERNEL_NAMES)
+    kernel_displays = [KERNEL_NAMES.get(k, k) for k in kernels]
+    n_cols_values = sorted(df['n_cols'].unique())
+    n_metrics = len(imp_metrics)
+    n_kernels = len(kernel_displays)
+
+    def _clean(m):
+        s = get_metric_display(m)
+        for suffix in [' Improvement', ' Reduction']:
+            s = s.replace(suffix, '')
+        return s
+
+    display_labels = [_clean(m) for m in imp_metrics]
+    metric_order = [get_metric_display(m) for m in imp_metrics]
+
+    plot_dir = Path(out_dir) / 'feature_importance'
+    plot_dir.mkdir(parents=True, exist_ok=True)
+
+    MIN_SAMPLES = 30
+
+    def _fit_rf(sub, n_trees=300):
+        X = sub[imp_metrics].values
+        y = sub['speedup'].values
+        rf = RandomForestRegressor(n_estimators=n_trees, random_state=42,
+                                   min_samples_leaf=5, n_jobs=-1)
+        rf.fit(X, y)
+        return rf.feature_importances_
+
+    for n_cols in n_cols_values:
+        nc_int = int(n_cols)
+        df_nc = df[df['n_cols'] == n_cols]
+        imp_mat = pd.DataFrame(np.nan, index=display_labels,
+                               columns=kernel_displays)
+
+        for kernel, kdisp in zip(kernels, kernel_displays):
+            sub = df_nc[(df_nc['kernel_id'] == kernel) &
+                        (df_nc['strategy'] != 'Original')
+                        ][imp_metrics + ['speedup']].dropna()
+            sub = sub[np.isfinite(sub).all(axis=1)]
+            if len(sub) < MIN_SAMPLES:
+                print(f"  Skipping {kdisp} n_cols={nc_int}: {len(sub)} samples")
+                continue
+            imp_mat[kdisp] = _fit_rf(sub)
+
+        valid = imp_mat.dropna(axis=1, how='all')
+        if valid.empty:
+            continue
+
+        # ---- Heatmap ------------------------------------------------- #
+        fig, ax = plt.subplots(
+            figsize=(max(5, valid.shape[1] * 1.3 + 2),
+                     max(4, valid.shape[0] * 0.5 + 1.5)))
+        sns.heatmap(valid.astype(float), annot=True, fmt='.3f',
+                    cmap='Blues', vmin=0,
+                    ax=ax, linewidths=0.5, linecolor='white',
+                    cbar_kws={'label': 'Feature Importance', 'shrink': 0.8},
+                    annot_kws={'size': 8})
+        ax.set_xlabel('')
+        ax.set_ylabel('')
+        plt.setp(ax.get_xticklabels(), rotation=30, ha='right')
+        ax.tick_params(axis='y', rotation=0)
+        plt.tight_layout()
+        fname = plot_dir / f'rf_importance_heatmap_ncols_{nc_int}.png'
+        plt.savefig(fname, dpi=300, bbox_inches='tight')
+        plt.close()
+        print(f"  Saved: {fname}")
+
+        # ---- Grouped bar chart --------------------------------------- #
+        valid_kernels = list(valid.columns)
+        n_valid = len(valid_kernels)
+        fig, ax = plt.subplots(figsize=(12, 6))
+        bar_width = 0.7 / n_metrics
+        x = np.arange(n_valid)
+
+        for mi, (mc, dlabel, mdisplay) in enumerate(
+                zip(imp_metrics, display_labels, metric_order)):
+            vals = [valid.loc[dlabel, k] if dlabel in valid.index else 0.0
+                    for k in valid_kernels]
+            offset = (mi - (n_metrics - 1) / 2) * bar_width
+            ax.bar(x + offset, vals, bar_width * 0.9,
+                   label=mdisplay, color=get_metric_color(mc),
+                   hatch=get_metric_hatch(mc),
+                   edgecolor='black', linewidth=0.4)
+
+        ax.set_xticks(x)
+        ax.set_xticklabels(valid_kernels, rotation=30, ha='right')
+        ax.set_xlabel('')
+        ax.set_ylabel('Feature Importance')
+        ax.legend(title='Metric', fontsize=10, title_fontsize=11)
+        ax.grid(True, axis='y', alpha=0.3)
+        plt.tight_layout()
+        fname = plot_dir / f'rf_importance_bars_ncols_{nc_int}.png'
+        plt.savefig(fname, dpi=300, bbox_inches='tight')
+        plt.close()
+        print(f"  Saved: {fname}")
+
+
 def _should_run(section: str, args) -> bool:
     """Decide whether *section* should run given CLI flags.
 
@@ -2416,8 +1303,8 @@ def _should_run(section: str, args) -> bool:
     if args.sections is not None:
         return section in args.sections
     # Legacy coarse flags
-    kernel_sections = {'kernels', 'breakeven', 'original-scatter', 'speedup-profiles'}
-    reorder_sections = {'reorder-analysis', 'reorderability', 'improvability', 'per-matrix', 'timing', 'pairwise'}
+    kernel_sections = {'grouped-scatter', 'breakeven', 'speedup-profiles'}
+    reorder_sections = {'reorder-analysis', 'profiles'}
     if args.only_kernels:
         return section in kernel_sections
     if args.only_reorder_analysis:
@@ -2497,23 +1384,11 @@ def main():
     # 3. Generate Plots  (each guarded by _should_run)
     # -----------------------------------------------------------------
 
-    if has_ops and _should_run('kernels', args):
+    if has_ops and _should_run('grouped-scatter', args):
         print("\n" + "="*60)
-        print("Generating kernel performance plots...")
+        print("Generating grouped improvement vs speedup scatter plots...")
         print("="*60)
-        generate_kernel_plots(df, out_dir, args)
-
-    if has_ops and _should_run('singular-improvement', args):
-        print("\n" + "="*60)
-        print("Generating singular kernel improvement plots...")
-        print("="*60)
-        generate_singular_improvement_plots(df, out_dir, args)
-
-    if has_ops and _should_run('original-scatter', args):
-        print("\n" + "="*60)
-        print("Generating original-only grouped scatter plots...")
-        print("="*60)
-        generate_original_scatter_plots(df, out_dir, args)
+        generate_grouped_scatter_plots(df, out_dir, args)
 
     if has_ops and _should_run('breakeven', args):
         print("\n" + "="*60)
@@ -2528,31 +1403,6 @@ def main():
         print("="*60)
         generate_reorder_analysis_plots(df_analysis, out_dir, n_jobs=args.jobs)
         
-    if _should_run('reorderability', args):
-        print("\n" + "="*60)
-        print("Generating reorderability analysis plots...")
-        print("="*60)
-        generate_reorderability_plots(df_analysis, out_dir)
-
-    if _should_run('improvability', args):
-        print("\n" + "="*60)
-        print("Generating improvability summary plots...")
-        print("="*60)
-        generate_improvability_summary_plots(df_analysis, out_dir)
-
-    if _should_run('per-matrix', args):
-        print("\n" + "="*60)
-        print("Generating per-matrix difficulty study...")
-        print("="*60)
-        generate_per_matrix_study(df_analysis, out_dir)
-
-    if _should_run('timing', args):
-        print("\n" + "="*60)
-        print("Generating reordering timing analysis...")
-        print("="*60)
-        generate_reorder_timing_plots(df_analysis, out_dir,
-                                      reordering_csv=_reordering_csv(), cfg=_cfg)
-
     if _should_run('profiles', args):
         print("\n" + "="*60)
         print("Generating performance profile plots...")
@@ -2573,12 +1423,6 @@ def main():
         print("="*60)
         generate_speedup_profile_plots(df, out_dir, args)
 
-    if _should_run('pairwise', args):
-        print("\n" + "="*60)
-        print("Generating pairwise win/loss heatmaps...")
-        print("="*60)
-        generate_pairwise_heatmap(df_analysis, out_dir)
-
     if has_ops and _should_run('imp-correlation', args):
         print("\n" + "="*60)
         print("Generating improvement-correlation bar charts...")
@@ -2592,6 +1436,12 @@ def main():
         print("Generating partial-correlation heatmaps...")
         print("="*60)
         generate_partial_correlation_heatmaps(df, out_dir)
+
+    if has_ops and _should_run('feature-importance', args):
+        print("\n" + "="*60)
+        print("Generating RF feature importance plots...")
+        print("="*60)
+        generate_feature_importance_plots(df, out_dir)
 
     print(f"\nAll plots saved to {out_dir}")
 

@@ -126,11 +126,6 @@ def format_log_axes(ax, which='both', dense=True):
     ax.grid(True, which='minor', alpha=0.08, linewidth=0.25)
 
 
-def get_display_name(col):
-    """Get display name for a column, or format the column name if not configured."""
-    return get_metric_display(col)
-
-
 # =============================================================================
 # Data Loading and Processing
 # =============================================================================
@@ -1028,12 +1023,12 @@ def scatter_with_correlation(df, x_col, y_col, output_path,
         ax.grid(True, alpha=0.3)
 
     # Labels
-    ax.set_xlabel(get_display_name(x_col))
-    ax.set_ylabel(get_display_name(y_col))
+    ax.set_xlabel(get_metric_display(x_col))
+    ax.set_ylabel(get_metric_display(y_col))
 
     # Title
     if title is None:
-        title = f"{get_display_name(y_col)} vs {get_display_name(x_col)}"
+        title = f"{get_metric_display(y_col)} vs {get_metric_display(x_col)}"
     if show_correlation:
         title += f"\n${sym} = {corr_val:.3f}$"
     ax.set_title(title)
@@ -1121,11 +1116,11 @@ def boxplot_by_category(df, x_col, y_col, output_path,
     else:
         ax.grid(True, axis='y', alpha=0.3)
     
-    ax.set_xlabel(get_display_name(x_col))
-    ax.set_ylabel(get_display_name(y_col))
+    ax.set_xlabel(get_metric_display(x_col))
+    ax.set_ylabel(get_metric_display(y_col))
     
     if title is None:
-        title = f"{get_display_name(y_col)} by {get_display_name(x_col)}"
+        title = f"{get_metric_display(y_col)} by {get_metric_display(x_col)}"
     if clip_percentile:
         title += f"\n({clip_percentile[0]}-{clip_percentile[1]} percentile)"
     ax.set_title(title)
@@ -1237,7 +1232,7 @@ def breakeven_boxplot(df_valid, df_harmful, x_col, y_col, output_path,
     ax_box.set_ylabel('# of Operations to Break Even')
 
     if title is None:
-        title = f"Break-even Operations by {get_display_name(x_col)}"
+        title = f"Break-even Operations by {get_metric_display(x_col)}"
     ax_box.set_title(title)
 
     # ===== Bottom subplot: success / failure percentage bars =====
@@ -1262,7 +1257,7 @@ def breakeven_boxplot(df_valid, df_harmful, x_col, y_col, output_path,
     ax_bar.set_ylim(0, 100)
     ax_bar.set_yticks([0, 25, 50, 75, 100])
     ax_bar.set_ylabel('Success (%)')
-    ax_bar.set_xlabel(get_display_name(x_col))
+    ax_bar.set_xlabel(get_metric_display(x_col))
     ax_bar.legend(loc='lower right', fontsize=8, ncol=2)
 
     # Shared x-axis labels
@@ -1330,11 +1325,11 @@ def binned_bar_chart(df, bin_col, value_col, output_path,
     if baseline is not None:
         ax.axhline(baseline, color='red', linestyle='--', alpha=0.7)
     
-    ax.set_xlabel(f"{get_display_name(bin_col)} Bin")
-    ax.set_ylabel(f"{agg_func.title()} {get_display_name(value_col)}")
+    ax.set_xlabel(f"{get_metric_display(bin_col)} Bin")
+    ax.set_ylabel(f"{agg_func.title()} {get_metric_display(value_col)}")
     
     if title is None:
-        title = f"{agg_func.title()} {get_display_name(value_col)} by {get_display_name(bin_col)}"
+        title = f"{agg_func.title()} {get_metric_display(value_col)} by {get_metric_display(bin_col)}"
     ax.set_title(title)
     
     ax.grid(True, axis='y', alpha=0.3)
@@ -1413,11 +1408,11 @@ def binned_boxplot(df, bin_col, value_col, output_path,
     if baseline is not None:
         ax.axhline(baseline, color='red', linestyle='--', alpha=0.7)
     
-    ax.set_xlabel(f"{get_display_name(bin_col)} Bin")
-    ax.set_ylabel(f"{get_display_name(value_col)}")
+    ax.set_xlabel(f"{get_metric_display(bin_col)} Bin")
+    ax.set_ylabel(f"{get_metric_display(value_col)}")
     
     if title is None:
-        title = f"{get_display_name(value_col)} Distribution by {get_display_name(bin_col)}"
+        title = f"{get_metric_display(value_col)} Distribution by {get_metric_display(bin_col)}"
     ax.set_title(title)
     
     ax.grid(True, axis='y', alpha=0.3)
@@ -1461,7 +1456,7 @@ def cdf_plot(df, value_col, output_path,
             color = strategy_pal.get(cat)
             ax.step(values, cdf_y, label=cat, where='post', linewidth=2,
                     **({"color": color} if color else {}))
-        ax.legend(title=get_display_name(hue_col))
+        ax.legend(title=get_metric_display(hue_col))
     else:
         values = plot_df[value_col].sort_values()
         cdf_y = np.arange(1, len(values) + 1) / len(values)
@@ -1476,11 +1471,11 @@ def cdf_plot(df, value_col, output_path,
     else:
         ax.grid(True, alpha=0.3)
     
-    ax.set_xlabel(get_display_name(value_col))
+    ax.set_xlabel(get_metric_display(value_col))
     ax.set_ylabel('CDF')
     
     if title is None:
-        title = f"CDF of {get_display_name(value_col)}"
+        title = f"CDF of {get_metric_display(value_col)}"
     ax.set_title(title)
     
     _save_figure(output_path)
@@ -1517,11 +1512,11 @@ def violin_plot(df, x_col, y_col, output_path,
         sns.stripplot(data=plot_df, x=x_col, y=y_col, order=order,
                       color='black', alpha=0.3, jitter=True, size=3, ax=ax)
     
-    ax.set_xlabel(get_display_name(x_col))
-    ax.set_ylabel(get_display_name(y_col))
+    ax.set_xlabel(get_metric_display(x_col))
+    ax.set_ylabel(get_metric_display(y_col))
     
     if title is None:
-        title = f"{get_display_name(y_col)} by {get_display_name(x_col)}"
+        title = f"{get_metric_display(y_col)} by {get_metric_display(x_col)}"
     ax.set_title(title)
     
     plt.xticks(rotation=45, ha='right')
@@ -1596,6 +1591,131 @@ def pairwise_heatmap(win_frac_df, output_path, title=None, figsize=(10, 9)):
 
 
 # =============================================================================
+# Profile Plot Utilities
+# =============================================================================
+
+def profile_perm_order(perm_values):
+    """Canonical perm order for profile plots — Original drawn last (on top)."""
+    seen = set()
+    order = [p for p in list(PERMS)
+             if p != 'None' and p in perm_values
+             and not (p in seen or seen.add(p))]
+    if 'None' in perm_values:
+        order.append('None')
+    return order
+
+
+def draw_profile_curve(ax, taus_asc, n_matrices, perm, xlim_lo, xlim_hi,
+                       higher_is_better):
+    """Draw one perm's Dolan-Moré profile curve on *ax*.
+
+    *taus_asc* must be sorted ascending.  For higher_is_better metrics the
+    survival function is plotted (x from 1→0); for lower_is_better the CDF
+    is plotted (x from 1→∞).
+    """
+    n = len(taus_asc)
+    color = get_perm_color(perm)
+    label = get_perm_display(perm)
+    ls = ':' if perm == 'None' else '-'
+    lw = 2.5 if perm == 'None' else 1.5
+    if perm == 'None':
+        color = 'red'
+
+    if higher_is_better:
+        taus = taus_asc[::-1]                       # descending
+        fracs = np.arange(1, n + 1) / n_matrices
+        n_best = (taus >= 1.0 - 1e-9).sum()
+        y_at_1 = n_best / n_matrices
+        taus_rest = taus[n_best:]
+        fracs_rest = fracs[n_best:]
+        if len(taus_rest) > 0:
+            ax.step(taus_rest, fracs_rest, where='pre',
+                    label=label, color=color, linewidth=lw, linestyle=ls)
+            ax.plot([xlim_hi, taus_rest[0]], [y_at_1, y_at_1],
+                    color=color, linewidth=lw, linestyle=ls)
+            ax.plot([taus_rest[-1], xlim_lo], [fracs_rest[-1], fracs_rest[-1]],
+                    color=color, linewidth=lw, linestyle=ls)
+        else:
+            ax.plot([xlim_hi, xlim_lo], [y_at_1, y_at_1],
+                    label=label, color=color, linewidth=lw, linestyle=ls)
+    else:
+        fracs = np.arange(1, n + 1) / n_matrices
+        n_best = (taus_asc <= 1.0 + 1e-9).sum()
+        y_at_1 = n_best / n_matrices
+        taus_rest = taus_asc[n_best:]
+        fracs_rest = fracs[n_best:]
+        if len(taus_rest) > 0:
+            ax.step(taus_rest, fracs_rest, where='pre',
+                    label=label, color=color, linewidth=lw, linestyle=ls)
+            ax.plot([xlim_lo, taus_rest[0]], [y_at_1, y_at_1],
+                    color=color, linewidth=lw, linestyle=ls)
+            ax.plot([taus_rest[-1], xlim_hi], [fracs_rest[-1], fracs_rest[-1]],
+                    color=color, linewidth=lw, linestyle=ls)
+        else:
+            ax.plot([xlim_lo, xlim_hi], [y_at_1, y_at_1],
+                    label=label, color=color, linewidth=lw, linestyle=ls)
+
+
+# =============================================================================
+# Partial Correlation Utilities
+# =============================================================================
+
+def compute_partial_imp_matrix(df, n_cols, imp_metrics, kernel, method=None):
+    """Compute partial correlation matrix for one kernel.
+
+    Returns a DataFrame of shape (n_metrics, n_metrics).
+    Cell [i, j] = r(speedup, metric_i | metric_j).
+    Diagonal = marginal r(speedup, metric_i).
+    """
+    if method is None:
+        method = get_correlation_method()
+
+    df_k = df[(df['n_cols'] == n_cols)
+              & (df['strategy'] != 'Original')
+              & (df['kernel_id'] == kernel)]
+
+    n = len(imp_metrics)
+    mat = pd.DataFrame(np.full((n, n), np.nan),
+                       index=imp_metrics, columns=imp_metrics)
+
+    for i, m_target in enumerate(imp_metrics):
+        if m_target not in df_k.columns:
+            continue
+
+        for j, m_control in enumerate(imp_metrics):
+            if i == j or m_control not in df_k.columns:
+                continue
+
+            cols = [m_target, m_control, 'speedup']
+            sub = df_k[cols].dropna()
+            sub = sub[np.isfinite(sub).all(axis=1)]
+            if len(sub) < 10:
+                continue
+
+            # Partial correlation via OLS residuals
+            y = sub['speedup'].values
+            x = sub[m_target].values
+            z = sub[m_control].values
+            z_aug = np.column_stack([z, np.ones(len(z))])
+            try:
+                coef_y = np.linalg.lstsq(z_aug, y, rcond=None)[0]
+                coef_x = np.linalg.lstsq(z_aug, x, rcond=None)[0]
+            except np.linalg.LinAlgError:
+                continue
+
+            ry = y - z_aug @ coef_y
+            rx = x - z_aug @ coef_x
+
+            if np.std(ry) < 1e-12 or np.std(rx) < 1e-12:
+                continue
+
+            r, _ = compute_correlation(pd.Series(rx), pd.Series(ry), method)
+            mat.iloc[i, j] = r
+
+    return mat
+
+
+# =============================================================================
 # Utility Functions
 # =============================================================================
 
@@ -1648,16 +1768,6 @@ def safe_filename(name):
 # Publication-Ready Scatter Plots
 # =============================================================================
 
-def _pearson_for_scatter(x_vals, y_vals):
-    """Compute Pearson r on raw (linear) values."""
-    valid = x_vals.notna() & y_vals.notna() & np.isfinite(x_vals) & np.isfinite(y_vals)
-    xp, yp = x_vals[valid], y_vals[valid]
-    if len(xp) >= 2:
-        r, _ = stats.pearsonr(xp, yp)
-        return r
-    return np.nan
-
-
 def _correlation_for_scatter(x_vals, y_vals, method=None,
                               log_x=False, log_y=False):
     """Compute correlation using the configured method.
@@ -1680,6 +1790,30 @@ def _correlation_for_scatter(x_vals, y_vals, method=None,
         r, _ = compute_correlation(xp, yp, method=method)
         return r
     return np.nan
+
+
+def _loglog_slope(x_vals, y_vals, log_x=False, log_y=False, min_pts=5):
+    """Return the slope of a linear fit in (optionally log-transformed) space.
+
+    In log-log space the slope is the power-law exponent α: y ∝ x^α.
+    Returns ``np.nan`` when there are too few valid points.
+    """
+    xp = np.asarray(x_vals, dtype=float)
+    yp = np.asarray(y_vals, dtype=float)
+    mask = np.isfinite(xp) & np.isfinite(yp)
+    if log_x:
+        mask &= xp > 0
+    if log_y:
+        mask &= yp > 0
+    xp, yp = xp[mask], yp[mask]
+    if log_x:
+        xp = np.log10(xp)
+    if log_y:
+        yp = np.log10(yp)
+    if len(xp) < min_pts:
+        return np.nan
+    z = np.polyfit(xp, yp, 1)
+    return z[0]
 
 
 def scatter_publication(df, x_col, y_col, output_path,
@@ -1719,8 +1853,8 @@ def scatter_publication(df, x_col, y_col, output_path,
     else:
         ax.grid(True, alpha=0.3)
 
-    ax.set_xlabel(get_display_name(x_col), fontsize=13)
-    ax.set_ylabel(get_display_name(y_col), fontsize=13)
+    ax.set_xlabel(get_metric_display(x_col), fontsize=13)
+    ax.set_ylabel(get_metric_display(y_col), fontsize=13)
     ax.tick_params(axis='both', labelsize=11, which='major')
 
     if show_correlation:
@@ -1728,7 +1862,12 @@ def scatter_publication(df, x_col, y_col, output_path,
         sym = correlation_display_symbol(method, log_x=log_x, log_y=log_y)
         corr_val = _correlation_for_scatter(plot_df[x_col], plot_df[y_col], method,
                                             log_x=log_x, log_y=log_y)
-        ax.text(0.03, 0.97, f"${sym}={corr_val:.2f}$",
+        slope = _loglog_slope(plot_df[x_col], plot_df[y_col],
+                              log_x=log_x, log_y=log_y)
+        ann = f"${sym}={corr_val:.2f}$"
+        if np.isfinite(slope) and (log_x or log_y):
+            ann += f"\n$\\alpha={slope:.2f}$"
+        ax.text(0.03, 0.97, ann,
                 transform=ax.transAxes, fontsize=10, va='top',
                 bbox=dict(boxstyle='round,pad=0.3', fc='white', alpha=0.8))
 
@@ -1825,8 +1964,8 @@ def scatter_presentation(df, x_col, y_col, output_path,
                     linestyle='-', alpha=0.45, zorder=2)
 
     # Axis formatting
-    ax.set_xlabel(get_display_name(x_col), fontsize=16)
-    ax.set_ylabel(get_display_name(y_col), fontsize=16)
+    ax.set_xlabel(get_metric_display(x_col), fontsize=16)
+    ax.set_ylabel(get_metric_display(y_col), fontsize=16)
     ax.tick_params(axis='both', labelsize=13, which='major')
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
@@ -1841,7 +1980,12 @@ def scatter_presentation(df, x_col, y_col, output_path,
         sym = correlation_display_symbol(method, log_x=log_x, log_y=log_y)
         corr_val = _correlation_for_scatter(plot_df[x_col], plot_df[y_col], method,
                                             log_x=log_x, log_y=log_y)
-        ax.text(0.03, 0.97, f"${sym}={corr_val:.2f}$",
+        slope = _loglog_slope(plot_df[x_col], plot_df[y_col],
+                              log_x=log_x, log_y=log_y)
+        ann = f"${sym}={corr_val:.2f}$"
+        if np.isfinite(slope) and (log_x or log_y):
+            ann += f"\n$\\alpha={slope:.2f}$"
+        ax.text(0.03, 0.97, ann,
                 transform=ax.transAxes, fontsize=14, va='top',
                 bbox=dict(boxstyle='round,pad=0.3', fc='white', alpha=0.85))
 
@@ -1928,8 +2072,14 @@ def grouped_scatter_publication(df, x_col, y_col, group_col, group_order,
                 method = get_correlation_method()
                 sym = correlation_display_symbol(method, log_x=log_x, log_y=log_y)
                 cr = _correlation_for_scatter(df_g[x_col], df_g[y_col], method,
-                                              log_x=log_x, log_y=log_y)
-                ax.text(0.03, 0.97, f"${sym}={cr:.2f}$",
+                                              log_x=log_x, log_y=log_y,
+                                              )
+                slope = _loglog_slope(df_g[x_col], df_g[y_col],
+                                      log_x=log_x, log_y=log_y)
+                ann = f"${sym}={cr:.2f}$"
+                if np.isfinite(slope) and (log_x or log_y):
+                    ann += f"\n$\\alpha={slope:.2f}$"
+                ax.text(0.03, 0.97, ann,
                         transform=ax.transAxes, fontsize=7, va='top',
                         bbox=dict(boxstyle='round,pad=0.2', fc='white',
                                   alpha=0.8))
@@ -1954,13 +2104,10 @@ def grouped_scatter_publication(df, x_col, y_col, group_col, group_order,
 
         # Edge labels only
         if c == 0:
-            ax.set_ylabel(get_display_name(y_col), fontsize=10)
+            ax.set_ylabel(get_metric_display(y_col), fontsize=10)
         else:
             ax.set_ylabel('')
-        if r == nrows - 1:
-            ax.set_xlabel(get_display_name(x_col), fontsize=10)
-        else:
-            ax.set_xlabel('')
+        ax.set_xlabel('')
 
         ax.tick_params(axis='both', labelsize=8)
 
@@ -1985,6 +2132,7 @@ def grouped_scatter_publication(df, x_col, y_col, group_col, group_order,
                 if xlim is not None:
                     ax.set_xlim(xlim)
 
+    fig.supxlabel(get_metric_display(x_col), fontsize=10)
     fig.tight_layout()
     fig.savefig(output_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
     plt.close(fig)

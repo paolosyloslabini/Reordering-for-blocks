@@ -22,13 +22,15 @@ ROOT_DIR = SCRIPTS_DIR.parent
 # ── Plot groups (plot.py --sections <key>) ───────────────────────────────────
 # Each entry: (label, section key passed to plot.py --sections)
 PLOT_GROUPS = [
-    ("Kernel performance plots",       "kernels"),
+    ("Grouped improvement scatter",    "grouped-scatter"),
     ("Break-even analysis plots",      "breakeven"),
     ("Reorder analysis plots",         "reorder-analysis"),
-    ("Reorderability analysis plots",  "reorderability"),
-    ("Per-matrix difficulty study",    "per-matrix"),
-    ("Reorder timing analysis",        "timing"),
     ("Performance profile plots",      "profiles"),
+    ("Speedup profile plots",          "speedup-profiles"),
+    ("Aggregate improvement plots",    "aggregate-improvement"),
+    ("Improvement correlation plots",  "imp-correlation"),
+    ("Partial correlation heatmaps",   "partial-correlation"),
+    ("Feature importance plots",       "feature-importance"),
     ("ALL plot.py plots",              None),          # None → no --sections flag
 ]
 
