@@ -133,7 +133,7 @@ def create_spy_plot(matrices_dict, output_path, matrix_name, figsize=None, marke
     matrix_stem = Path(matrix_name).stem
     fig.suptitle(f'{matrix_stem}  ({first_A.shape[0]:,} $\\times$ {first_A.shape[1]:,},  nnz = {first_A.nnz:,})',
                  fontsize=13, fontweight='bold', y=1.01)
-    plt.tight_layout()
+    plt.tight_layout(h_pad=2.0, w_pad=2.0)
     plt.savefig(output_path, dpi=300, bbox_inches='tight', pad_inches=0.05)
     plt.close()
 
