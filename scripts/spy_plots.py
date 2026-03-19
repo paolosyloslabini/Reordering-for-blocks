@@ -68,7 +68,12 @@ def _get_canonical_order(labels):
 
     Unknown labels are appended alphabetically at the end.
     """
-    canonical = ['Original'] + [p['display'] for p in PERMS.values()]
+    seen = set()
+    canonical = []
+    for name in ['Original'] + [p['display'] for p in PERMS.values()]:
+        if name not in seen:
+            seen.add(name)
+            canonical.append(name)
     order = [l for l in canonical if l in labels]
     extra = sorted(set(labels) - set(order))
     return order + extra
@@ -118,21 +123,8 @@ def create_spy_plot(matrices_dict, output_path, matrix_name, figsize=None, marke
         color = _label_color(label)
         ax.spy(A, markersize=markersize, aspect='equal', color=color)
         ax.set_title(label, fontsize=14, fontweight='bold', color=color)
-        # Limit tick density to avoid overlapping labels
-        ax.xaxis.set_major_locator(plt.MaxNLocator(4, integer=True))
-        ax.yaxis.set_major_locator(plt.MaxNLocator(4, integer=True))
-        ax.tick_params(axis='x', labelrotation=30, labelsize=8)
-        ax.tick_params(axis='y', labelsize=8)
-        # Only show dimension labels on edge subplots
-        row_idx, col_idx = divmod(idx, n_cols)
-        if row_idx == n_rows - 1:
-            ax.set_xlabel(f'{A.shape[1]:,} cols', fontsize=9)
-        else:
-            ax.set_xlabel('')
-        if col_idx == 0:
-            ax.set_ylabel(f'{A.shape[0]:,} rows', fontsize=9)
-        else:
-            ax.set_ylabel('')
+        ax.set_xticks([])
+        ax.set_yticks([])
 
     # Hide unused subplots
     for idx in range(n_plots, len(axes)):
@@ -235,8 +227,8 @@ def main():
         help="Maximum matrix dimension for plotting (default: 20000)"
     )
     parser.add_argument(
-        "--markersize", type=float, default=0.01,
-        help="Marker size for spy plot (default: 0.01)"
+        "--markersize", type=float, default=0.005,
+        help="Marker size for spy plot (default: 0.005)"
     )
     parser.add_argument(
         "--use-curated", action="store_true",
@@ -279,7 +271,7 @@ def main():
         df = pd.DataFrame()
     
     # Algorithms excluded from spy plots (not informative / not in scope)
-    SPY_EXCLUDE = {'SPARTA_reorder', 'random2D'}
+    SPY_EXCLUDE = {'SPARTA_reorder', 'random2D', 'ACCORDER_reorder', 'graphblas'}
 
     # Get available algorithms from perms directory or use defaults
     if args.algorithms:
