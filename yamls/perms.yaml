@@ -15,6 +15,9 @@ jobs:
           perm_path=perms/GROOT_reorder/$mtx_name.perm
         command: "python3 MtxPerm/GROOT/reorder.py {mtx} $perm_path"
 
+  - config: "perm"
+    config_jobs:
+
       - tag: "random1D"
         preprocess: |
           mtx_name=$(basename {mtx} .mtx)

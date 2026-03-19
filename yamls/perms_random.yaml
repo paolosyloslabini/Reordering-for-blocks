@@ -7,18 +7,6 @@ jobs:
   - config: "perm"
     config_jobs:
 
-      - tag: "random1D_RANDOM"
-        preprocess: |
-          mtx_name=$(basename {mtx} .mtx)
-          mkdir -p perms_random/random1D
-          perm_path=perms_random/random1D/$mtx_name.perm
-        command: >
-          temp_mtx=$(mktemp /tmp/pre_perm_XXXXXX.mtx) &&
-          python3 MtxPerm/pre_permute.py {mtx} $temp_mtx
-          --perm perms/random1D/$mtx_name.perm --perm-type SYMMETRIC &&
-          python3 MtxPerm/RANDOM/GB_random_permutation_1d.py $temp_mtx $perm_path;
-          rm -f $temp_mtx
-
       - tag: "GROOT_reorder_RANDOM"
         preprocess: |
           source MtxPerm/GROOT/groot_preprocess.sh
@@ -30,6 +18,21 @@ jobs:
           python3 MtxPerm/pre_permute.py {mtx} $temp_mtx
           --perm perms/random1D/$mtx_name.perm --perm-type SYMMETRIC &&
           python3 MtxPerm/GROOT/reorder.py $temp_mtx $perm_path;
+          rm -f $temp_mtx
+
+  - config: "perm"
+    config_jobs:
+
+      - tag: "random1D_RANDOM"
+        preprocess: |
+          mtx_name=$(basename {mtx} .mtx)
+          mkdir -p perms_random/random1D
+          perm_path=perms_random/random1D/$mtx_name.perm
+        command: >
+          temp_mtx=$(mktemp /tmp/pre_perm_XXXXXX.mtx) &&
+          python3 MtxPerm/pre_permute.py {mtx} $temp_mtx
+          --perm perms/random1D/$mtx_name.perm --perm-type SYMMETRIC &&
+          python3 MtxPerm/RANDOM/GB_random_permutation_1d.py $temp_mtx $perm_path;
           rm -f $temp_mtx
 
       # - tag: "SPARTA_reorder_RANDOM"  # disabled
