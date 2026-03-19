@@ -117,7 +117,12 @@ def create_spy_plot(matrices_dict, output_path, matrix_name, figsize=None, marke
         ax = axes[idx]
         color = _label_color(label)
         ax.spy(A, markersize=markersize, aspect='equal', color=color)
-        ax.set_title(label, fontsize=11, fontweight='bold', color=color)
+        ax.set_title(label, fontsize=14, fontweight='bold', color=color)
+        # Limit tick density to avoid overlapping labels
+        ax.xaxis.set_major_locator(plt.MaxNLocator(4, integer=True))
+        ax.yaxis.set_major_locator(plt.MaxNLocator(4, integer=True))
+        ax.tick_params(axis='x', labelrotation=30, labelsize=8)
+        ax.tick_params(axis='y', labelsize=8)
         # Only show dimension labels on edge subplots
         row_idx, col_idx = divmod(idx, n_cols)
         if row_idx == n_rows - 1:
@@ -273,31 +278,34 @@ def main():
         print(f"Warning: Could not load analysis CSV: {e}")
         df = pd.DataFrame()
     
+    # Algorithms excluded from spy plots (not informative / not in scope)
+    SPY_EXCLUDE = {'SPARTA_reorder', 'random2D'}
+
     # Get available algorithms from perms directory or use defaults
     if args.algorithms:
-        algorithms = args.algorithms
+        algorithms = [a for a in args.algorithms if a not in SPY_EXCLUDE]
     else:
         # Default algorithms based on analysis data
         # These match the permutation names in results_analysis.csv
         algorithms = [
-            'SB_rcm',       # Reverse Cuthill-McKee (bandwidth reduction)
-            'SB_amd',       # Approximate Minimum Degree
-            'SB_metis',     # Graph partitioning
-            'SB_gray',      # Gray code ordering
-            'SB_degree',    # Degree-based ordering
-            'SB_rabbit',    # Rabbit ordering
-            'SB_patoh',     # PaToH hypergraph partitioning
+            'SB_rcm',        # Reverse Cuthill-McKee (bandwidth reduction)
+            'SB_amd',        # Approximate Minimum Degree
+            'SB_metis',      # Graph partitioning
+            'SB_gray',       # Gray code ordering
+            'SB_degree',     # Degree-based ordering
+            'SB_rabbit',     # Rabbit ordering
+            'SB_patoh',      # PaToH hypergraph partitioning
             'GROOT_reorder', # GROOT GPU reordering
-            'SPARTA_reorder', # SPARTA reordering
-            'random1D',     # Random permutation (baseline)
+            'TCA_reorder',   # DTC-LSH reordering
+            'random1D',      # Random permutation (baseline)
         ]
-        
+
         # Also check what's actually in the perms directory
         if perms_dir.exists():
             available = [d.name for d in perms_dir.iterdir() if d.is_dir()]
-            # Keep only algorithms that exist
-            algorithms = [a for a in algorithms if a in available] + \
-                        [a for a in available if a not in algorithms]
+            # Keep only algorithms that exist, excluding blacklisted ones
+            algorithms = [a for a in algorithms if a in available and a not in SPY_EXCLUDE] + \
+                        [a for a in available if a not in algorithms and a not in SPY_EXCLUDE]
     
     print(f"Algorithms to process: {algorithms}")
     
