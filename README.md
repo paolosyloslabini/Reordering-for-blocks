@@ -160,19 +160,6 @@ Permutations are stored in `perms_random/<algorithm>/<matrix_name>.perm`.
 5. **Parse results**: `python scripts/parse_results.py`
 6. **Generate plots**: `python scripts/plot.py --one-per-family`
 
-## Key Metrics
-
-### Analysis Metrics (from MtxPerm/ANALYSIS)
-- `bandwidth_max`: Maximum matrix bandwidth
-- `block_density_{4,8,16,32,64,128}`: Nonzero fraction in occupied blocks
-- `locality_vertical_adjacency_ratio`: Consecutive column pairs ratio
-- `locality_avg_row_spread`: Average spread of nonzeros per row
-
-### Performance Metrics
-- `time_operation_ms`: SpMM execution time
-- `gflops`: Computed from nnz and time
-- `speedup`: Relative to identity (no reordering)
-
 ## Dependencies
 
 ### Python
