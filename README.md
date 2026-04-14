@@ -1,6 +1,7 @@
-# ReorderingSurvey-2026
+# Reordering for Blocks.
 
-A comprehensive research framework for evaluating **sparse matrix reordering algorithms** and their impact on **GPU SpMM (Sparse Matrix-Matrix Multiplication) performance**.
+This repository contains the experimental suite for the paper Reordering and Blocking for High Performance Linear Algebra (currently under review). 
+It provides a comprehensive research framework for evaluating *sparse matrix reordering algorithms**. It studies the structural effect of reordering on matrices, and how these structural changes impact linear algebra primitives on GPUs.
 
 ## Purpose
 
@@ -8,7 +9,7 @@ This repository systematically:
 1. Downloads and manages sparse matrices from the SuiteSparse Matrix Collection
 2. Generates permutations using various reordering algorithms
 3. Analyzes matrix structural properties (bandwidth, block density, locality)
-4. Benchmarks SpMM performance across multiple GPU kernels
+4. Benchmarks the performance of reordered matrices across multiple GPU kernels
 5. Correlates reordering-induced structural changes with performance gains
 
 ## Directory Structure
