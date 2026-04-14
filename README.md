@@ -1,7 +1,7 @@
 # Reordering for Blocks.
 
 This repository contains the experimental suite for the paper Reordering and Blocking for High Performance Linear Algebra (currently under review). 
-It provides a comprehensive research framework for evaluating *sparse matrix reordering algorithms**. It studies the structural effect of reordering on matrices, and how these structural changes impact linear algebra primitives on GPUs.
+It provides a comprehensive research framework for evaluating *sparse matrix reordering algorithms*. It studies the structural effect of reordering on matrices, and how these structural changes impact linear algebra primitives on GPUs.
 
 ## Purpose
 
