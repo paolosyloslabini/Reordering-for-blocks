@@ -69,20 +69,20 @@ This repository systematically:
 
 Defined in [yamls/perms.yaml](yamls/perms.yaml):
 
-| Algorithm | Source | Description |
+| Algorithm | Description |
 |-----------|--------|-------------|
 | `identity` | - | No reordering (baseline) |
-| `random1D` | GraphBLAS | Random row permutation |
-| `random2D` | GraphBLAS | Random row + column permutation |
-| `SB_rcm` | SparseBase | Reverse Cuthill-McKee (bandwidth reduction) |
-| `SB_degree` | SparseBase | Degree-based ordering |
-| `SB_gray` | SparseBase | Gray code reordering |
-| `SB_amd` | SparseBase | Approximate Minimum Degree |
-| `SB_metis` | SparseBase | METIS graph partitioning |
-| `SB_rabbit` | SparseBase | Rabbit reordering |
-| `SB_slashburn` | SparseBase | SlashBurn algorithm |
-| `SPARTA_reorder` | SPARTA | Sparse blocking for tensor cores |
-| `GROOT_reorder` | GROOT | k-NN + MST + DFS row reordering for tensor cores (EuroSys'25) |
+| `random1D` | Random row permutation |
+| `random2D` | Random row + column permutation |
+| `SB_rcm` | Reverse Cuthill-McKee (bandwidth reduction) |
+| `SB_degree` | Degree-based ordering |
+| `SB_gray` | Gray code reordering |
+| `SB_amd` | Approximate Minimum Degree |
+| `SB_metis` | METIS graph partitioning |
+| `SB_rabbit` | Rabbit reordering |
+| `SB_slashburn` | SlashBurn algorithm |
+| `SPARTA_reorder` | Sparse blocking for tensor cores |
+| `GROOT_reorder` | k-NN + MST + DFS row reordering for tensor cores (EuroSys'25) |
 
 ## Permutation Types
 
