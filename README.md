@@ -109,7 +109,7 @@ Three modes for applying permutations:
 |--------|-------------|
 | `.mtx` | Matrix Market format (standard sparse matrix) |
 | `.perm` | Permutation file: 1-based indices, space-separated, 1-2 lines |
-| `.csv` | Result files (Pandas-compatible) |
+| `.csv` | Result files |
 | `.yaml` | SbatchMan experiment configurations |
 
 ## Permutation File Format
