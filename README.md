@@ -156,7 +156,7 @@ Permutations are stored in `perms_random/<algorithm>/<matrix_name>.perm`.
 1. **Download matrices**: Configure [yamls/matrices.yaml](yamls/matrices.yaml)
 2. **Generate permutations**: Configure [yamls/perms.yaml](yamls/perms.yaml)
 3. **Run analysis**: Use `sbatchman launch --file yamls/analysis_*.yaml` to compute matrix metrics
-4. **Run benchmarks**: Use `sbatchman launch yamls/operations_*.yaml` to benchmark SpMM kernels
+4. **Run benchmarks**: Use `sbatchman launch --file yamls/operations_*.yaml` to benchmark SpMM kernels
 5. **Parse results**: `python scripts/parse_results.py`
 6. **Generate plots**: `python scripts/plot.py --one-per-family`
 
