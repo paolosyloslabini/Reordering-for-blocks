@@ -125,20 +125,6 @@ Three modes for applying permutations:
 
 Indices are **1-based**.
 
-## Random-Base Reordering Experiments
-
-Tests whether reordering algorithms can **recover structure from a randomized starting point**. The pipeline:
-
-1. **Scramble**: Apply `random1D` permutation symmetrically (`P_rand * A * P_rand^T`) to destroy existing structure
-2. **Re-order**: Run all 10 non-random reordering algorithms on the scrambled matrix
-3. **Analyze**: Compare structural metrics of re-ordered-random matrices against the originals
-
-### How it works
-
-- **[MtxPerm/pre_permute.py](MtxPerm/pre_permute.py)** loads a matrix, applies a permutation, and writes a new `.mtx` file
-- **[yamls/perms_random.yaml](yamls/perms_random.yaml)** generates permutations on pre-scrambled matrices (uses `mktemp` for race-free temp files in parallel SLURM jobs)
-- **[MtxPerm/ANALYSIS/analyze.py](MtxPerm/ANALYSIS/analyze.py)** supports dual permutations via `--base-perm` / `--base-perm-type` (base applied first, then `--perm` on top)
-
 ### Analysis YAMLs
 
 | YAML | Description |
