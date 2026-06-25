@@ -19,7 +19,7 @@ This repository systematically:
 | [`scripts/`](scripts/README.md) | Result parsing, plotting, and job monitoring utilities |
 | [`yamls/`](yamls/README.md) | Experiment configuration files for SbatchMan |
 | [`operators/`](operators/) | SpMM kernel implementations and Python wrappers |
-| [`MtxPerm/`](MtxPerm/) | Permutation generation tools (SparseBase, GraphBLAS, SPARTA) |
+| [`MtxPerm/`](MtxPerm/) | Permutation generation tools |
 | [`datasets/`](datasets/README.md) | Sparse matrices from SuiteSparse collection |
 | [`results/`](results/README.md) | Aggregated CSV results from experiments |
 | [`perms/`](perms/README.md) | Generated permutation files organized by algorithm |
