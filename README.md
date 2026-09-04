@@ -1,6 +1,6 @@
 # Reordering for Blocks
 
-This repository contains the experimental suite for the paper Reordering and Blocking for High Performance Linear Algebra (currently under review). 
+This repository contains the experimental suite for the paper Reordering and Blocking for High-Performance Linear Algebra. 
 It provides a comprehensive research framework for evaluating *sparse matrix reordering algorithms*. It studies the structural effect of reordering on matrices, and how these structural changes impact linear algebra primitives on GPUs.
 
 ## Purpose
@@ -8,9 +8,38 @@ It provides a comprehensive research framework for evaluating *sparse matrix reo
 This repository:
 1. Downloads and manages sparse matrices from the SuiteSparse Matrix Collection
 2. Generates permutations using various reordering algorithms
-3. Analyzes matrix structural properties (bandwidth, block density, locality)
+3. Analyses matrix structural properties (bandwidth, block density, locality)
 4. Benchmarks the performance of reordered matrices across multiple GPU kernels
 5. Correlates reordering-induced structural changes with performance gains
+
+## Typical Workflow
+
+1. **Download matrices**: Configure [yamls/matrices.yaml](yamls/matrices.yaml)
+2. **Generate permutations**: Configure [yamls/perms.yaml](yamls/perms.yaml), run reorderings with `sbatchman launch --file yamls/perm_*.yaml`
+3. **Run analysis**: Use `sbatchman launch --file yamls/analysis_*.yaml` to compute matrix metrics
+4. **Run benchmarks**: Use `sbatchman launch --file yamls/operations_*.yaml` to benchmark SpMM kernels
+5. **Parse results**: `python scripts/parse_results.py`
+6. **Generate plots**: `python scripts/plot.py --one-per-family`
+
+## Dependencies
+
+### Python
+- PyTorch (with CUDA), CuPy
+- NumPy, SciPy, Pandas
+- Matplotlib, Seaborn
+- python-graphblas
+- ssgetpy (SuiteSparse download)
+
+### C++/CUDA
+- CUDA Toolkit (≥11.8)
+- SparseBase library
+- CMake (≥3.12)
+- OpenMP
+- Optional: METIS, PaToH
+
+## Environment
+
+Designed for SLURM cluster execution. Job configurations in [yamls/configs.yaml](yamls/configs.yaml)
 
 ## Directory Structure
 
@@ -136,32 +165,3 @@ Indices are **1-based**.
 ### Output
 
 Permutations are stored in `perms_random/<algorithm>/<matrix_name>.perm`.
-
-## Typical Workflow
-
-1. **Download matrices**: Configure [yamls/matrices.yaml](yamls/matrices.yaml)
-2. **Generate permutations**: Configure [yamls/perms.yaml](yamls/perms.yaml), run reorderings with `sbatchman launch --file yamls/perm_*.yaml`
-3. **Run analysis**: Use `sbatchman launch --file yamls/analysis_*.yaml` to compute matrix metrics
-4. **Run benchmarks**: Use `sbatchman launch --file yamls/operations_*.yaml` to benchmark SpMM kernels
-5. **Parse results**: `python scripts/parse_results.py`
-6. **Generate plots**: `python scripts/plot.py --one-per-family`
-
-## Dependencies
-
-### Python
-- PyTorch (with CUDA), CuPy
-- NumPy, SciPy, Pandas
-- Matplotlib, Seaborn
-- python-graphblas
-- ssgetpy (SuiteSparse download)
-
-### C++/CUDA
-- CUDA Toolkit (≥11.8)
-- SparseBase library
-- CMake (≥3.12)
-- OpenMP
-- Optional: METIS, PaToH
-
-## Environment
-
-Designed for SLURM cluster execution. Job configurations in [yamls/configs.yaml](yamls/configs.yaml).
