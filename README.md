@@ -5,7 +5,7 @@ It provides a comprehensive research framework for evaluating *sparse matrix reo
 
 ## Purpose
 
-This repository systematically:
+This repository:
 1. Downloads and manages sparse matrices from the SuiteSparse Matrix Collection
 2. Generates permutations using various reordering algorithms
 3. Analyzes matrix structural properties (bandwidth, block density, locality)
