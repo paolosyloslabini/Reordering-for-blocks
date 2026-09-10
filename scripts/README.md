@@ -42,6 +42,18 @@ python scripts/plot.py [--one-per-family] [--row] [--random] [--n-cols N] [--ker
 
 Break-even analysis plots (minimum SpMM operations for reordering to pay for itself) are generated per kernel under `plots/n_cols_{N}/{kernel}/breakeven/`. Cases where reordering is harmful are shown as × markers at a cap line.
 
+### roofline_lite.py
+
+FLOP-side roof analysis from existing timings (no measured byte traffic).
+Invoked via `plot.py --sections roofline-lite`; outputs to `plots/<pipeline>/roofline_lite/`:
+
+- `gflops_vs_ncols.png`, `gflops_vs_ncols_panels.png` — useful GFLOP/s vs `n_cols`, Original vs RCM, with A100 peak lines (bandwidth-bound kernels scale ~linearly; compute-bound ones plateau).
+- `executed_vs_useful[_frac]_nc{N}.png` — median useful vs *executed* GFLOP/s (useful / block density at the kernel's tile size), against the tensor-core peak.
+- `executed_orig_vs_reordered_nc{N}.png` — per-matrix executed GFLOP/s after vs before RCM; points on the diagonal mean reordering only removed padding.
+- `roofline_lite_summary.csv`, `roofline_lite_summary_nc256.tex` — per-kernel medians.
+
+Constants (A100 peaks, per-kernel precision, tile block size, reference perm) are in `settings.py`.
+
 ### plot_utils.py
 
 Shared plotting utilities and style configurations.

@@ -31,6 +31,7 @@ PLOT_GROUPS = [
     ("Improvement correlation plots",  "imp-correlation"),
     ("Partial correlation heatmaps",   "partial-correlation"),
     ("Feature importance plots",       "feature-importance"),
+    ("Roofline-lite (FLOP-side roof)", "roofline-lite"),
     ("ALL plot.py plots",              None),          # None → no --sections flag
 ]
 
