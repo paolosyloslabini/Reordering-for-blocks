@@ -416,6 +416,7 @@ def generate_roofline_lite_plots(df, out_dir, ref_perm=ROOFLINE_REF_PERM):
     for n in sorted(df['n_cols'].unique()):
         plot_exec_frac_vs_density(df, kernels, out_dir, n)
         write_per_perm_table(df, kernels, out_dir, n)
+        write_per_matrix_slopes(df, kernels, out_dir, n)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -435,7 +436,7 @@ def plot_exec_frac_vs_density(df, kernels, out_dir, n_cols):
     fig, axes = plt.subplots(nrows_fig, ncols_fig,
                              figsize=(3.6 * ncols_fig, 3.1 * nrows_fig))
     axes = np.atleast_1d(axes).ravel()
-    strategies = pu.get_strategy_order(sub)
+    strategies = list(dict.fromkeys(pu.get_strategy_order(sub)))
     pal = pu.get_strategy_palette(strategies)
     for ax, k in zip(axes, blocked):
         s = sub[sub['kernel_id'] == k]
@@ -500,3 +501,35 @@ def write_per_perm_table(df, kernels, out_dir, n_cols):
     wide.to_csv(out_dir / f'exec_frac_by_perm_nc{int(n_cols)}_wide.csv', float_format='%.3g')
     print(f"  Saved: {csv_path}")
     return wide
+
+
+def write_per_matrix_slopes(df, kernels, out_dir, n_cols, min_pts=5):
+    """Per (matrix, kernel): OLS slope of log(exec/peak) vs log(tile density)
+    across that matrix's reorderings.  Slope 0: executed rate invariant to
+    padding (time ~ tiles).  Slope -1: useful rate invariant (time ~ nnz).
+    Note slope = elasticity - 1, i.e. the same quantity as the log-log
+    elasticity alpha of speedup vs density improvement, computed per matrix.
+    """
+    blocked = [k for k in kernels if k in KERNEL_TILE_DENSITY_BS]
+    sub = df[(df['n_cols'] == n_cols) & df['kernel_id'].isin(blocked)].copy()
+    sub = sub.replace([np.inf, -np.inf], np.nan).dropna(subset=['exec_gflops', 'tile_density'])
+    sub = sub[(sub['exec_gflops'] > 0) & (sub['tile_density'] > 0)]
+    rows = []
+    for (k, m), g in sub.groupby(['kernel_id', 'matrix']):
+        g = g.groupby('strategy').agg(x=('tile_density', 'mean'), y=('exec_gflops', 'mean'))
+        if len(g) < min_pts or g['x'].max() / g['x'].min() < 1.2:
+            continue
+        lx, ly = np.log(g['x']), np.log(g['y'])
+        slope = np.polyfit(lx, ly, 1)[0]
+        rows.append({'kernel_id': k, 'matrix': m, 'slope': slope, 'n': len(g),
+                     'density_range': g['x'].max() / g['x'].min()})
+    t = pd.DataFrame(rows)
+    t.to_csv(out_dir / f'exec_slope_per_matrix_nc{int(n_cols)}.csv', index=False, float_format='%.3g')
+    summ = (t.groupby('kernel_id')['slope']
+             .describe(percentiles=[0.25, 0.5, 0.75])[['count', '25%', '50%', '75%']]
+             .rename(columns={'50%': 'median'}))
+    summ.index = [KERNEL_NAMES.get(k, k) for k in summ.index]
+    summ.to_csv(out_dir / f'exec_slope_summary_nc{int(n_cols)}.csv', float_format='%.3g')
+    print(f"  Per-matrix exec-vs-density slopes (n_cols={int(n_cols)}):")
+    print(summ.to_string())
+    return summ
