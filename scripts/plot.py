@@ -14,6 +14,7 @@ import pandas as pd
 import numpy as np
 import plot_utils as pu
 from settings import get_perm_display, KERNEL_NAMES, GROUPED_SCATTER_EXCLUDE, PERMS, ALL_METRICS, BLOCK_SIZES, get_metric_display, get_metric_color, get_metric_hatch
+from roofline_lite import generate_roofline_lite_plots
 from correlation_table import (compute_imp_correlations,
                                _enabled_improvement_metrics,
                                _density_improvement_metrics, _corr_method_tag,
@@ -78,6 +79,7 @@ def parse_args():
         'imp-correlation',
         'partial-correlation',
         'feature-importance',
+        'roofline-lite',
     ]
     parser.add_argument(
         "--sections", nargs="+", choices=SECTION_CHOICES, default=None,
@@ -1442,6 +1444,12 @@ def main():
         print("Generating RF feature importance plots...")
         print("="*60)
         generate_feature_importance_plots(df, out_dir)
+
+    if has_ops and _should_run('roofline-lite', args):
+        print("\n" + "="*60)
+        print("Generating roofline-lite (FLOP-side roof) plots...")
+        print("="*60)
+        generate_roofline_lite_plots(df, out_dir)
 
     print(f"\nAll plots saved to {out_dir}")
 

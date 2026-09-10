@@ -330,3 +330,44 @@ GROUPED_SCATTER_EXCLUDE = {'CUSPARSE_SPMM_BSR_bs32'}
 
 
 
+
+
+# =============================================================================
+# Roofline-lite constants (FLOP-side roofs only; no measured byte traffic)
+# =============================================================================
+# Hardware peaks for the A100-SXM4-80GB used in the experiments, in GFLOP/s.
+# Dense (non-sparsity) tensor-core peaks from the NVIDIA A100 datasheet.
+A100_PEAK_GFLOPS = {
+    'FP32': 19_500,     # CUDA cores
+    'TF32': 156_000,    # Tensor cores, TF32 inputs
+    'FP16': 312_000,    # Tensor cores, FP16/BF16 inputs
+}
+A100_HBM_GBPS = 2_039   # HBM2e bandwidth, GB/s (for reference only)
+
+# Precision each kernel executes its MMA / FMA work in.  Drives which peak
+# line is drawn for it.  DTC-SpMM issues TF32 MMA instructions on FP32 data.
+KERNEL_PRECISION = {
+    'CUSPARSE_SPMM_CSR':       'FP32',
+    'CUSPARSE_SPMM_BSR_bs32':  'FP32',
+    'ASPT_SPMM':               'FP32',
+    'DTC_SPMM':                'TF32',
+    'SMAT_SPMM_bs32':          'FP16',
+    'FLASHSPARSE_SPMM':        'FP16',
+    'ACCSPMM_SPMM':            'TF32',
+}
+
+# Square block size (from BLOCK_SIZES) whose block density approximates the
+# padding of each kernel's own tile.  Executed FLOPs = useful FLOPs / density.
+# cuSPARSE BSR uses exact 32x32 tiles; SMaT processes 16x16 tiles (despite
+# the bs32 kernel id); AccSpMM uses exact 8x8 tiles; DTC-SpMM and
+# FlashSparse use 16x8 tiles, approximated here by the 16x16 density
+# (a slight over-estimate of padding).  Unblocked kernels (CSR, ASpT) have
+# no entry: their executed FLOPs equal their useful FLOPs.
+KERNEL_TILE_DENSITY_BS = {
+    'CUSPARSE_SPMM_BSR_bs32': 32,
+    'SMAT_SPMM_bs32':         16,
+    'DTC_SPMM':               16,
+    'FLASHSPARSE_SPMM':       16,
+    'ACCSPMM_SPMM':           8,
+}
+
