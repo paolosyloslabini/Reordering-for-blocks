@@ -412,3 +412,91 @@ def generate_roofline_lite_plots(df, out_dir, ref_perm=ROOFLINE_REF_PERM):
         plot_executed_vs_useful(paired, kernels, out_dir, n, ref_label, normalise=True)
         plot_executed_orig_vs_ref(paired, kernels, out_dir, n, ref_label)
     write_summary_table(paired, kernels, out_dir, ref_label)
+    # Reference-free views over all reorderings
+    for n in sorted(df['n_cols'].unique()):
+        plot_exec_frac_vs_density(df, kernels, out_dir, n)
+        write_per_perm_table(df, kernels, out_dir, n)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Reference-free view: executed fraction of peak vs tile density, all
+# (matrix, reordering) pairs.  A kernel-intrinsic floor appears as a
+# horizontal asymptote that every reordering converges to.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def plot_exec_frac_vs_density(df, kernels, out_dir, n_cols):
+    blocked = [k for k in kernels if k in KERNEL_TILE_DENSITY_BS]
+    sub = df[(df['n_cols'] == n_cols) & df['kernel_id'].isin(blocked)].copy()
+    sub = sub.replace([np.inf, -np.inf], np.nan).dropna(subset=['exec_gflops', 'tile_density'])
+    sub['exec_frac'] = sub['exec_gflops'] / sub['peak_gflops']
+    n = len(blocked)
+    ncols_fig = min(3, n)
+    nrows_fig = int(np.ceil(n / ncols_fig))
+    fig, axes = plt.subplots(nrows_fig, ncols_fig,
+                             figsize=(3.6 * ncols_fig, 3.1 * nrows_fig))
+    axes = np.atleast_1d(axes).ravel()
+    strategies = pu.get_strategy_order(sub)
+    pal = pu.get_strategy_palette(strategies)
+    for ax, k in zip(axes, blocked):
+        s = sub[sub['kernel_id'] == k]
+        for strat in strategies:
+            ss = s[s['strategy'] == strat]
+            if ss.empty:
+                continue
+            ax.scatter(ss['tile_density'], ss['exec_frac'], s=7, alpha=0.5,
+                       color=pal.get(strat, 'grey'), edgecolors='none',
+                       label=strat)
+        # Binned median trend across all reorderings
+        bins = np.logspace(np.log10(s['tile_density'].min()),
+                           np.log10(s['tile_density'].max()), 12)
+        s = s.assign(_bin=pd.cut(s['tile_density'], bins))
+        med = s.groupby('_bin', observed=True).agg(
+            x=('tile_density', 'median'), y=('exec_frac', 'median'), n=('exec_frac', 'size'))
+        med = med[med['n'] >= 10]
+        ax.plot(med['x'], med['y'], color='black', linewidth=1.6, zorder=5)
+        ax.axhline(1.0, color='grey', linestyle=':', linewidth=0.9)
+        ax.set_xscale('log'); ax.set_yscale('log')
+        ax.set_ylim(top=2.0)
+        bs = KERNEL_TILE_DENSITY_BS[k]
+        ax.set_title(f"{KERNEL_NAMES.get(k, k)}  ({bs}$\\times${bs} tiles)", fontsize=10)
+        ax.set_xlabel('Tile density', fontsize=8)
+        ax.set_ylabel('Executed / peak', fontsize=8)
+        ax.grid(True, which='major', alpha=0.25)
+    for ax in axes[n:]:
+        ax.axis('off')
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc='lower right', fontsize=7, ncol=2,
+               markerscale=2.5, bbox_to_anchor=(0.98, 0.04))
+    fig.suptitle(f'$n_{{cols}} = {int(n_cols)}$; all (matrix, reordering) pairs; '
+                 'black: binned median', fontsize=9)
+    plt.tight_layout()
+    path = out_dir / f'exec_frac_vs_density_nc{int(n_cols)}.png'
+    plt.savefig(path, dpi=300, bbox_inches='tight')
+    plt.close()
+    print(f"  Saved: {path}")
+
+
+def write_per_perm_table(df, kernels, out_dir, n_cols):
+    """Median executed/peak and useful/peak per (kernel, reordering)."""
+    sub = df[df['n_cols'] == n_cols].copy()
+    sub = sub.replace([np.inf, -np.inf], np.nan).dropna(subset=['exec_gflops'])
+    sub['exec_frac'] = sub['exec_gflops'] / sub['peak_gflops']
+    sub['useful_frac'] = sub['gflops'] / sub['peak_gflops']
+    sub['kernel'] = sub['kernel_id'].map(lambda k: KERNEL_NAMES.get(k, k))
+    strategies = list(dict.fromkeys(pu.get_strategy_order(sub)))
+    tab = (sub.groupby(['kernel', 'strategy'])
+              .agg(n=('exec_frac', 'size'),
+                   exec_frac=('exec_frac', 'median'),
+                   useful_frac=('useful_frac', 'median'),
+                   tile_density=('tile_density', 'median'))
+              .reset_index())
+    rank = {s_: i for i, s_ in enumerate(strategies)}
+    tab['_r'] = tab['strategy'].map(lambda x: rank.get(x, len(rank)))
+    tab = tab.sort_values(['kernel', '_r']).drop(columns='_r')
+    csv_path = out_dir / f'exec_frac_by_perm_nc{int(n_cols)}.csv'
+    tab.to_csv(csv_path, index=False, float_format='%.3g')
+    wide = tab.pivot(index='strategy', columns='kernel', values='exec_frac')
+    wide = wide.reindex([s_ for s_ in strategies if s_ in wide.index])
+    wide.to_csv(out_dir / f'exec_frac_by_perm_nc{int(n_cols)}_wide.csv', float_format='%.3g')
+    print(f"  Saved: {csv_path}")
+    return wide
