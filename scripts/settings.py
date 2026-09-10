@@ -358,13 +358,14 @@ KERNEL_PRECISION = {
 
 # Square block size (from BLOCK_SIZES) whose block density approximates the
 # padding of each kernel's own tile.  Executed FLOPs = useful FLOPs / density.
-# BSR and SMaT use exact 32x32 tiles; AccSpMM uses exact 8x8 tiles; DTC-SpMM
-# and FlashSparse use 16x8 tiles, approximated here by the 16x16 density
+# cuSPARSE BSR uses exact 32x32 tiles; SMaT processes 16x16 tiles (despite
+# the bs32 kernel id); AccSpMM uses exact 8x8 tiles; DTC-SpMM and
+# FlashSparse use 16x8 tiles, approximated here by the 16x16 density
 # (a slight over-estimate of padding).  Unblocked kernels (CSR, ASpT) have
 # no entry: their executed FLOPs equal their useful FLOPs.
 KERNEL_TILE_DENSITY_BS = {
     'CUSPARSE_SPMM_BSR_bs32': 32,
-    'SMAT_SPMM_bs32':         32,
+    'SMAT_SPMM_bs32':         16,
     'DTC_SPMM':               16,
     'FLASHSPARSE_SPMM':       16,
     'ACCSPMM_SPMM':           8,

@@ -26,9 +26,8 @@ Caveats
 -------
 * Executed FLOPs assume the kernel multiplies every padded zero of its tile
   at the block density of the square block size in KERNEL_TILE_DENSITY_BS.
-  For SMaT this over-estimates: its executed rate exceeds the FP16 peak at
-  n_cols=1024, so SMaT must skip empty MMA fragments inside its 32x32
-  blocks.  Treat SMaT's executed numbers as an upper bound.
+* SMaT is modelled with 16x16 tiles (its actual MMA tile), not the 32x32
+  suggested by its kernel id.
 * DTC-SpMM and FlashSparse use 16x8 tiles, approximated by 16x16 density.
 * Only FLOP-side roofs are drawn; no byte traffic is measured, so this is
   not a full roofline.
