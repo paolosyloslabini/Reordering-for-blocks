@@ -417,6 +417,7 @@ def generate_roofline_lite_plots(df, out_dir, ref_perm=ROOFLINE_REF_PERM):
         plot_exec_frac_vs_density(df, kernels, out_dir, n)
         write_per_perm_table(df, kernels, out_dir, n)
         write_per_matrix_slopes(df, kernels, out_dir, n)
+        write_split_elasticity(df, kernels, out_dir, n)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -532,4 +533,43 @@ def write_per_matrix_slopes(df, kernels, out_dir, n_cols, min_pts=5):
     summ.to_csv(out_dir / f'exec_slope_summary_nc{int(n_cols)}.csv', float_format='%.3g')
     print(f"  Per-matrix exec-vs-density slopes (n_cols={int(n_cols)}):")
     print(summ.to_string())
+    return summ
+
+
+def write_split_elasticity(df, kernels, out_dir, n_cols, thresh=0.1):
+    """Per-matrix elasticity of speedup w.r.t. density change, anchored at
+    the Original ordering and fitted separately for reorderings that
+    *degrade* density (log ratio < -thresh) and ones that *improve* it
+    (> thresh).  Separates the cost of losing density from the benefit of
+    gaining it; pooled elasticities (as in the improvement-vs-speedup
+    scatter) mix the two.
+    """
+    blocked = [k for k in kernels if k in KERNEL_TILE_DENSITY_BS]
+    sub = df[(df['n_cols'] == n_cols) & df['kernel_id'].isin(blocked)]
+    sub = sub.replace([np.inf, -np.inf], np.nan).dropna(subset=['gflops', 'tile_density'])
+    rows = []
+    for (k, m), g in sub.groupby(['kernel_id', 'matrix']):
+        g = g.groupby('strategy').agg(x=('tile_density', 'mean'), y=('gflops', 'mean'))
+        if 'Original' not in g.index:
+            continue
+        x0, y0 = g.loc['Original', 'x'], g.loc['Original', 'y']
+        rel = g.drop('Original')
+        lx, ly = np.log(rel['x'] / x0), np.log(rel['y'] / y0)
+        for side, mask in (('worse', lx < -thresh), ('better', lx > thresh)):
+            if mask.sum() < 2:
+                continue
+            a = (lx[mask] * ly[mask]).sum() / (lx[mask] ** 2).sum()  # fit through origin
+            rows.append({'kernel': KERNEL_NAMES.get(k, k), 'kernel_id': k,
+                         'matrix': m, 'side': side, 'alpha': a, 'n': int(mask.sum())})
+    t = pd.DataFrame(rows)
+    if t.empty:
+        return t
+    t.to_csv(out_dir / f'split_elasticity_per_matrix_nc{int(n_cols)}.csv',
+             index=False, float_format='%.3g')
+    summ = (t.groupby(['kernel', 'side'])['alpha']
+             .agg(count='size', q25=lambda v: v.quantile(.25), median='median',
+                  q75=lambda v: v.quantile(.75)))
+    summ.to_csv(out_dir / f'split_elasticity_summary_nc{int(n_cols)}.csv', float_format='%.3g')
+    print(f"  Split elasticity (n_cols={int(n_cols)}), alpha of speedup vs density change:")
+    print(summ.round(2).to_string())
     return summ
