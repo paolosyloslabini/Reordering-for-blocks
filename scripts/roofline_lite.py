@@ -1,36 +1,51 @@
 """
-Roofline-lite analysis: FLOP-side roof placement from existing timing data.
+Roofline-lite: does a blocked SpMM kernel pay per *tile* or per *nonzero*?
 
-No byte traffic is measured, so this is *not* a full roofline.  It answers
-three questions using only kernel timings, nnz, and block densities:
+One question, one figure (``tile_roof_nc{N}.png``) and one table
+(``tile_roof_nc{N}.csv``), computed only from kernel timings, nnz and block
+densities.  No byte traffic is measured, so this is NOT a full roofline.
 
-1. How does useful throughput scale with n_cols?  Linear growth means the
-   kernel is bound by streaming the sparse operand; a plateau means it has
-   hit a roof (``gflops_vs_ncols*.png``).
-2. For blocked kernels, how close is the *executed* throughput (useful
-   FLOPs / block density at the kernel's tile size, i.e. including the
-   padded zeros the MMA units actually multiply) to the tensor-core peak?
-   Near peak => compute-saturated, reordering can only remove padding
-   (``executed_vs_useful_nc*.png``).
-3. Does reordering raise executed throughput (memory behaviour improved,
-   point moves *toward* the roof) or leave it flat while useful throughput
-   rises (kernel already at a roof, reordering only converts waste into
-   work)?  (``executed_orig_vs_reordered_nc*.png``).
+The question
+------------
+A blocked / tensor-core kernel does a fixed amount of work per tile it
+touches, whether the tile holds one nonzero or 256.  Reordering changes only
+how many tiles the same nonzeros occupy.  So:
 
-A summary table (CSV + LaTeX) with per-kernel medians is written alongside.
+    When a reordering packs the same nonzeros into fewer tiles, does the
+    kernel's time drop in proportion (it is *tile-bound*: reordering buys
+    speed), or does the time stay tied to the number of nonzeros (it is
+    *nnz-bound*: reordering cannot help)?  And how close to the tensor-core
+    peak is the per-tile work being executed?
 
-All constants (peaks, per-kernel precision, tile block size, reference
-reordering) live in ``settings.py``.
+The figure
+----------
+Top row (level):  executed FLOP/s / peak  vs  tile density, one panel per
+    blocked kernel, all (matrix, reordering) pairs.  Executed FLOP/s =
+    useful FLOP/s / tile density, i.e. counting the padded zeros the MMA
+    units multiply.  A point at 1.0 is on the tensor-core roof.
+
+Bottom row (slope, matrix-controlled):  time ratio vs tile-count ratio,
+    each reordering relative to the *same matrix's* Original.  The log-log
+    slope beta is fitted through the origin separately for reorderings that
+    reduce the tile count (density improves) and ones that increase it.
+    beta = 1: time ~ tiles (tile-bound).  beta = 0: time ~ nnz (nnz-bound).
+    beta is the elasticity alpha of the speedup-vs-density scatter, but
+    anchored per matrix (no size confound) and split by direction (no
+    mixing of losses and gains).
+
+The table also reports beta fitted per matrix (median) and per nnz tercile
+as robustness checks.
 
 Caveats
 -------
-* Executed FLOPs assume the kernel multiplies every padded zero of its tile
-  at the block density of the square block size in KERNEL_TILE_DENSITY_BS.
-* SMaT is modelled with 16x16 tiles (its actual MMA tile), not the 32x32
-  suggested by its kernel id.
-* DTC-SpMM and FlashSparse use 16x8 tiles, approximated by 16x16 density.
-* Only FLOP-side roofs are drawn; no byte traffic is measured, so this is
-  not a full roofline.
+* Executed FLOPs assume the kernel multiplies every padded zero of a
+  bs x bs tile, with bs from KERNEL_TILE_DENSITY_BS.
+* SMaT is modelled with 16x16 tiles (its MMA tile), not the 32x32 of its id.
+* DTC-SpMM and FlashSparse use 16x8 tiles, approximated by 16x16 density,
+  which OVER-estimates padding (16x8 density >= 16x16 density), so their
+  executed/peak is an upper bound (up to 2x too high at very low density).
+* DTC-SpMM is assumed to issue TF32 MMAs (peak 156 TFLOP/s).
+* Peaks are datasheet dense tensor-core peaks of the A100-SXM4-80GB.
 """
 
 from pathlib import Path
@@ -39,537 +54,201 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-import plot_utils as pu
-from settings import (KERNEL_NAMES, PALETTE, A100_PEAK_GFLOPS,
-                      KERNEL_PRECISION, KERNEL_TILE_DENSITY_BS,
-                      ROOFLINE_REF_PERM, get_perm_display)
+from settings import (KERNEL_NAMES, A100_PEAK_GFLOPS, KERNEL_PRECISION,
+                      KERNEL_TILE_DENSITY_BS)
 from correlation_table import _ordered_kernels
 
+C_FEWER = '#4477AA'   # reordering reduced the tile count (density up)
+C_MORE = '#CC6677'    # reordering increased the tile count (density down)
+C_ALL = '#999999'
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Data preparation
-# ─────────────────────────────────────────────────────────────────────────────
 
 def add_executed_gflops(df):
-    """Add ``exec_gflops``, ``tile_density`` and ``peak_gflops`` columns.
-
-    exec_gflops = gflops / block_density_{bs} for blocked kernels (bs from
-    KERNEL_TILE_DENSITY_BS); equal to gflops for unblocked kernels.
-    """
+    """Add ``tile_density``, ``exec_gflops`` and ``peak_gflops`` columns."""
     df = df.copy()
     df['tile_density'] = 1.0
     for kernel, bs in KERNEL_TILE_DENSITY_BS.items():
         col = f'block_density_{bs}'
-        if col not in df.columns:
-            continue
-        mask = df['kernel_id'] == kernel
-        df.loc[mask, 'tile_density'] = df.loc[mask, col]
+        if col in df.columns:
+            mask = df['kernel_id'] == kernel
+            df.loc[mask, 'tile_density'] = df.loc[mask, col]
     df['exec_gflops'] = df['gflops'] / df['tile_density']
     df['peak_gflops'] = df['kernel_id'].map(
         lambda k: A100_PEAK_GFLOPS.get(KERNEL_PRECISION.get(k, 'FP32')))
     return df
 
 
-def build_paired_frame(df, ref_perm=ROOFLINE_REF_PERM):
-    """One row per (matrix, kernel_id, n_cols) with Original and ref columns.
-
-    Columns: gflops_orig, gflops_ref, exec_orig, exec_ref, dens_orig,
-    dens_ref, peak_gflops, speedup (= gflops_ref / gflops_orig).
-    """
-    keys = ['matrix', 'kernel_id', 'n_cols']
-    agg = {'gflops': 'mean', 'exec_gflops': 'mean', 'tile_density': 'mean',
-           'peak_gflops': 'first'}
-    orig = (df[df['strategy'] == 'Original']
-            .groupby(keys).agg(agg).reset_index()
-            .rename(columns={'gflops': 'gflops_orig', 'exec_gflops': 'exec_orig',
-                             'tile_density': 'dens_orig'}))
-    ref = (df[df['perm'] == ref_perm]
-           .groupby(keys).agg({'gflops': 'mean', 'exec_gflops': 'mean',
-                               'tile_density': 'mean'}).reset_index()
-           .rename(columns={'gflops': 'gflops_ref', 'exec_gflops': 'exec_ref',
-                            'tile_density': 'dens_ref'}))
-    paired = orig.merge(ref, on=keys, how='inner')
-    paired = paired.replace([np.inf, -np.inf], np.nan).dropna(
-        subset=['gflops_orig', 'gflops_ref', 'exec_orig', 'exec_ref'])
-    paired['speedup'] = paired['gflops_ref'] / paired['gflops_orig']
-    paired['exec_ratio'] = paired['exec_ref'] / paired['exec_orig']
-    paired['dens_imp'] = paired['dens_ref'] / paired['dens_orig']
-    return paired
+def _relative_to_original(sub):
+    """One row per (matrix, strategy != Original): tile ratio, time ratio."""
+    keys = ['matrix', 'strategy']
+    g = (sub.groupby(keys)
+            .agg(dens=('tile_density', 'mean'), t=('time_operation_ms', 'mean'),
+                 nnz=('nnz', 'first'))
+            .reset_index())
+    orig = g[g['strategy'] == 'Original'][['matrix', 'dens', 't']]
+    orig = orig.rename(columns={'dens': 'dens0', 't': 't0'})
+    r = g[g['strategy'] != 'Original'].merge(orig, on='matrix', how='inner')
+    r['tile_ratio'] = r['dens0'] / r['dens']          # nnz fixed => tiles ~ 1/density
+    r['time_ratio'] = r['t'] / r['t0']
+    r = r.replace([np.inf, -np.inf], np.nan).dropna(subset=['tile_ratio', 'time_ratio'])
+    r = r[(r['tile_ratio'] > 0) & (r['time_ratio'] > 0)]
+    r['lx'] = np.log(r['tile_ratio'])
+    r['ly'] = np.log(r['time_ratio'])
+    return r
 
 
-def _kernel_palette(kernels):
-    return {k: PALETTE[i % len(PALETTE)] for i, k in enumerate(kernels)}
+def _slope0(lx, ly):
+    """Log-log slope through the origin (Original = (1, 1))."""
+    return float((lx * ly).sum() / (lx ** 2).sum()) if len(lx) else np.nan
 
 
-def _peak_lines(ax, precisions, xmin, xmax, fontsize=8):
-    """Draw dotted horizontal peak lines with right-aligned labels."""
-    styles = {'FP32': ':', 'TF32': '--', 'FP16': '-.'}
-    for prec in sorted(set(precisions), key=lambda p: A100_PEAK_GFLOPS[p]):
-        y = A100_PEAK_GFLOPS[prec]
-        ax.axhline(y, color='grey', linestyle=styles.get(prec, ':'),
-                   linewidth=0.9, alpha=0.8, zorder=0)
-        ax.text(xmax, y, f' {prec} peak', va='center', ha='left',
-                fontsize=fontsize, color='dimgrey')
+def _side_fits(r, thresh=0.1):
+    """Pooled and per-matrix-median beta for each direction."""
+    out = {}
+    for side, mask in (('fewer', r['lx'] < -thresh), ('more', r['lx'] > thresh)):
+        s = r[mask]
+        out[f'beta_{side}'] = _slope0(s['lx'], s['ly'])
+        out[f'n_{side}'] = int(len(s))
+        per_m = [_slope0(g['lx'], g['ly']) for _, g in s.groupby('matrix') if len(g) >= 2]
+        out[f'beta_{side}_matrix_median'] = float(np.median(per_m)) if per_m else np.nan
+        # size-confound check: beta per nnz tercile
+        if len(s) >= 30:
+            terc = pd.qcut(s['nnz'], 3, labels=['small', 'mid', 'large'], duplicates='drop')
+            for lab, g in s.groupby(terc, observed=True):
+                out[f'beta_{side}_{lab}'] = _slope0(g['lx'], g['ly'])
+    return out
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Plot 1: throughput vs n_cols
-# ─────────────────────────────────────────────────────────────────────────────
-
-def plot_gflops_vs_ncols(paired, kernels, out_dir, ref_label):
-    """Median useful GFLOPS vs n_cols, Original (solid) vs ref (dashed)."""
-    pal = _kernel_palette(kernels)
-    n_cols_values = sorted(paired['n_cols'].unique())
-
-    fig, ax = plt.subplots(figsize=(6.5, 4.2))
-    for k in kernels:
-        sub = paired[paired['kernel_id'] == k]
-        if sub.empty:
-            continue
-        med = sub.groupby('n_cols')[['gflops_orig', 'gflops_ref']].median()
-        ax.plot(med.index, med['gflops_orig'], '-o', color=pal[k],
-                label=KERNEL_NAMES.get(k, k), markersize=5, linewidth=1.6)
-        ax.plot(med.index, med['gflops_ref'], '--s', color=pal[k],
-                markersize=4, linewidth=1.2, alpha=0.9)
-    ax.set_xscale('log', base=2)
-    ax.set_yscale('log')
-    ax.set_xticks(n_cols_values)
-    ax.set_xticklabels([str(int(v)) for v in n_cols_values])
-    ax.set_xlabel('$n_{cols}$')
-    ax.set_ylabel('Median useful GFLOP/s')
-    _peak_lines(ax, [KERNEL_PRECISION.get(k, 'FP32') for k in kernels],
-                n_cols_values[0], n_cols_values[-1])
-    # Style legend for orig/ref
-    from matplotlib.lines import Line2D
-    handles, labels = ax.get_legend_handles_labels()
-    handles += [Line2D([0], [0], color='k', linestyle='-', marker='o', markersize=4),
-                Line2D([0], [0], color='k', linestyle='--', marker='s', markersize=4)]
-    labels += ['Original', ref_label]
-    ax.legend(handles, labels, fontsize=8, ncol=2, loc='upper left', framealpha=0.9)
-    ax.grid(True, which='both', alpha=0.25)
-    plt.tight_layout()
-    path = out_dir / 'gflops_vs_ncols.png'
-    plt.savefig(path, dpi=300)
-    plt.close()
-    print(f"  Saved: {path}")
-
-
-def plot_gflops_vs_ncols_panels(paired, kernels, out_dir, ref_label):
-    """Per-kernel boxplots (5/95 whiskers) of useful GFLOPS at each n_cols."""
-    n_cols_values = sorted(paired['n_cols'].unique())
-    n_k = len(kernels)
-    ncols_fig = 4
-    nrows_fig = int(np.ceil(n_k / ncols_fig))
-    fig, axes = plt.subplots(nrows_fig, ncols_fig,
-                             figsize=(3.2 * ncols_fig, 2.8 * nrows_fig),
-                             sharey=False)
-    axes = np.atleast_1d(axes).ravel()
-    c_orig, c_ref = '#88CCEE', '#CC6677'
-    for ax, k in zip(axes, kernels):
-        sub = paired[paired['kernel_id'] == k]
-        pos = np.arange(len(n_cols_values))
-        data_o = [sub.loc[sub['n_cols'] == n, 'gflops_orig'].values for n in n_cols_values]
-        data_r = [sub.loc[sub['n_cols'] == n, 'gflops_ref'].values for n in n_cols_values]
-        bp_o = ax.boxplot(data_o, positions=pos - 0.18, widths=0.3, whis=(5, 95),
-                          showfliers=False, patch_artist=True)
-        bp_r = ax.boxplot(data_r, positions=pos + 0.18, widths=0.3, whis=(5, 95),
-                          showfliers=False, patch_artist=True)
-        for bp, c in ((bp_o, c_orig), (bp_r, c_ref)):
-            for box in bp['boxes']:
-                box.set(facecolor=c, alpha=0.8, linewidth=0.7)
-            for med in bp['medians']:
-                med.set(color='black', linewidth=1.0)
-        ax.set_yscale('log')
-        ax.set_xticks(pos)
-        ax.set_xticklabels([str(int(n)) for n in n_cols_values])
-        ax.set_title(KERNEL_NAMES.get(k, k), fontsize=10)
-        ax.set_xlabel('$n_{cols}$', fontsize=9)
-        peak = A100_PEAK_GFLOPS[KERNEL_PRECISION.get(k, 'FP32')]
-        ax.axhline(peak, color='grey', linestyle=':', linewidth=0.9)
-        ax.text(pos[-1] + 0.45, peak, f'{KERNEL_PRECISION.get(k, "FP32")} peak',
-                fontsize=7, color='dimgrey', va='bottom', ha='right')
-        ax.grid(True, which='major', axis='y', alpha=0.25)
-    for ax in axes[len(kernels):]:
-        ax.axis('off')
-    axes[0].set_ylabel('Useful GFLOP/s')
-    from matplotlib.patches import Patch
-    fig.legend([Patch(facecolor=c_orig), Patch(facecolor=c_ref)],
-               ['Original', ref_label], loc='lower right', fontsize=9,
-               bbox_to_anchor=(0.98, 0.04))
-    plt.tight_layout()
-    path = out_dir / 'gflops_vs_ncols_panels.png'
-    plt.savefig(path, dpi=300)
-    plt.close()
-    print(f"  Saved: {path}")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Plot 2: executed vs useful throughput against the peak
-# ─────────────────────────────────────────────────────────────────────────────
-
-def plot_executed_vs_useful(paired, kernels, out_dir, n_cols, ref_label,
-                            normalise=False):
-    """Grouped bars per kernel: useful/executed GFLOPS, Original vs ref.
-
-    With ``normalise=True`` values are divided by the kernel's peak, so the
-    y-axis reads as "fraction of peak".
-    """
-    sub = paired[paired['n_cols'] == n_cols]
-    series = [('gflops_orig', 'Useful, Original', '#b2dfdb', ''),
-              ('gflops_ref', f'Useful, {ref_label}', '#00897b', ''),
-              ('exec_orig', 'Executed, Original', '#f4c7c3', '///'),
-              ('exec_ref', f'Executed, {ref_label}', '#c0392b', '///')]
-    n_s = len(series)
-    x = np.arange(len(kernels))
-    bw = 0.8 / n_s
-
-    fig, ax = plt.subplots(figsize=(8, 4))
-    for si, (col, label, color, hatch) in enumerate(series):
-        vals = []
-        for k in kernels:
-            s = sub.loc[sub['kernel_id'] == k]
-            if s.empty:
-                vals.append(np.nan)
-                continue
-            v = s[col].median()
-            if normalise:
-                v = v / s['peak_gflops'].iloc[0]
-            # Unblocked kernels: executed == useful; grey them out
-            vals.append(v)
-        bars = ax.bar(x + (si - (n_s - 1) / 2) * bw, vals, bw * 0.92,
-                      label=label, color=color, hatch=hatch,
-                      edgecolor='black', linewidth=0.4)
-        if col.startswith('exec'):
-            for k, b in zip(kernels, bars):
-                if k not in KERNEL_TILE_DENSITY_BS:
-                    b.set_alpha(0.25)
-    if not normalise:
-        for i, k in enumerate(kernels):
-            peak = A100_PEAK_GFLOPS[KERNEL_PRECISION.get(k, 'FP32')]
-            ax.hlines(peak, i - 0.42, i + 0.42, color='black', linewidth=1.2)
-        ax.plot([], [], color='black', linewidth=1.2, label='Peak (kernel precision)')
-        ax.set_ylabel('Median GFLOP/s')
-    else:
-        ax.axhline(1.0, color='black', linewidth=1.0)
-        ax.set_ylabel('Median fraction of peak')
-    ax.set_yscale('log')
-    ax.set_xticks(x)
-    ax.set_xticklabels([KERNEL_NAMES.get(k, k) for k in kernels],
-                       rotation=25, ha='right')
-    ax.legend(fontsize=8, ncol=2, loc='upper left', framealpha=0.9)
-    ax.grid(True, axis='y', which='both', alpha=0.25)
-    ax.set_title(f'$n_{{cols}} = {int(n_cols)}$  '
-                 '(faded executed bars: unblocked kernel, executed = useful)',
-                 fontsize=9)
-    plt.tight_layout()
-    suffix = '_frac' if normalise else ''
-    path = out_dir / f'executed_vs_useful{suffix}_nc{int(n_cols)}.png'
-    plt.savefig(path, dpi=300)
-    plt.close()
-    print(f"  Saved: {path}")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Plot 3: executed throughput, Original vs reordered (per matrix)
-# ─────────────────────────────────────────────────────────────────────────────
-
-def plot_executed_orig_vs_ref(paired, kernels, out_dir, n_cols, ref_label):
-    """Scatter of executed GFLOPS after vs before reordering, one panel per
-    blocked kernel.  Points on the diagonal: reordering only removed padding
-    (kernel at a roof).  Above: memory behaviour improved too."""
+def tile_roof(df, kernels, out_dir, n_cols, thresh=0.1):
     blocked = [k for k in kernels if k in KERNEL_TILE_DENSITY_BS]
-    sub = paired[(paired['n_cols'] == n_cols) & paired['kernel_id'].isin(blocked)]
+    dfn = df[df['n_cols'] == n_cols].replace([np.inf, -np.inf], np.nan)
+    dfn = dfn.dropna(subset=['gflops', 'tile_density', 'time_operation_ms'])
+    dfn = dfn[dfn['tile_density'] > 0]
+
     n = len(blocked)
-    ncols_fig = min(3, n)
-    nrows_fig = int(np.ceil(n / ncols_fig))
-    fig, axes = plt.subplots(nrows_fig, ncols_fig,
-                             figsize=(3.4 * ncols_fig, 3.2 * nrows_fig))
-    axes = np.atleast_1d(axes).ravel()
-    pal = _kernel_palette(kernels)
-    for ax, k in zip(axes, blocked):
-        s = sub[sub['kernel_id'] == k]
-        peak = A100_PEAK_GFLOPS[KERNEL_PRECISION.get(k, 'FP32')]
-        sc = ax.scatter(s['exec_orig'], s['exec_ref'], s=10, alpha=0.55,
-                        c=np.log10(s['dens_imp']), cmap='viridis',
-                        vmin=-0.5, vmax=1.0, edgecolors='none')
-        lo = min(s['exec_orig'].min(), s['exec_ref'].min()) * 0.7
-        hi = max(s['exec_orig'].max(), s['exec_ref'].max(), peak) * 1.4
-        ax.plot([lo, hi], [lo, hi], color='grey', linewidth=0.8)
-        ax.axhline(peak, color='grey', linestyle=':', linewidth=0.9)
-        ax.axvline(peak, color='grey', linestyle=':', linewidth=0.9)
-        ax.set_xscale('log'); ax.set_yscale('log')
-        ax.set_xlim(lo, hi); ax.set_ylim(lo, hi)
-        ax.set_aspect('equal')
-        med_ratio = s['exec_ratio'].median()
-        frac_up = (s['exec_ratio'] > 1.1).mean()
-        ax.set_title(KERNEL_NAMES.get(k, k), fontsize=10)
-        ax.text(0.04, 0.96,
-                f'median exec ratio {med_ratio:.2f}\n'
-                f'{100*frac_up:.0f}% of matrices >1.1x\n'
-                f'n={len(s)}',
-                transform=ax.transAxes, fontsize=7.5, va='top',
-                bbox=dict(facecolor='white', alpha=0.8, edgecolor='none'))
-        ax.set_xlabel('Executed GFLOP/s, Original', fontsize=8)
-        ax.set_ylabel(f'Executed GFLOP/s, {ref_label}', fontsize=8)
-        ax.grid(True, which='major', alpha=0.25)
-    for ax in axes[n:]:
-        ax.axis('off')
-    cbar = fig.colorbar(sc, ax=axes.tolist(), shrink=0.7, pad=0.02)
-    cbar.set_label('log$_{10}$ tile-density improvement', fontsize=8)
-    path = out_dir / f'executed_orig_vs_reordered_nc{int(n_cols)}.png'
-    plt.savefig(path, dpi=300, bbox_inches='tight')
-    plt.close()
-    print(f"  Saved: {path}")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Summary table
-# ─────────────────────────────────────────────────────────────────────────────
-
-def write_summary_table(paired, kernels, out_dir, ref_label):
+    fig, axes = plt.subplots(2, n, figsize=(2.9 * n, 5.6))
+    axes = np.atleast_2d(axes)
     rows = []
-    for k in kernels:
-        for n in sorted(paired['n_cols'].unique()):
-            s = paired[(paired['kernel_id'] == k) & (paired['n_cols'] == n)]
-            if s.empty:
-                continue
-            peak = s['peak_gflops'].iloc[0]
-            rows.append({
-                'kernel': KERNEL_NAMES.get(k, k),
-                'kernel_id': k,
-                'precision': KERNEL_PRECISION.get(k, 'FP32'),
-                'n_cols': int(n),
-                'n_matrices': len(s),
-                'peak_gflops': peak,
-                'useful_orig': s['gflops_orig'].median(),
-                'useful_ref': s['gflops_ref'].median(),
-                'exec_orig': s['exec_orig'].median() if k in KERNEL_TILE_DENSITY_BS else np.nan,
-                'exec_ref': s['exec_ref'].median() if k in KERNEL_TILE_DENSITY_BS else np.nan,
-                'useful_orig_frac_peak': s['gflops_orig'].median() / peak,
-                'exec_orig_frac_peak': (s['exec_orig'].median() / peak
-                                        if k in KERNEL_TILE_DENSITY_BS else np.nan),
-                'exec_ref_frac_peak': (s['exec_ref'].median() / peak
-                                       if k in KERNEL_TILE_DENSITY_BS else np.nan),
-                'median_speedup': s['speedup'].median(),
-                'median_exec_ratio': (s['exec_ratio'].median()
-                                      if k in KERNEL_TILE_DENSITY_BS else np.nan),
-                'median_density_imp': (s['dens_imp'].median()
-                                       if k in KERNEL_TILE_DENSITY_BS else np.nan),
-            })
-    tab = pd.DataFrame(rows)
-    csv_path = out_dir / 'roofline_lite_summary.csv'
-    tab.to_csv(csv_path, index=False, float_format='%.4g')
-    print(f"  Saved: {csv_path}")
+    for j, k in enumerate(blocked):
+        s = dfn[dfn['kernel_id'] == k]
+        s = s.assign(exec_frac=s['exec_gflops'] / s['peak_gflops'])
+        name = KERNEL_NAMES.get(k, k)
+        bs = KERNEL_TILE_DENSITY_BS[k]
+        prec = KERNEL_PRECISION.get(k, 'FP32')
 
-    # Compact LaTeX (n_cols=256 rows only, one line per kernel)
-    def fmt(v, p='{:.0f}'):
-        return '--' if pd.isna(v) else p.format(v)
-    lines = [r'\begin{tabular}{@{}lrrrrrrr@{}}', r'\toprule',
-             r'\textbf{Kernel} & \textbf{Peak} & '
-             r'\multicolumn{2}{c}{\textbf{Useful GFLOP/s}} & '
-             r'\multicolumn{2}{c}{\textbf{Executed GFLOP/s}} & '
-             r'\textbf{Exec./peak} & \textbf{Speedup} \\',
-             r' & & Orig. & ' + ref_label + r' & Orig. & ' + ref_label + r' & Orig. / ' + ref_label + r' & \\',
-             r'\midrule']
-    for _, r in tab[tab['n_cols'] == 256].iterrows():
-        lines.append(
-            f"{r['kernel']} & {fmt(r['peak_gflops']/1000, '{:.1f}T')} & "
-            f"{fmt(r['useful_orig'])} & {fmt(r['useful_ref'])} & "
-            f"{fmt(r['exec_orig'])} & {fmt(r['exec_ref'])} & "
-            f"{fmt(r['exec_orig_frac_peak'], '{:.2f}')} / {fmt(r['exec_ref_frac_peak'], '{:.2f}')} & "
-            f"{fmt(r['median_speedup'], '{:.2f}')} \\\\")
-    lines += [r'\bottomrule', r'\end{tabular}']
-    tex_path = out_dir / 'roofline_lite_summary_nc256.tex'
-    tex_path.write_text('\n'.join(lines) + '\n')
-    print(f"  Saved: {tex_path}")
-    return tab
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Entry point
-# ─────────────────────────────────────────────────────────────────────────────
-
-def generate_roofline_lite_plots(df, out_dir, ref_perm=ROOFLINE_REF_PERM):
-    out_dir = Path(out_dir) / 'roofline_lite'
-    out_dir.mkdir(parents=True, exist_ok=True)
-    ref_label = get_perm_display(ref_perm)
-
-    df = add_executed_gflops(df)
-    paired = build_paired_frame(df, ref_perm)
-    if paired.empty:
-        print(f"  No (Original, {ref_perm}) pairs found — skipping roofline-lite.")
-        return
-    kernels = [k for k in _ordered_kernels(df, KERNEL_NAMES)
-               if k in paired['kernel_id'].unique()]
-    print(f"  Reference reordering: {ref_label}; kernels: "
-          f"{[KERNEL_NAMES.get(k, k) for k in kernels]}; "
-          f"{paired['matrix'].nunique()} matrices")
-
-    plot_gflops_vs_ncols(paired, kernels, out_dir, ref_label)
-    plot_gflops_vs_ncols_panels(paired, kernels, out_dir, ref_label)
-    for n in sorted(paired['n_cols'].unique()):
-        plot_executed_vs_useful(paired, kernels, out_dir, n, ref_label)
-        plot_executed_vs_useful(paired, kernels, out_dir, n, ref_label, normalise=True)
-        plot_executed_orig_vs_ref(paired, kernels, out_dir, n, ref_label)
-    write_summary_table(paired, kernels, out_dir, ref_label)
-    # Reference-free views over all reorderings
-    for n in sorted(df['n_cols'].unique()):
-        plot_exec_frac_vs_density(df, kernels, out_dir, n)
-        write_per_perm_table(df, kernels, out_dir, n)
-        write_per_matrix_slopes(df, kernels, out_dir, n)
-        write_split_elasticity(df, kernels, out_dir, n)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Reference-free view: executed fraction of peak vs tile density, all
-# (matrix, reordering) pairs.  A kernel-intrinsic floor appears as a
-# horizontal asymptote that every reordering converges to.
-# ─────────────────────────────────────────────────────────────────────────────
-
-def plot_exec_frac_vs_density(df, kernels, out_dir, n_cols):
-    blocked = [k for k in kernels if k in KERNEL_TILE_DENSITY_BS]
-    sub = df[(df['n_cols'] == n_cols) & df['kernel_id'].isin(blocked)].copy()
-    sub = sub.replace([np.inf, -np.inf], np.nan).dropna(subset=['exec_gflops', 'tile_density'])
-    sub['exec_frac'] = sub['exec_gflops'] / sub['peak_gflops']
-    n = len(blocked)
-    ncols_fig = min(3, n)
-    nrows_fig = int(np.ceil(n / ncols_fig))
-    fig, axes = plt.subplots(nrows_fig, ncols_fig,
-                             figsize=(3.6 * ncols_fig, 3.1 * nrows_fig))
-    axes = np.atleast_1d(axes).ravel()
-    strategies = list(dict.fromkeys(pu.get_strategy_order(sub)))
-    pal = pu.get_strategy_palette(strategies)
-    for ax, k in zip(axes, blocked):
-        s = sub[sub['kernel_id'] == k]
-        for strat in strategies:
+        # ── top: level vs the tensor-core roof ─────────────────────────────
+        ax = axes[0, j]
+        ax.scatter(s['tile_density'], s['exec_frac'], s=5, alpha=0.35,
+                   color=C_ALL, edgecolors='none', rasterized=True)
+        bins = np.logspace(np.log10(s['tile_density'].min()),
+                           np.log10(s['tile_density'].max()), 12)
+        b = s.assign(_b=pd.cut(s['tile_density'], bins))
+        med = b.groupby('_b', observed=True).agg(
+            x=('tile_density', 'median'), y=('exec_frac', 'median'), n=('exec_frac', 'size'))
+        med = med[med['n'] >= 10]
+        ax.plot(med['x'], med['y'], color='black', linewidth=1.8, zorder=5,
+                label='binned median')
+        lvl = {}
+        for strat, mk, col in (('Original', 'o', 'black'), ('Random', 'D', C_MORE)):
             ss = s[s['strategy'] == strat]
             if ss.empty:
                 continue
-            ax.scatter(ss['tile_density'], ss['exec_frac'], s=7, alpha=0.5,
-                       color=pal.get(strat, 'grey'), edgecolors='none',
-                       label=strat)
-        # Binned median trend across all reorderings
-        bins = np.logspace(np.log10(s['tile_density'].min()),
-                           np.log10(s['tile_density'].max()), 12)
-        s = s.assign(_bin=pd.cut(s['tile_density'], bins))
-        med = s.groupby('_bin', observed=True).agg(
-            x=('tile_density', 'median'), y=('exec_frac', 'median'), n=('exec_frac', 'size'))
-        med = med[med['n'] >= 10]
-        ax.plot(med['x'], med['y'], color='black', linewidth=1.6, zorder=5)
-        ax.axhline(1.0, color='grey', linestyle=':', linewidth=0.9)
+            lvl[strat] = (ss['tile_density'].median(), ss['exec_frac'].median())
+            ax.plot(*lvl[strat], marker=mk, color=col, markersize=7,
+                    markeredgecolor='white', linestyle='none', zorder=6,
+                    label=f'{strat} (median)')
+        ax.axhline(1.0, color='black', linestyle=':', linewidth=1)
         ax.set_xscale('log'); ax.set_yscale('log')
-        ax.set_ylim(top=2.0)
-        bs = KERNEL_TILE_DENSITY_BS[k]
-        ax.set_title(f"{KERNEL_NAMES.get(k, k)}  ({bs}$\\times${bs} tiles)", fontsize=10)
-        ax.set_xlabel('Tile density', fontsize=8)
-        ax.set_ylabel('Executed / peak', fontsize=8)
-        ax.grid(True, which='major', alpha=0.25)
-    for ax in axes[n:]:
-        ax.axis('off')
-    handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc='lower right', fontsize=7, ncol=2,
-               markerscale=2.5, bbox_to_anchor=(0.98, 0.04))
-    fig.suptitle(f'$n_{{cols}} = {int(n_cols)}$; all (matrix, reordering) pairs; '
-                 'black: binned median', fontsize=9)
-    plt.tight_layout()
-    path = out_dir / f'exec_frac_vs_density_nc{int(n_cols)}.png'
-    plt.savefig(path, dpi=300, bbox_inches='tight')
+        ax.set_ylim(3e-3, 2.5)
+        ax.set_title(f'{name}\n{bs}$\\times${bs} tiles, {prec} peak', fontsize=9)
+        ax.set_xlabel('tile density', fontsize=8)
+        if j == 0:
+            ax.set_ylabel('executed FLOP/s / peak', fontsize=8)
+            ax.text(s['tile_density'].min(), 1.05, ' tensor-core roof',
+                    fontsize=7, va='bottom')
+        ax.tick_params(labelsize=7)
+        ax.grid(True, which='major', alpha=0.2)
+
+        # ── bottom: per-matrix time vs tiles ───────────────────────────────
+        ax = axes[1, j]
+        r = _relative_to_original(s)
+        fits = _side_fits(r, thresh)
+        fewer, more = r[r['lx'] < -thresh], r[r['lx'] > thresh]
+        for pts, col, lab in ((fewer, C_FEWER, 'fewer tiles'), (more, C_MORE, 'more tiles')):
+            if not pts.empty:
+                ax.scatter(pts['tile_ratio'], pts['time_ratio'], s=5, alpha=0.4,
+                           color=col, edgecolors='none', rasterized=True, label=lab)
+        xx = np.array([0.02, 50.0])
+        ax.plot(xx, xx, color='black', linewidth=1, linestyle='--',
+                label=r'time $\propto$ tiles ($\beta$=1)')
+        ax.plot(xx, [1, 1], color='black', linewidth=1, linestyle=':',
+                label=r'time $\propto$ nnz ($\beta$=0)')
+        for side, col, xr in (('fewer', C_FEWER, np.array([0.02, 1.0])),
+                              ('more', C_MORE, np.array([1.0, 50.0]))):
+            bta = fits[f'beta_{side}']
+            if np.isfinite(bta):
+                ax.plot(xr, xr ** bta, color=col, linewidth=2.2, zorder=5)
+        ax.set_xscale('log'); ax.set_yscale('log')
+        ax.set_xlim(0.03, 30); ax.set_ylim(0.1, 10)
+        ax.set_xlabel('tiles / tiles(Original)', fontsize=8)
+        if j == 0:
+            ax.set_ylabel('time / time(Original)', fontsize=8)
+        txt = [f"$\\beta_{{{side}}}$ = {fits[f'beta_{side}']:.2f}"
+               for side in ('fewer', 'more') if np.isfinite(fits[f'beta_{side}'])]
+        ax.text(0.03, 0.97, '\n'.join(txt),
+                transform=ax.transAxes, fontsize=8, va='top',
+                bbox=dict(facecolor='white', alpha=0.85, edgecolor='none'))
+        ax.tick_params(labelsize=7)
+        ax.grid(True, which='major', alpha=0.2)
+
+        row = {'kernel': name, 'kernel_id': k, 'tile_bs': bs, 'precision': prec,
+               'n_cols': int(n_cols), 'n_matrices': s['matrix'].nunique(),
+               'exec_frac_original': lvl.get('Original', (np.nan, np.nan))[1],
+               'dens_original': lvl.get('Original', (np.nan, np.nan))[0],
+               'exec_frac_random': lvl.get('Random', (np.nan, np.nan))[1],
+               'dens_random': lvl.get('Random', (np.nan, np.nan))[0]}
+        row.update(fits)
+        rows.append(row)
+
+    # unblocked kernels: useful/peak as context only (no panel)
+    for k in kernels:
+        if k in KERNEL_TILE_DENSITY_BS:
+            continue
+        s = dfn[(dfn['kernel_id'] == k) & (dfn['strategy'] == 'Original')]
+        if s.empty:
+            continue
+        rows.append({'kernel': KERNEL_NAMES.get(k, k), 'kernel_id': k,
+                     'tile_bs': np.nan, 'precision': KERNEL_PRECISION.get(k, 'FP32'),
+                     'n_cols': int(n_cols), 'n_matrices': s['matrix'].nunique(),
+                     'exec_frac_original': (s['gflops'] / s['peak_gflops']).median()})
+
+    h, l = axes[0, 0].get_legend_handles_labels()
+    axes[0, -1].legend(h, l, fontsize=6.5, loc='lower left', framealpha=0.9)
+    h, l = axes[1, 0].get_legend_handles_labels()
+    axes[1, -1].legend(h, l, fontsize=6.5, loc='lower right', framealpha=0.9,
+                       markerscale=2.5)
+    fig.suptitle(f'$n_{{cols}}$ = {int(n_cols)}.  Top: where each kernel runs relative '
+                 'to the tensor-core roof (executed = useful / tile density).  '
+                 'Bottom: per matrix, does time follow the tile count?',
+                 fontsize=8.5)
+    plt.tight_layout(rect=(0, 0, 1, 0.96))
+    png = out_dir / f'tile_roof_nc{int(n_cols)}.png'
+    plt.savefig(png, dpi=300)
     plt.close()
-    print(f"  Saved: {path}")
+    tab = pd.DataFrame(rows)
+    csv = out_dir / f'tile_roof_nc{int(n_cols)}.csv'
+    tab.to_csv(csv, index=False, float_format='%.3g')
+    print(f"  Saved: {png}\n  Saved: {csv}")
+    cols = ['kernel', 'exec_frac_original', 'exec_frac_random', 'beta_fewer',
+            'beta_fewer_matrix_median', 'beta_more', 'beta_more_matrix_median']
+    print(tab[[c for c in cols if c in tab.columns]].round(3).to_string(index=False))
+    return tab
 
 
-def write_per_perm_table(df, kernels, out_dir, n_cols):
-    """Median executed/peak and useful/peak per (kernel, reordering)."""
-    sub = df[df['n_cols'] == n_cols].copy()
-    sub = sub.replace([np.inf, -np.inf], np.nan).dropna(subset=['exec_gflops'])
-    sub['exec_frac'] = sub['exec_gflops'] / sub['peak_gflops']
-    sub['useful_frac'] = sub['gflops'] / sub['peak_gflops']
-    sub['kernel'] = sub['kernel_id'].map(lambda k: KERNEL_NAMES.get(k, k))
-    strategies = list(dict.fromkeys(pu.get_strategy_order(sub)))
-    tab = (sub.groupby(['kernel', 'strategy'])
-              .agg(n=('exec_frac', 'size'),
-                   exec_frac=('exec_frac', 'median'),
-                   useful_frac=('useful_frac', 'median'),
-                   tile_density=('tile_density', 'median'))
-              .reset_index())
-    rank = {s_: i for i, s_ in enumerate(strategies)}
-    tab['_r'] = tab['strategy'].map(lambda x: rank.get(x, len(rank)))
-    tab = tab.sort_values(['kernel', '_r']).drop(columns='_r')
-    csv_path = out_dir / f'exec_frac_by_perm_nc{int(n_cols)}.csv'
-    tab.to_csv(csv_path, index=False, float_format='%.3g')
-    wide = tab.pivot(index='strategy', columns='kernel', values='exec_frac')
-    wide = wide.reindex([s_ for s_ in strategies if s_ in wide.index])
-    wide.to_csv(out_dir / f'exec_frac_by_perm_nc{int(n_cols)}_wide.csv', float_format='%.3g')
-    print(f"  Saved: {csv_path}")
-    return wide
-
-
-def write_per_matrix_slopes(df, kernels, out_dir, n_cols, min_pts=5):
-    """Per (matrix, kernel): OLS slope of log(exec/peak) vs log(tile density)
-    across that matrix's reorderings.  Slope 0: executed rate invariant to
-    padding (time ~ tiles).  Slope -1: useful rate invariant (time ~ nnz).
-    Note slope = elasticity - 1, i.e. the same quantity as the log-log
-    elasticity alpha of speedup vs density improvement, computed per matrix.
-    """
-    blocked = [k for k in kernels if k in KERNEL_TILE_DENSITY_BS]
-    sub = df[(df['n_cols'] == n_cols) & df['kernel_id'].isin(blocked)].copy()
-    sub = sub.replace([np.inf, -np.inf], np.nan).dropna(subset=['exec_gflops', 'tile_density'])
-    sub = sub[(sub['exec_gflops'] > 0) & (sub['tile_density'] > 0)]
-    rows = []
-    for (k, m), g in sub.groupby(['kernel_id', 'matrix']):
-        g = g.groupby('strategy').agg(x=('tile_density', 'mean'), y=('exec_gflops', 'mean'))
-        if len(g) < min_pts or g['x'].max() / g['x'].min() < 1.2:
-            continue
-        lx, ly = np.log(g['x']), np.log(g['y'])
-        slope = np.polyfit(lx, ly, 1)[0]
-        rows.append({'kernel_id': k, 'matrix': m, 'slope': slope, 'n': len(g),
-                     'density_range': g['x'].max() / g['x'].min()})
-    t = pd.DataFrame(rows)
-    t.to_csv(out_dir / f'exec_slope_per_matrix_nc{int(n_cols)}.csv', index=False, float_format='%.3g')
-    summ = (t.groupby('kernel_id')['slope']
-             .describe(percentiles=[0.25, 0.5, 0.75])[['count', '25%', '50%', '75%']]
-             .rename(columns={'50%': 'median'}))
-    summ.index = [KERNEL_NAMES.get(k, k) for k in summ.index]
-    summ.to_csv(out_dir / f'exec_slope_summary_nc{int(n_cols)}.csv', float_format='%.3g')
-    print(f"  Per-matrix exec-vs-density slopes (n_cols={int(n_cols)}):")
-    print(summ.to_string())
-    return summ
-
-
-def write_split_elasticity(df, kernels, out_dir, n_cols, thresh=0.1):
-    """Per-matrix elasticity of speedup w.r.t. density change, anchored at
-    the Original ordering and fitted separately for reorderings that
-    *degrade* density (log ratio < -thresh) and ones that *improve* it
-    (> thresh).  Separates the cost of losing density from the benefit of
-    gaining it; pooled elasticities (as in the improvement-vs-speedup
-    scatter) mix the two.
-    """
-    blocked = [k for k in kernels if k in KERNEL_TILE_DENSITY_BS]
-    sub = df[(df['n_cols'] == n_cols) & df['kernel_id'].isin(blocked)]
-    sub = sub.replace([np.inf, -np.inf], np.nan).dropna(subset=['gflops', 'tile_density'])
-    rows = []
-    for (k, m), g in sub.groupby(['kernel_id', 'matrix']):
-        g = g.groupby('strategy').agg(x=('tile_density', 'mean'), y=('gflops', 'mean'))
-        if 'Original' not in g.index:
-            continue
-        x0, y0 = g.loc['Original', 'x'], g.loc['Original', 'y']
-        rel = g.drop('Original')
-        lx, ly = np.log(rel['x'] / x0), np.log(rel['y'] / y0)
-        for side, mask in (('worse', lx < -thresh), ('better', lx > thresh)):
-            if mask.sum() < 2:
-                continue
-            a = (lx[mask] * ly[mask]).sum() / (lx[mask] ** 2).sum()  # fit through origin
-            rows.append({'kernel': KERNEL_NAMES.get(k, k), 'kernel_id': k,
-                         'matrix': m, 'side': side, 'alpha': a, 'n': int(mask.sum())})
-    t = pd.DataFrame(rows)
-    if t.empty:
-        return t
-    t.to_csv(out_dir / f'split_elasticity_per_matrix_nc{int(n_cols)}.csv',
-             index=False, float_format='%.3g')
-    summ = (t.groupby(['kernel', 'side'])['alpha']
-             .agg(count='size', q25=lambda v: v.quantile(.25), median='median',
-                  q75=lambda v: v.quantile(.75)))
-    summ.to_csv(out_dir / f'split_elasticity_summary_nc{int(n_cols)}.csv', float_format='%.3g')
-    print(f"  Split elasticity (n_cols={int(n_cols)}), alpha of speedup vs density change:")
-    print(summ.round(2).to_string())
-    return summ
+def generate_roofline_lite_plots(df, out_dir):
+    out_dir = Path(out_dir) / 'roofline_lite'
+    out_dir.mkdir(parents=True, exist_ok=True)
+    df = add_executed_gflops(df)
+    kernels = _ordered_kernels(df, KERNEL_NAMES)
+    for n in sorted(df['n_cols'].unique()):
+        tile_roof(df, kernels, out_dir, n)

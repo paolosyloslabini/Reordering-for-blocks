@@ -371,5 +371,3 @@ KERNEL_TILE_DENSITY_BS = {
     'ACCSPMM_SPMM':           8,
 }
 
-# Reference reordering used for the "after reordering" series.
-ROOFLINE_REF_PERM = 'SB_rcm'
