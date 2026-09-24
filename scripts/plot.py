@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import plot_utils as pu
-from settings import get_perm_display, get_perm_color, KERNEL_NAMES, GROUPED_SCATTER_EXCLUDE, PERMS, ALL_METRICS, BLOCK_SIZES, get_metric_display, get_metric_color, get_metric_hatch
+from settings import get_perm_display, get_perm_color, KERNEL_NAMES, GROUPED_SCATTER_EXCLUDE, SHOW_UNSCRAMBLE, PERMS, ALL_METRICS, BLOCK_SIZES, get_metric_display, get_metric_color, get_metric_hatch
 from correlation_table import (compute_imp_correlations,
                                _enabled_improvement_metrics,
                                _density_improvement_metrics, _corr_method_tag,
@@ -583,7 +583,7 @@ def generate_profile_plots(df_analysis, out_dir, df_main_original=None):
             # panels: always lists Random, Original and Unscramble) ---
             from matplotlib.lines import Line2D
             leg_perms = [p for p in perm_order if p not in ('None', 'Unscramble', 'random1D')]
-            leg_perms += ['random1D', 'None', 'Unscramble']
+            leg_perms += ['random1D', 'None'] + (['Unscramble'] if SHOW_UNSCRAMBLE else [])
             handles_leg, labels_leg = [], []
             for perm in leg_perms:
                 color = 'red' if perm == 'None' else get_perm_color(perm)
@@ -1436,7 +1436,7 @@ def main():
 
     # Load main-pipeline Original data for Unscramble reference (random only)
     df_main_original = None
-    if args.random:
+    if args.random and SHOW_UNSCRAMBLE:
         main_overrides = dict(cli_overrides, random=False)
         _, df_main_analysis_full, _ = pu.load_and_filter_data(
             config_path=args.filter_config,

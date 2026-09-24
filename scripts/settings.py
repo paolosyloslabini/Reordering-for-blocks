@@ -328,6 +328,6 @@ KERNEL_NAMES = {
 # Kernels excluded from the grouped 2x3 scatter plots
 GROUPED_SCATTER_EXCLUDE = {'CUSPARSE_SPMM_BSR_bs32'}
 
-
-
-
+# Add the 'Unscramble' reference (the original, unscrambled matrix) as an extra
+# solver in the random-pipeline plots. Off: the paper does not show it.
+SHOW_UNSCRAMBLE = False
