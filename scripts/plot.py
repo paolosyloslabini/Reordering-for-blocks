@@ -156,6 +156,23 @@ def generate_grouped_scatter_plots(df, out_dir, args):
                     group_labels=kernel_labels, log_x=True, log_y=True,
                     **_kw)))
 
+        # Per-kernel density scatter (used in the paper for cuSPARSE BSR)
+        for kernel in kernels:
+            df_k = df_nc_reordered[df_nc_reordered['kernel_id'] == kernel]
+            if df_k.empty:
+                continue
+            k_dir = (out_dir / f"n_cols_{int(n_cols)}" / pu.safe_filename(kernel)
+                     / "improvement_vs_speedup_loglog")
+            k_dir.mkdir(parents=True, exist_ok=True)
+            for bs in BLOCK_SIZES:
+                imp_col = f'density_improvement_{bs}'
+                if imp_col in df_k.columns:
+                    tasks.append((pu.scatter_presentation, dict(
+                        df=df_k, x_col=imp_col, y_col='speedup',
+                        output_path=k_dir / f"speedup_vs_density_imp_bs{bs}_loglog.png",
+                        log_x=True, log_y=True,
+                        label=KERNEL_NAMES.get(kernel, kernel), **_kw)))
+
     print(f"\n  Collected {len(tasks)} grouped scatter tasks")
     pu.parallel_execute(tasks, n_jobs=n_jobs)
 
@@ -382,8 +399,18 @@ def generate_profile_plots(df_analysis, out_dir, df_main_original=None):
     Higher curve = better solver in both cases.
 
     All permutations *and* the original ordering (None) are included as
-    competing solvers.
+    competing solvers. On the random pipeline, ``df_main_original`` adds the
+    unscrambled matrix as one more solver ('Unscramble').
     """
+    if df_main_original is not None and not df_main_original.empty:
+        shared = [c for c in df_main_original.columns if c in df_analysis.columns]
+        unscr = df_main_original[shared].copy()
+        unscr['perm'] = 'Unscramble'
+        if 'perm_type' in df_analysis.columns:
+            unscr['perm_type'] = df_analysis['perm_type'].iloc[0]
+        df_analysis = pd.concat([df_analysis, unscr], ignore_index=True)
+        print(f"  Added {len(unscr)} Unscramble rows to profiles")
+
     # Same raw metrics as the correlation heatmaps (no bandwidth).
     profile_metrics = [
         'bandwidth_max',

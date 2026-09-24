@@ -935,6 +935,10 @@ def _exec_plot_task(task):
         print(f"  Error in {func.__name__}: {e}")
 
 
+def _init_plot_worker(rc):
+    mpl.rcParams.update(rc)
+
+
 def parallel_execute(tasks, n_jobs=None):
     """Execute plot tasks in parallel using multiprocessing.
 
@@ -951,7 +955,10 @@ def parallel_execute(tasks, n_jobs=None):
             _exec_plot_task(task)
         return
     print(f"  Running {len(tasks)} plots across {n_jobs} workers...")
-    with ProcessPoolExecutor(max_workers=n_jobs) as pool:
+    # Workers are spawned fresh on Windows and would lose the parent's style;
+    # hand them a snapshot of rcParams so output matches across platforms.
+    with ProcessPoolExecutor(max_workers=n_jobs, initializer=_init_plot_worker,
+                             initargs=(dict(mpl.rcParams),)) as pool:
         futs = [pool.submit(_exec_plot_task, t) for t in tasks]
         for f in as_completed(futs):
             if f.exception():
