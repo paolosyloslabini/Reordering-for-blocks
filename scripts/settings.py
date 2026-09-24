@@ -289,6 +289,7 @@ PERMS = {
     'SPARTA_reorder':  {'display': 'SPARTA',   'color': PALETTE[8]},
     'TCA_reorder':     {'display': 'DTC-LSH',  'color': PALETTE[9]},
     'SB_degree':       {'display': 'Degree',    'color': PALETTE[10]},
+    'Unscramble':      {'display': 'Unscramble', 'color': '#8B0000'},
     'random1D':        {'display': 'Random',   'color': '#000000'},
 }
 

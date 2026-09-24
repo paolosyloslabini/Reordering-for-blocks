@@ -104,7 +104,8 @@ for r, c in zip(coo.row, coo.col):
 blocked = np.kron(block_occ.astype(float), np.ones((block_size, block_size)))
 
 # --- Plot ---
-fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 5))
+plt.rcParams.update({"font.size": 15, "axes.titlesize": 19, "axes.titleweight": "bold", "xtick.labelsize": 13, "ytick.labelsize": 13})
+fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 5.6))
 ticks = np.arange(0, N + 1, block_size)
 
 dense = np.zeros((N, N))

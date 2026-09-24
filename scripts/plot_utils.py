@@ -1043,6 +1043,7 @@ def boxplot_by_category(df, x_col, y_col, output_path,
                          log_y=False,
                          ylim=None,
                          palette=None,
+                         xlabel=None,
                          figsize=(12, 4.8)):
     """Create boxplot with optional stripplot overlay.
     
@@ -1115,15 +1116,16 @@ def boxplot_by_category(df, x_col, y_col, output_path,
         format_log_axes(ax, which='y')
     else:
         ax.grid(True, axis='y', alpha=0.3)
-    
-    ax.set_xlabel(get_metric_display(x_col))
+
+    ax.set_xlabel(get_metric_display(x_col) if xlabel is None else xlabel)
     ax.set_ylabel(get_metric_display(y_col))
-    
+
     if title is None:
         title = f"{get_metric_display(y_col)} by {get_metric_display(x_col)}"
-    if clip_percentile:
-        title += f"\n({clip_percentile[0]}-{clip_percentile[1]} percentile)"
-    ax.set_title(title)
+        if clip_percentile:
+            title += f"\n({clip_percentile[0]}-{clip_percentile[1]} percentile)"
+    if title:
+        ax.set_title(title)
     
     plt.xticks(rotation=45, ha='right')
     
@@ -1598,8 +1600,10 @@ def profile_perm_order(perm_values):
     """Canonical perm order for profile plots — Original drawn last (on top)."""
     seen = set()
     order = [p for p in list(PERMS)
-             if p != 'None' and p in perm_values
+             if p not in ('None', 'Unscramble') and p in perm_values
              and not (p in seen or seen.add(p))]
+    if 'Unscramble' in perm_values:
+        order.append('Unscramble')
     if 'None' in perm_values:
         order.append('None')
     return order
@@ -1616,8 +1620,8 @@ def draw_profile_curve(ax, taus_asc, n_matrices, perm, xlim_lo, xlim_hi,
     n = len(taus_asc)
     color = get_perm_color(perm)
     label = get_perm_display(perm)
-    ls = ':' if perm == 'None' else '-'
-    lw = 2.5 if perm == 'None' else 1.5
+    ls = ':' if perm == 'None' else ('--' if perm == 'Unscramble' else '-')
+    lw = 2.5 if perm == 'None' else (2.0 if perm == 'Unscramble' else 1.5)
     if perm == 'None':
         color = 'red'
 

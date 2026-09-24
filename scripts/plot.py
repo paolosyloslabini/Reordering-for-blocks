@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import plot_utils as pu
-from settings import get_perm_display, KERNEL_NAMES, GROUPED_SCATTER_EXCLUDE, PERMS, ALL_METRICS, BLOCK_SIZES, get_metric_display, get_metric_color, get_metric_hatch
+from settings import get_perm_display, get_perm_color, KERNEL_NAMES, GROUPED_SCATTER_EXCLUDE, PERMS, ALL_METRICS, BLOCK_SIZES, get_metric_display, get_metric_color, get_metric_hatch
 from correlation_table import (compute_imp_correlations,
                                _enabled_improvement_metrics,
                                _density_improvement_metrics, _corr_method_tag,
@@ -280,7 +280,8 @@ def generate_breakeven_plots(df, out_dir, reordering_csv='results/results_reorde
     print(f"  Break-even plots saved under {out_dir}/n_cols_*/*/breakeven/")
 
 
-def generate_reorder_analysis_plots(df_analysis, out_dir, n_jobs=None):
+def generate_reorder_analysis_plots(df_analysis, out_dir, n_jobs=None,
+                                    df_main_original=None):
     """Generate reordering analysis plots (independent of kernel performance)."""
 
     print("\n=== Reordering Analysis ===")
@@ -305,7 +306,35 @@ def generate_reorder_analysis_plots(df_analysis, out_dir, n_jobs=None):
         print("No reordered data for analysis plots")
         return
 
-    strategies = sorted(df_reordered['strategy'].unique())
+    # --- Inject Unscramble rows (random pipeline only) ---
+    if df_main_original is not None and not df_main_original.empty:
+        available_metrics = [m for m in metrics_config if m in df_main_original.columns]
+        # Random-pipeline Original (scrambled) values per matrix
+        random_orig = df[df['strategy'] == 'Original'][['matrix'] + available_metrics].copy()
+        random_orig = random_orig.groupby('matrix')[available_metrics].mean().reset_index()
+        # Main-pipeline Original (unscrambled) values per matrix
+        main_orig = df_main_original[['matrix'] + available_metrics].copy()
+        main_orig = main_orig.groupby('matrix')[available_metrics].mean().reset_index()
+        merged = random_orig.merge(main_orig, on='matrix', suffixes=('_random', '_main'))
+
+        unscramble_rows = merged[['matrix']].copy()
+        unscramble_rows['strategy'] = 'Unscramble'
+        for metric, config in metrics_config.items():
+            if metric not in available_metrics:
+                continue
+            imp_col = config['improvement_name']
+            if config['higher_is_better']:
+                unscramble_rows[imp_col] = (
+                    merged[f'{metric}_main'] /
+                    merged[f'{metric}_random'].replace(0, np.nan))
+            else:
+                unscramble_rows[imp_col] = (
+                    merged[f'{metric}_random'] /
+                    merged[f'{metric}_main'].replace(0, np.nan))
+        df_reordered = pd.concat([df_reordered, unscramble_rows], ignore_index=True)
+        print(f"  Injected {len(unscramble_rows)} Unscramble rows")
+
+    strategies = pu.get_strategy_order(df_reordered)
 
     # -----------------------------------------------------------------
     # All boxplot sections: (imp_col, title_template, subdir, filename_template)
@@ -328,7 +357,7 @@ def generate_reorder_analysis_plots(df_analysis, out_dir, n_jobs=None):
         tasks.append((pu.boxplot_by_category, dict(
             df=df_reordered, x_col='strategy', y_col=imp_col,
             output_path=output_dir / filename,
-            title=None,
+            title='', xlabel='',
             order=[s for s in strategies if s in df_reordered['strategy'].unique()],
             baseline=1.0, log_y=True)))
 
@@ -336,7 +365,7 @@ def generate_reorder_analysis_plots(df_analysis, out_dir, n_jobs=None):
     pu.parallel_execute(tasks, n_jobs=n_jobs)
 
 
-def generate_profile_plots(df_analysis, out_dir):
+def generate_profile_plots(df_analysis, out_dir, df_main_original=None):
     """Generate Dolan-Moré performance-profile plots.
 
     For each metric and solver (perm) s, compute the ratio relative to the
@@ -523,10 +552,21 @@ def generate_profile_plots(df_analysis, out_dir):
             plt.close(fig_bd)
             print(f"  Saved profile_block_density_16.pdf/png")
 
-            # --- Standalone legend ---
-            ncol_leg = (len(handles_bd) + 1) // 2
+            # --- Standalone legend (shared by the original and scrambled
+            # panels: always lists Random, Original and Unscramble) ---
+            from matplotlib.lines import Line2D
+            leg_perms = [p for p in perm_order if p not in ('None', 'Unscramble', 'random1D')]
+            leg_perms += ['random1D', 'None', 'Unscramble']
+            handles_leg, labels_leg = [], []
+            for perm in leg_perms:
+                color = 'red' if perm == 'None' else get_perm_color(perm)
+                ls = ':' if perm == 'None' else ('--' if perm == 'Unscramble' else '-')
+                lw = 2.5 if perm == 'None' else (2.0 if perm == 'Unscramble' else 1.5)
+                handles_leg.append(Line2D([0], [0], color=color, linestyle=ls, linewidth=lw))
+                labels_leg.append(get_perm_display(perm))
+            ncol_leg = (len(handles_leg) + 1) // 2
             fig_leg = plt.figure(figsize=(6, 1.2))
-            fig_leg.legend(handles_bd, labels_bd, loc='center',
+            fig_leg.legend(handles_leg, labels_leg, loc='center',
                            ncol=ncol_leg, fontsize=9, frameon=False)
             for ext in ('pdf', 'png'):
                 fig_leg.savefig(prof_dir / f'profile_legend.{ext}',
@@ -620,7 +660,7 @@ def generate_profile_aggregate_boxplot(df_analysis, out_dir):
 
     # Metrics on x-axis, reordering algorithms as hue (mirrors aggregate speedup by kernel)
     n_metrics = len(metric_order)
-    fig, ax = plt.subplots(figsize=(max(14, n_metrics * 2.0), 6))
+    fig, ax = plt.subplots(figsize=(max(9, n_metrics * 1.3), 4))
 
     sns.boxplot(
         data=df_long, x='metric_display', y='improvement', hue='strategy',
@@ -638,10 +678,11 @@ def generate_profile_aggregate_boxplot(df_analysis, out_dir):
     p05 = df_long['improvement'].quantile(0.02)
     p95 = df_long['improvement'].quantile(0.98)
     ax.set_ylim(p05 / 1.3, p95 * 1.3)
-    pu.format_log_axes(ax, which='y')
+    pu.format_log_axes(ax, which='y', dense=False)
 
     ax.legend(title=None, bbox_to_anchor=(0.5, 1.02), loc='lower center',
-              ncol=len(strat_order), fontsize=10, frameon=False)
+              ncol=(len(strat_order) + 1) // 2, fontsize=11, frameon=False,
+              handlelength=1.2, columnspacing=1.0)
     ax.tick_params(axis='x', rotation=30)
     ax.grid(True, axis='y', alpha=0.3)
 
@@ -649,7 +690,7 @@ def generate_profile_aggregate_boxplot(df_analysis, out_dir):
 
     for ext in ('pdf', 'png'):
         fig.savefig(agg_dir / f'aggregate_improvement_boxplot.{ext}',
-                    bbox_inches='tight', dpi=150)
+                    bbox_inches='tight', dpi=250)
     plt.close(fig)
     print(f"  Saved aggregate_improvement_boxplot.pdf/png")
 
@@ -697,7 +738,7 @@ def generate_speedup_aggregate_boxplot(df, out_dir, args=None):
             continue
 
         n_kernels = len(kernel_names_ordered)
-        fig, ax = plt.subplots(figsize=(max(14, n_kernels * 2.0), 6))
+        fig, ax = plt.subplots(figsize=(max(9, n_kernels * 1.3), 4))
 
         sns.boxplot(
             data=df_nc, x='kernel_display', y='speedup', hue='strategy',
@@ -719,7 +760,8 @@ def generate_speedup_aggregate_boxplot(df, out_dir, args=None):
         pu.format_log_axes(ax, which='y')
 
         ax.legend(title=None, bbox_to_anchor=(0.5, 1.02), loc='lower center',
-                  ncol=len(strat_order), fontsize=10, frameon=False)
+                  ncol=(len(strat_order) + 1) // 2, fontsize=11, frameon=False,
+                  handlelength=1.2, columnspacing=1.0)
         ax.tick_params(axis='x', rotation=30)
         ax.grid(True, axis='y', alpha=0.3)
 
@@ -727,7 +769,7 @@ def generate_speedup_aggregate_boxplot(df, out_dir, args=None):
 
         for ext in ('pdf', 'png'):
             fig.savefig(agg_dir / f'aggregate_speedup_by_kernel_nc{int(nc)}.{ext}',
-                        bbox_inches='tight', dpi=150)
+                        bbox_inches='tight', dpi=250)
         plt.close(fig)
         print(f"  Saved aggregate_speedup_by_kernel_nc{int(nc)}.pdf/png")
 
@@ -962,7 +1004,7 @@ def generate_imp_ncols_correlation_plots(df, out_dir):
             metric_display = get_metric_display(mc)
             metric_safe = pu.safe_filename(mc)
 
-            fig, ax = plt.subplots(figsize=(12, 6))
+            fig, ax = plt.subplots(figsize=(12, 4))
 
             bar_width = 0.7 / n_ncols
             x = np.arange(n_kernels)
@@ -988,7 +1030,7 @@ def generate_imp_ncols_correlation_plots(df, out_dir):
             ax.set_xticks(x)
             ax.set_xticklabels(kernel_order, rotation=30, ha='right')
             ax.set_xlabel('')
-            ax.set_ylabel(f'Correlation of {metric_display} with Speedup')
+            ax.set_ylabel('Correlation with Speedup')
             ax.legend(title='$n_{cols}$', fontsize=10, title_fontsize=11)
             ax.grid(True, axis='y', alpha=0.3)
 
@@ -1032,7 +1074,7 @@ def generate_imp_blocksize_correlation_plots(df, out_dir):
                 df, n_cols, bd_imp_metrics, kernels,
                 method=method, log_transform=log_transform)
 
-            fig, ax = plt.subplots(figsize=(12, 6))
+            fig, ax = plt.subplots(figsize=(12, 4))
 
             bar_width = 0.7 / n_block_sizes
             x = np.arange(n_kernels)
@@ -1057,8 +1099,10 @@ def generate_imp_blocksize_correlation_plots(df, out_dir):
             ax.set_xticks(x)
             ax.set_xticklabels(kernel_order, rotation=30, ha='right')
             ax.set_xlabel('')
-            ax.set_ylabel('Correlation of Block Density Improvement with Speedup')
-            ax.legend(title='Block Size', fontsize=10, title_fontsize=11)
+            ax.set_ylabel('Correlation with Speedup')
+            ax.legend(fontsize=10, loc='lower center',
+                      bbox_to_anchor=(0.5, 1.0), ncol=n_block_sizes,
+                      frameon=False)
             ax.grid(True, axis='y', alpha=0.3)
 
             fname = (f'imp_blocksize_bars_{tag}{scale_suffix}'
@@ -1363,6 +1407,27 @@ def main():
     df, df_analysis = pu.split_by_perm_type(
         df, df_analysis, perm_type_filter, pipeline_cfg)
 
+    # Load main-pipeline Original data for Unscramble reference (random only)
+    df_main_original = None
+    if args.random:
+        main_overrides = dict(cli_overrides, random=False)
+        _, df_main_analysis_full, _ = pu.load_and_filter_data(
+            config_path=args.filter_config,
+            cli_overrides=main_overrides,
+        )
+        main_pipeline_key = perm_type_filter.lower()
+        main_pipeline_cfg = _cfg.get('pipelines', {}).get(main_pipeline_key, {})
+        _, df_main_analysis_full = pu.split_by_perm_type(
+            pd.DataFrame(), df_main_analysis_full,
+            perm_type_filter, main_pipeline_cfg)
+        # Keep only Original rows for matrices present in the random pipeline
+        df_main_original = df_main_analysis_full[
+            df_main_analysis_full['perm'] == 'None'].copy()
+        common = set(df_analysis['matrix'].unique()) & set(df_main_original['matrix'].unique())
+        df_main_original = df_main_original[df_main_original['matrix'].isin(common)]
+        print(f"  Loaded {len(df_main_original)} Unscramble reference rows "
+              f"({len(common)} matrices in common)")
+
     # -----------------------------------------------------------------
     # 2. Process Data (add all derived columns)
     # -----------------------------------------------------------------
@@ -1401,13 +1466,15 @@ def main():
         print("\n" + "="*60)
         print("Generating reordering analysis plots...")
         print("="*60)
-        generate_reorder_analysis_plots(df_analysis, out_dir, n_jobs=args.jobs)
+        generate_reorder_analysis_plots(df_analysis, out_dir, n_jobs=args.jobs,
+                                        df_main_original=df_main_original)
         
     if _should_run('profiles', args):
         print("\n" + "="*60)
         print("Generating performance profile plots...")
         print("="*60)
-        generate_profile_plots(df_analysis, out_dir)
+        generate_profile_plots(df_analysis, out_dir,
+                               df_main_original=df_main_original)
 
     if _should_run('aggregate-improvement', args):
         print("\n" + "="*60)
