@@ -15,6 +15,7 @@ inputs. The matrix set and filters are the paper's (`scripts/filter_config.yaml`
 python analysis/density_response/gain_figures.py        # figures 1-2 (~1 min)
 python analysis/density_response/elasticity_figure.py   # figures 3-5 (~10 min, bootstrap)
 python analysis/density_response/decision_test.py       # decision table (~5 min)
+python analysis/density_response/strategy_profiles.py   # strategy profiles (~2 min)
 ```
 
 Use the repo's Windows venv (`.venv/Scripts/python.exe`). Outputs go to `figures/` (PDF sized for
@@ -204,3 +205,48 @@ Caveat: **best** takes the maximum over about 11 noisy timings, each a mean of 5
 cold runs). So it partly selects lucky measurements, especially on original matrices, where true
 differences are a few percent. The real gap between the rules and the best choice is smaller than the
 table shows.
+
+## Strategy profiles (`strategy_profiles`, `figures/strategy_profiles_summary.csv`)
+
+These are per-kernel performance profiles of simple strategies on the original matrices.
+- **Best available speedup:** for each (matrix, kernel), the maximum over the original ordering and
+  every reordering that ran, symmetric or row.
+- **Curve:** the share of matrices on which a strategy comes within a factor x of that best. Higher and
+  further left is better.
+
+The strategies:
+- **Highest block density:** the densest candidate after running them all, or the original ordering if
+  nothing is denser.
+- **Always RCM, AMD or Rabbit:** symmetric reordering.
+- **The same three, dashed, "d < 10%":** reorder only if the starting 16×16 block density is below 10%,
+  otherwise keep the original ordering.
+
+If a strategy's run is missing (the reordering or the kernel failed), it keeps the original ordering.
+Widths and exclusions are as in the decision test. The x-axis runs to 4× for the BSR kernels and to 2×
+for the others.
+
+Geometric-mean speedup achieved, with the share of matrices within 10% of the best in brackets:
+
+| kernel | Highest density | RCM | RCM d<10% | AMD | AMD d<10% | Rabbit | Rabbit d<10% |
+|---|---|---|---|---|---|---|---|
+| cuSPARSE-BSR | **1.93 (84%)** | 1.64 (45%) | 1.66 (47%) | 1.47 (33%) | 1.54 (40%) | 1.14 (16%) | 1.32 (24%) |
+| SMaT (32 cols) | 1.43 (49%) | 1.51 (56%) | **1.53 (57%)** | 1.03 (7%) | 1.09 (14%) | 1.08 (21%) | 1.22 (30%) |
+| DTC-SpMM | 1.08 (55%) | 1.09 (37%) | 1.09 (36%) | 1.05 (42%) | 1.06 (44%) | 1.11 (56%) | **1.16 (63%)** |
+| FlashSparse | 1.13 (52%) | 1.05 (22%) | 1.06 (23%) | 1.04 (30%) | 1.05 (33%) | 1.08 (41%) | **1.14 (48%)** |
+| Acc-SpMM | 1.06 (50%) | 1.04 (40%) | 1.04 (42%) | 1.03 (35%) | 1.04 (40%) | 1.06 (44%) | **1.10 (53%)** |
+| cuSPARSE-CSR | **1.14 (74%)** | 1.12 (68%) | 1.12 (69%) | 1.12 (68%) | 1.12 (70%) | 1.09 (52%) | 1.10 (57%) |
+| ASpT (32 cols) | 1.01 (54%) | 0.98 (49%) | 0.99 (50%) | 1.00 (47%) | 1.00 (48%) | 1.00 (49%) | 1.00 (50%) |
+
+What it shows:
+- **The 10% cut-off never hurts.** It helps most where a reordering damages well-blocked matrices:
+  Rabbit on every kernel (cuSPARSE-BSR 1.14 → 1.32, SMaT 1.08 → 1.22), and AMD on the BSR kernels.
+- **The best strategy depends on the kernel family:**
+  - *cuSPARSE-BSR and cuSPARSE-CSR:* highest block density.
+  - *SMaT:* RCM. Highest density is close behind, but for SMaT the densest candidate is not always
+    the fastest.
+  - *Tensor-core kernels (DTC-SpMM, FlashSparse, Acc-SpMM):* Rabbit with the cut-off. It edges out
+    highest density, consistent with locality mattering beyond block density for these kernels.
+- **ASpT:** no strategy matters.
+
+The "best" reference carries the same caveat as the decision test: it is the maximum of noisy timings,
+so every strategy looks somewhat further from it than it really is.
