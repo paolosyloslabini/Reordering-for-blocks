@@ -312,3 +312,37 @@ cuSPARSE-BSR, SMaT and ASpT barely change (SMaT and ASpT are at 32 columns in bo
 - **Densest speedup against starting block density:** at 32 columns, the densest reordering *slows
   down* the tensor-core kernels on very scattered matrices (about 0.90–0.98× at 0.5%). Gains appear only
   between about 1% and 10% (1.04–1.12×).
+
+## How often reordering helps, and by how much (`improvement_bars_nc32`, `figures/improvement_bars_nc32.csv`)
+
+Four cells: {original, scrambled} × {symmetric, row}, with **all kernels at 32 columns**. In each cell
+the strategy takes the densest candidate among that cell's reorderings (or keeps the original ordering
+if none is denser). Speedups are relative to the cell's own starting matrix, which for scrambled matrices
+is the scrambled matrix.
+
+- **Bottom bars:** share of matrices where the chosen reordering made the kernel faster (green) or
+  slower (red). Grey means no candidate was denser, so the original ordering was kept.
+- **Top:** geometric-mean speedup among the improved matrices, with a 95% bootstrap interval over
+  matrices.
+
+**Original matrices, symmetric reordering:**
+
+| kernel | faster | slower | gain when faster |
+|---|---|---|---|
+| cuSPARSE-BSR | 67% | 12% | 2.43× |
+| SMaT | 60% | 18% | 2.05× |
+| cuSPARSE-CSR | 70% | 10% | 1.27× |
+| DTC-SpMM, FlashSparse | 48% | 31–35% | 1.32–1.33× |
+| Acc-SpMM | 48% | 31% | 1.23× |
+| ASpT | 49% | 32% | 1.10× |
+
+- **ASpT is the noise reference.** It barely reacts to reordering, yet about half of the matrices come
+  out "faster", by about 1.1×.
+- **cuSPARSE-BSR, SMaT and cuSPARSE-CSR** are faster clearly more often than that, and the BSR
+  kernels by a lot.
+- **The tensor-core kernels** are faster no more often than ASpT, but when they are faster, it is by
+  1.2–1.3×, well above noise.
+- **Row reordering on original matrices** keeps the original ordering more often (about a third of
+  matrices), with smaller gains (1.2–1.5×).
+- **Scrambled matrices** are improved in 62–97% of cases. Gains reach 6.5× (cuSPARSE-BSR, symmetric)
+  and 1.6–1.9× for the tensor-core kernels.
