@@ -11,6 +11,7 @@ Strategies
   RCM / AMD / Rabbit      always that reordering, symmetric
   ... (d < 10%)           that reordering only if the starting block density
                           is below 10%, otherwise the original ordering
+  Never reorder           the original ordering (speedup 1), as a reference
 If a strategy's run is missing (reordering or kernel failed), it keeps the
 original ordering (speedup 1).
 
@@ -31,6 +32,7 @@ STRATEGIES = [  # (label, colour, linestyle)
     ('RCM', PALETTE[1], '-'), (f'RCM (d < {THRESHOLD:.0%})', PALETTE[1], '--'),
     ('AMD', PALETTE[2], '-'), (f'AMD (d < {THRESHOLD:.0%})', PALETTE[2], '--'),
     ('Rabbit', PALETTE[3], '-'), (f'Rabbit (d < {THRESHOLD:.0%})', PALETTE[3], '--'),
+    ('Never reorder', INK2, ':'),
 ]
 
 
@@ -60,6 +62,7 @@ def outcomes(df):
         for s in ('RCM', 'AMD', 'Rabbit'):
             out[s] = sym.get(s, 1.0)
             out[f'{s} (d < {THRESHOLD:.0%})'] = sym.get(s, 1.0) if d0 < THRESHOLD else 1.0
+        out['Never reorder'] = 1.0
         rows.append({'kernel': KERNEL_NAMES[k], 'matrix': m, 'best': best,
                      **{s: best / v for s, v in out.items()}})
     return pd.DataFrame(rows)
