@@ -4,8 +4,7 @@ SuiteSparse matrices, symmetric and row reorderings pooled).
 Model, per kernel:  log2 GFLOPS_ij = mu_i + f(log2 d_ij) + e_ij
   i = matrix (fixed effect), j = ordering (incl. the original one),
   f = natural cubic spline (knots at the 5/27.5/50/72.5/95% quantiles of log2 d).
-Left panel: speed relative to the median-density ordering, 2^(f(d) - f(d_med)).
-Right panel: local elasticity alpha(d) = df/dlog2 d.
+Plotted: local elasticity alpha(d) = df/dlog2 d.
 Bands: 95% bootstrap over matrices. Curves span the 2nd-98th percentile of d.
 
 Second figure (elasticity_vs_matrix_density): elasticity with respect to 16x16
@@ -103,31 +102,21 @@ def curves(df, rng):
 
 
 def figure(res):
-    fig, (a, b) = plt.subplots(1, 2, figsize=(PAGE_W, 2.7))
+    fig, ax = plt.subplots(figsize=(PAGE_W * 0.62, 2.6))
     for (k, name), col in zip(KERNEL_NAMES.items(), PALETTE):
         c = res[k]
         X = 2 ** c['grid']
         label = name + (' (32 cols)' if k in FIXED_32_COLS else '')
-        a.fill_between(X, 2 ** c['f_lo'], 2 ** c['f_hi'], color=col, alpha=0.13, lw=0)
-        a.plot(X, 2 ** c['f'], color=col, lw=1.6, label=label)
-        b.fill_between(X, c['e_lo'], c['e_hi'], color=col, alpha=0.13, lw=0)
-        b.plot(X, c['e'], color=col, lw=1.6, label=label)
-    a.axhline(1, color=INK2, lw=0.7, ls=':')
-    a.set_yscale('log', base=2)
-    a.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f'{v:g}×'))
-    a.set_ylabel('Speed relative to the\nmedian-density ordering')
-    a.set_title('Response', color=INK)
-    b.axhline(0, color=INK2, lw=0.7)
-    b.axhline(1, color=INK2, lw=0.7, ls=':')
-    b.set_ylabel(r'Elasticity $\alpha(d)$')
-    b.set_title('Local elasticity', color=INK)
-    for ax in (a, b):
-        ax.set_xscale('log')
-        ax.set_xlabel(r'Block density $d$ ($16{\times}16$)')
-        clean_axes(ax)
-    h, l = a.get_legend_handles_labels()
-    fig.legend(h, l, loc='upper center', ncol=4, frameon=False,
-               bbox_to_anchor=(0.5, 1.13), handlelength=1.6, columnspacing=1.2)
+        ax.fill_between(X, c['e_lo'], c['e_hi'], color=col, alpha=0.13, lw=0)
+        ax.plot(X, c['e'], color=col, lw=1.6, label=label)
+    ax.axhline(0, color=INK2, lw=0.7)
+    ax.axhline(1, color=INK2, lw=0.7, ls=':')
+    ax.set_xscale('log')
+    ax.set_xlabel(r'Block density $d$ ($16{\times}16$)')
+    ax.set_ylabel(r'Elasticity $\alpha(d)$')
+    clean_axes(ax)
+    ax.legend(loc='center left', bbox_to_anchor=(1.01, 0.5), frameon=False,
+              handlelength=1.6)
     fig.tight_layout()
     save(fig, 'elasticity_block_density_original')
     plt.close(fig)

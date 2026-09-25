@@ -46,7 +46,7 @@ graph matrices (the fully kept graph collections), not a density effect.
 Caveat: the drop around 1% starting block density in figure 1 partly reflects the population
 changing, from graph matrices below it to mesh and PDE matrices above it.
 
-## Figure 3: response of speed to block density (`elasticity_block_density_original`)
+## Figure 3: elasticity of speed to block density (`elasticity_block_density_original`)
 
 A per-kernel fixed-effects spline model:
 
@@ -57,11 +57,8 @@ A per-kernel fixed-effects spline model:
 - **d:** 16×16 block density, the same axis for every kernel.
 - **f:** a natural cubic spline, with knots at the 5, 27.5, 50, 72.5 and 95% quantiles.
 
-The two panels:
-- **Left:** speed relative to the median-density ordering, `2^(f(d) - f(d_med))`. The speedup
-  between two densities is the ratio of the curve at those points.
-- **Right:** local elasticity `alpha(d) = df/dlog2 d`, i.e. the % speed change per 1% change in block
-  density at that density.
+The figure plots the local elasticity `alpha(d) = df/dlog2 d`: the % change in speed per 1% change in
+block density, at that density.
 - **Bands:** 95% bootstrap over matrices (200 resamples).
 - **Range:** each curve spans the 2nd to 98th percentile of d.
 
