@@ -32,6 +32,7 @@ N_COLS = 32
 # Paper palette (scripts/paper_figures.py): improved, degraded, neutral.
 GOOD, BAD, NEUTRAL = '#006400', '#8B0000', '#A0A0A0'
 KEPT = '#000000'    # strips figure: kept-original dots sit on 1x and must stay visible
+GAIN = '#6A3D9A'    # strips figure: crossbar for the gain among faster matrices
 KERNEL_ORDER = sorted(KERNEL_NAMES.values(), key=str.lower)   # as in the paper figures
 CELLS = [('original', 'SYMMETRIC'), ('original', 'ROW'),
          ('scrambled', 'SYMMETRIC'), ('scrambled', 'ROW')]
@@ -164,6 +165,26 @@ def figure(results):
     plt.close(fig)
 
 
+class CrossbarHandle:
+    """Legend entry for the strips crossbar: a box with a line through it."""
+    def get_label(self):
+        return 'Gain among faster (line) and 95% CI (box)'
+
+
+class CrossbarHandler:
+    def legend_artist(self, legend, orig_handle, fontsize, handlebox):
+        from matplotlib.lines import Line2D
+        x0, y0 = handlebox.xdescent, handlebox.ydescent
+        w, h = handlebox.width, handlebox.height
+        box = Rectangle((x0, y0), w, h, facecolor='white', edgecolor=GAIN, linewidth=0.6,
+                        transform=handlebox.get_transform())
+        line = Line2D([x0, x0 + w], [y0 + h / 2] * 2, color=GAIN, lw=1.4,
+                      solid_capstyle='butt', transform=handlebox.get_transform())
+        handlebox.add_artist(box)
+        handlebox.add_artist(line)
+        return box
+
+
 def strips_figure(raw, results, rng):
     """Sina plot of per-matrix speedups per kernel, paper style."""
     import matplotlib as mpl
@@ -172,7 +193,7 @@ def strips_figure(raw, results, rng):
     names = KERNEL_ORDER
     by_name = {v: k for k, v in KERNEL_NAMES.items()}
     ylims = {'original': (1 / 6, 12), 'scrambled': (1 / 6, 48)}
-    fig, axes = plt.subplots(2, 2, figsize=(PAGE_W, 4.4), sharex=True, sharey='row')
+    fig, axes = plt.subplots(2, 2, figsize=(PAGE_W, 3.5), sharex=True, sharey='row')
     for r, ds in enumerate(('original', 'scrambled')):
         lo, hi = ylims[ds]
         for c, pt in enumerate(('SYMMETRIC', 'ROW')):
@@ -196,9 +217,9 @@ def strips_figure(raw, results, rng):
                 g, glo, ghi = res.loc[name, ['gain_improved', 'gain_lo', 'gain_hi']]
                 half = 0.24
                 ax.add_patch(Rectangle((i - half, glo), 2 * half, ghi - glo,
-                                       facecolor='white', alpha=0.75, edgecolor='#111111',
+                                       facecolor='white', alpha=0.75, edgecolor=GAIN,
                                        linewidth=0.6, zorder=5))
-                ax.plot([i - half, i + half], [g, g], color='#111111', lw=1.4, zorder=6,
+                ax.plot([i - half, i + half], [g, g], color=GAIN, lw=1.4, zorder=6,
                         solid_capstyle='butt')
                 # shares: faster along the top edge, slower along the bottom edge
                 up, down = res.loc[name, 'improved'], res.loc[name, 'slower']
@@ -220,11 +241,16 @@ def strips_figure(raw, results, rng):
             ax.grid(True, axis='y', which='major', color='#b0b0b0', linewidth=0.6)
             ax.grid(True, axis='y', which='minor', color='#e4e4e4', linewidth=0.4)
             kernel_separators(ax, len(names))
+            if c == 1:   # shared y: no tick marks poking into the gap between columns
+                ax.tick_params(axis='y', which='both', length=0, labelleft=False)
     for c, pt in enumerate(('SYMMETRIC', 'ROW')):
         axes[0][c].set_title(TITLES[pt].capitalize(), fontsize=8, fontweight='bold', pad=3)
         axes[1][c].set_xticks(np.arange(len(names)))
-        axes[1][c].set_xticklabels(names, rotation=25, ha='right', rotation_mode='anchor')
-    fig.subplots_adjust(left=0.085, right=0.965, top=0.9, bottom=0.11, wspace=0.012, hspace=0.1)
+        axes[1][c].set_xticklabels([n.replace('cuSPARSE-', 'cuSPARSE\n').replace('-SpMM', '-\nSpMM')
+                                    for n in names],
+                                   linespacing=0.9, fontsize=6.5)
+    fig.subplots_adjust(left=0.085, right=0.965, top=0.89, bottom=0.085, wspace=0.012,
+                        hspace=0.05)
     for r, ds in enumerate(('original', 'scrambled')):
         pos = axes[r][1].get_position()
         fig.text(pos.x1 + 0.004, (pos.y0 + pos.y1) / 2, TITLES[ds], rotation=270,
@@ -236,11 +262,11 @@ def strips_figure(raw, results, rng):
                Patch(facecolor=BAD, edgecolor='#222222', linewidth=0.5, label='Slower'),
                Patch(facecolor=KEPT, edgecolor='#222222', linewidth=0.5,
                      label='Kept original'),
-               Patch(facecolor='white', edgecolor='#111111', linewidth=0.6,
-                     label='Gain among faster (line) and 95% CI (box)')]
-    fig.legend(handles=handles, loc='lower center', bbox_to_anchor=(0.52, 0.935),
+               CrossbarHandle()]
+    fig.legend(handles=handles, loc='lower center', bbox_to_anchor=(0.52, 0.925),
                ncol=4, frameon=False, handlelength=0.9, handleheight=0.9,
-               columnspacing=1.2, handletextpad=0.35)
+               columnspacing=1.2, handletextpad=0.35,
+               handler_map={CrossbarHandle: CrossbarHandler()})
     save(fig, 'improvement_strips_nc32')
     plt.close(fig)
 
