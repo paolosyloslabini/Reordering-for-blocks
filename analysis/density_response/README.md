@@ -5,18 +5,32 @@ Two questions, answered from the existing results CSVs (no new GPU runs):
 1. **Given a matrix, what block-density gain will a reordering give?**
    See `gain_vs_start_block_density` and `gain_vs_start_density`.
 2. **Given a block-density change, what speedup does each kernel give?**
-   See `elasticity_block_density_original`.
+   See `elasticity_block_density_original_nc*`.
 
 All figures use **original SuiteSparse matrices only**. Scrambled matrices are left out
 because they hide a good ordering, so reordering recovers far more from them than from real
 inputs. The matrix set and filters are the paper's (`scripts/filter_config.yaml`, 389 matrices).
 
 ```
-python analysis/density_response/gain_figures.py        # figures 1-2 (~1 min)
-python analysis/density_response/elasticity_figure.py   # figures 3-5 (~10 min, bootstrap)
-python analysis/density_response/decision_test.py       # decision table (~5 min)
-python analysis/density_response/strategy_profiles.py   # strategy profiles (~2 min)
+python analysis/density_response/gain_figures.py                      # figures 1-2 (~1 min)
+python analysis/density_response/elasticity_figure.py --n-cols=256    # figures 3-5 (~10 min, bootstrap)
+python analysis/density_response/decision_test.py --n-cols=256        # decision table (~5 min)
+python analysis/density_response/strategy_profiles.py --n-cols=256    # strategy profiles (~2 min)
+# same three with --n-cols=32
 ```
+
+## Dense-operand width: `_nc32` and `_nc256`
+
+Every output that depends on the kernel runs comes in two versions:
+- **`_nc32`:** all kernels at 32 columns.
+- **`_nc256`:** five kernels at 256 columns, with **SMaT and ASpT at 32**, labelled "(32 cols)" in the
+  figures. Those two kernels ignore the width argument, so their "256" runs are really 32-column runs.
+  (The ASpT investigation on `analysis/aspt-invariance` suggests SMaT may have used 8 columns; this
+  still has to be checked in the cluster logs.)
+
+The gain figures (1-2) depend only on structure, not on kernel runs, so they have no width suffix.
+**All tables below are for `_nc256`.** The 32-column values are in the matching `_nc32` CSVs, and the
+main differences are summarised at the end.
 
 Use the repo's Windows venv (`.venv/Scripts/python.exe`). Outputs go to `figures/` (PDF sized for
 IEEE page width, plus PNG).
@@ -48,7 +62,7 @@ graph matrices (the fully kept graph collections), not a density effect.
 Caveat: the drop around 1% starting block density in figure 1 partly reflects the population
 changing, from graph matrices below it to mesh and PDE matrices above it.
 
-## Figure 3: elasticity of speed to block density (`elasticity_block_density_original`)
+## Figure 3: elasticity of speed to block density (`elasticity_block_density_original_nc*`)
 
 A per-kernel fixed-effects spline model:
 
@@ -65,13 +79,12 @@ block density, at that density.
 - **Range:** each curve spans the 2nd to 98th percentile of d.
 
 Setup details:
-- **Dense operand:** 256 columns, except **SMaT and ASpT, which always ran with 32 columns** (their
-  `n_cols` argument is ignored). Their 32-column runs are used.
+- **Dense operand:** see the width section above.
 - **Excluded runs:** for cuSPARSE-BSR and SMaT, runs whose padded 32×32 work would exceed the
   hardware peak are dropped (4 and 25 runs respectively). These are likely silent skips, concentrated
   on a few large graph matrices.
 
-Elasticity by density (`figures/elasticity_table.csv`):
+Elasticity by density (`figures/elasticity_table_nc*.csv`):
 
 | kernel | 0.5% | 1% | 2% | 5% | 10% |
 |---|---|---|---|---|---|
@@ -96,7 +109,7 @@ The bands are confidence bands for the *average* curve. Individual matrices scat
 it: for the tensor-core kernels, predicting a held-out matrix's speedup from its density change is off
 by about ±15% typically.
 
-## Figure 4: elasticity at varying matrix density (`elasticity_vs_matrix_density`)
+## Figure 4: elasticity at varying matrix density (`elasticity_vs_matrix_density_nc*`)
 
 This asks whether a kernel's sensitivity to block density depends on how sparse the matrix is overall.
 Matrix density nnz/(m·n) is fixed for a given matrix, so there is one within-matrix slope per window
@@ -120,7 +133,7 @@ What it shows:
 Compared with figure 3, matrix density separates the kernels less than block density does. What
 matters is the ordering-dependent block density, not overall sparsity.
 
-## Figure 5: local correlation with block density (`correlation_block_density_original`)
+## Figure 5: local correlation with block density (`correlation_block_density_original_nc*`)
 
 This is the correlation counterpart of figure 3, on the same data. At each block density d it gives the
 **within-matrix Pearson r** between log2 GFLOPS and log2 16×16 block density.
@@ -136,7 +149,7 @@ This is the correlation counterpart of figure 3, on the same data. At each block
   compare kernels with each other, not with the global r values in the paper.
 
 α (figure 3) says **how much** speed changes per 1% of block density at that density. r says
-**how reliably** block density predicts speed there. Values from `figures/correlation_table.csv`:
+**how reliably** block density predicts speed there. Values from `figures/correlation_table_nc*.csv`:
 
 | kernel | 0.5% | 1% | 2% | 5% | 10% |
 |---|---|---|---|---|---|
@@ -158,7 +171,7 @@ How to read it:
   a locality proxy for CSR.
 - **ASpT:** block density predicts nothing useful at any density.
 
-## Decision test: which reordering to pick (`decision_test.py`, `figures/decision_table.csv`)
+## Decision test: which reordering to pick (`decision_test.py`, `figures/decision_table_nc*.csv`)
 
 This tests how well simple rules choose a reordering. The unit is each (matrix, permutation type,
 kernel); the candidates are the original ordering and every reordering that ran.
@@ -175,8 +188,8 @@ The rules:
 A rule based only on the density curve is not listed: the curves rise monotonically, so it always makes
 the same choice as max_density.
 
-Same widths and exclusions as figure 3: 256 columns, SMaT and ASpT at their actual 32 columns, and the
-impossible BSR/SMaT runs dropped.
+Same widths and exclusions as figure 3: see the width section, with the impossible BSR/SMaT runs
+dropped.
 
 **Original matrices, geometric-mean speedup (share of cases within 90% of the best):**
 
@@ -206,7 +219,7 @@ cold runs). So it partly selects lucky measurements, especially on original matr
 differences are a few percent. The real gap between the rules and the best choice is smaller than the
 table shows.
 
-## Strategy profiles (`strategy_profiles`, `figures/strategy_profiles_summary.csv`)
+## Strategy profiles (`strategy_profiles_nc*`, `figures/strategy_profiles_summary_nc*.csv`)
 
 These are performance profiles on the original matrices.
 - **Best available speedup:** for each (matrix, kernel), the maximum over the original ordering and
@@ -249,14 +262,14 @@ What it shows:
 The "best" reference is the maximum of noisy timings, so every strategy looks somewhat further from it
 than it really is.
 
-### Expected speedup by starting block density (`strategy_speedup_vs_start_density`)
+### Expected speedup by starting block density (`strategy_speedup_vs_start_density_nc*`)
 
 This shows the speedup actually achieved by the **densest** strategy, against the matrix's starting
 16×16 block density. Each line is a Gaussian-kernel-weighted geometric mean over matrices (bandwidth
 0.15 decades on log10 d), one line per kernel.
 
 The "densest, only below 10%" strategy is identical to this line left of the dashed marker and exactly
-1× right of it, so it is not drawn separately. Values are in `figures/densest_speedup_vs_start_density.csv`:
+1× right of it, so it is not drawn separately. Values are in `figures/densest_speedup_vs_start_density_nc*.csv`:
 
 | kernel | 0.5% | 1% | 2% | 5% | 10% | 20% |
 |---|---|---|---|---|---|---|
@@ -276,3 +289,25 @@ What it shows:
   nothing is denser, no curve drops below 1×. So the 10% cut-off gives up a little (cuSPARSE-BSR
   1.18× → 1× at 10%) rather than protecting against losses.
 - These are averages. Individual matrices scatter widely around them (see the profiles above).
+
+## What changes at 32 columns (`_nc32`)
+
+With a narrow B, a larger part of each kernel's time is overhead that does not depend on B's width,
+and reordering does not reduce it. So block density matters less, above all for the tensor-core kernels.
+cuSPARSE-BSR, SMaT and ASpT barely change (SMaT and ASpT are at 32 columns in both versions).
+
+- **Elasticity:** the tensor-core kernels lose most of their low-density sensitivity (DTC-SpMM 0.10
+  vs 0.31 at 0.5%; FlashSparse 0.20 vs 0.39). Their rise at high density is a little lower (DTC-SpMM 0.44
+  vs 0.53 at 10%). cuSPARSE-BSR is at about 0.85 at 10%, against 0.94.
+- **Local correlation:** the tensor-core kernels start near zero (0.06–0.14 at 0.5%) and reach
+  0.30–0.54 at 10%.
+- **Decision test (original matrices):**
+  - *Densest:* gains shrink for the tensor-core kernels (DTC-SpMM 1.035×, FlashSparse 1.059×,
+    Acc-SpMM 1.024×) and for cuSPARSE-BSR (1.46×).
+  - *Density + reuse:* this model now clearly beats densest for DTC-SpMM (1.147×) and FlashSparse
+    (1.163×). Locality matters more when B is narrow.
+- **Strategy profiles:** Rabbit with the 10% cut-off is the best simple strategy for the tensor-core
+  kernels (1.07–1.14×). Densest is only 1.02–1.05× for them.
+- **Densest speedup against starting block density:** at 32 columns, the densest reordering *slows
+  down* the tensor-core kernels on very scattered matrices (about 0.90–0.98× at 0.5%). Gains appear only
+  between about 1% and 10% (1.04–1.12×).

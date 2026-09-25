@@ -1,0 +1,64 @@
+kernel,strategy,is_best,within_10pct,within_25pct,geo_speedup
+ASpT,Highest block density,0.108,0.537,0.841,1.007
+ASpT,Highest block density (d < 10%),0.095,0.54,0.841,1.007
+ASpT,RCM,0.09,0.486,0.83,0.982
+ASpT,RCM (d < 10%),0.075,0.501,0.828,0.985
+ASpT,AMD,0.08,0.473,0.828,1.002
+ASpT,AMD (d < 10%),0.077,0.481,0.823,1.002
+ASpT,Rabbit,0.077,0.494,0.812,1.0
+ASpT,Rabbit (d < 10%),0.072,0.496,0.815,1.002
+ASpT,Never reorder,0.031,0.414,0.835,1.0
+Acc-SpMM,Highest block density,0.18,0.512,0.738,1.02
+Acc-SpMM,Highest block density (d < 10%),0.19,0.512,0.73,1.018
+Acc-SpMM,RCM,0.103,0.452,0.728,1.012
+Acc-SpMM,RCM (d < 10%),0.134,0.483,0.74,1.01
+Acc-SpMM,AMD,0.064,0.296,0.635,0.983
+Acc-SpMM,AMD (d < 10%),0.103,0.36,0.656,0.989
+Acc-SpMM,Rabbit,0.188,0.434,0.663,1.029
+Acc-SpMM,Rabbit (d < 10%),0.226,0.524,0.746,1.066
+Acc-SpMM,Never reorder,0.118,0.357,0.632,1.0
+DTC-SpMM,Highest block density,0.152,0.375,0.602,1.018
+DTC-SpMM,Highest block density (d < 10%),0.152,0.38,0.589,1.014
+DTC-SpMM,RCM,0.103,0.302,0.605,1.056
+DTC-SpMM,RCM (d < 10%),0.103,0.313,0.599,1.055
+DTC-SpMM,AMD,0.059,0.214,0.463,0.969
+DTC-SpMM,AMD (d < 10%),0.085,0.269,0.486,0.982
+DTC-SpMM,Rabbit,0.212,0.444,0.667,1.095
+DTC-SpMM,Rabbit (d < 10%),0.233,0.512,0.729,1.142
+DTC-SpMM,Never reorder,0.098,0.279,0.481,1.0
+FlashSparse,Highest block density,0.18,0.393,0.674,1.05
+FlashSparse,Highest block density (d < 10%),0.177,0.398,0.671,1.049
+FlashSparse,RCM,0.057,0.278,0.599,1.008
+FlashSparse,RCM (d < 10%),0.069,0.308,0.614,1.019
+FlashSparse,AMD,0.028,0.177,0.44,0.951
+FlashSparse,AMD (d < 10%),0.049,0.234,0.483,0.969
+FlashSparse,Rabbit,0.167,0.401,0.591,1.057
+FlashSparse,Rabbit (d < 10%),0.19,0.486,0.697,1.134
+FlashSparse,Never reorder,0.075,0.242,0.486,1.0
+SMaT,Highest block density,0.386,0.49,0.596,1.429
+SMaT,Highest block density (d < 10%),0.369,0.469,0.581,1.422
+SMaT,RCM,0.395,0.563,0.702,1.505
+SMaT,RCM (d < 10%),0.416,0.572,0.717,1.529
+SMaT,AMD,0.044,0.068,0.165,1.031
+SMaT,AMD (d < 10%),0.097,0.142,0.251,1.088
+SMaT,Rabbit,0.133,0.212,0.336,1.076
+SMaT,Rabbit (d < 10%),0.195,0.298,0.451,1.223
+SMaT,Never reorder,0.168,0.245,0.375,1.0
+cuSPARSE-BSR,Highest block density,0.48,0.67,0.81,1.763
+cuSPARSE-BSR,Highest block density (d < 10%),0.437,0.638,0.773,1.738
+cuSPARSE-BSR,RCM,0.371,0.572,0.741,1.673
+cuSPARSE-BSR,RCM (d < 10%),0.368,0.578,0.73,1.682
+cuSPARSE-BSR,AMD,0.086,0.187,0.316,1.256
+cuSPARSE-BSR,AMD (d < 10%),0.135,0.267,0.402,1.323
+cuSPARSE-BSR,Rabbit,0.124,0.233,0.322,1.151
+cuSPARSE-BSR,Rabbit (d < 10%),0.172,0.319,0.422,1.311
+cuSPARSE-BSR,Never reorder,0.135,0.241,0.376,1.0
+cuSPARSE-CSR,Highest block density,0.221,0.599,0.964,1.178
+cuSPARSE-CSR,Highest block density (d < 10%),0.219,0.589,0.961,1.173
+cuSPARSE-CSR,RCM,0.139,0.568,0.931,1.162
+cuSPARSE-CSR,RCM (d < 10%),0.129,0.532,0.936,1.153
+cuSPARSE-CSR,AMD,0.126,0.522,0.933,1.149
+cuSPARSE-CSR,AMD (d < 10%),0.126,0.486,0.936,1.142
+cuSPARSE-CSR,Rabbit,0.134,0.524,0.913,1.15
+cuSPARSE-CSR,Rabbit (d < 10%),0.136,0.504,0.92,1.146
+cuSPARSE-CSR,Never reorder,0.015,0.159,0.658,1.0

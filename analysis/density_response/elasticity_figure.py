@@ -21,7 +21,8 @@ demeaned with per-matrix weighted means; r = Sxy / sqrt(Sxx Syy). The bandwidth
 is fixed across kernels, since a narrower window leaves less spread in d and
 lowers r.
 
-Dense operand: 256 columns, except SMaT and ASpT, which always ran with 32.
+Dense operand: --n-cols=32 or --n-cols=256 (default). At 256, SMaT and ASpT use
+their real 32-column runs (they ignore the width). Outputs carry an _nc<N> suffix.
 Runs whose padded 32x32 work would exceed the hardware peak (silent skips)
 are dropped for cuSPARSE-BSR and SMaT.
 """
@@ -29,10 +30,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from common import (FIXED_32_COLS, INK, INK2, KERNEL_NAMES, PAGE_W, PALETTE,
+from common import (kernel_label, kernel_width, n_cols_from_argv, FIXED_32_COLS, INK, INK2, KERNEL_NAMES, PAGE_W, PALETTE,
                     clean_axes, load_pipeline, save, style)
 
-N_COLS = 256
+N_COLS = n_cols_from_argv()
 PEAK_TFLOPS = {'CUSPARSE_SPMM_BSR_bs32': 19.5, 'SMAT_SPMM_bs32': 312.0}
 N_BOOT = 200
 
@@ -42,7 +43,7 @@ def data():
     df = pd.concat(parts, ignore_index=True)
     df.loc[df['strategy'] == 'Original', 'perm_type'] = '-'   # shared baseline
     df = df.drop_duplicates(['kernel_id', 'matrix', 'perm_type', 'strategy', 'n_cols'])
-    width = np.where(df['kernel_id'].isin(FIXED_32_COLS), 32, N_COLS)
+    width = kernel_width(df['kernel_id'], N_COLS)
     df = df[(df['n_cols'] == width) & (df['gflops'] > 0) & np.isfinite(df['gflops'])
             & (df['block_density_16'] > 0)]
     for k, peak in PEAK_TFLOPS.items():
@@ -113,7 +114,7 @@ def figure(res):
     for (k, name), col in zip(KERNEL_NAMES.items(), PALETTE):
         c = res[k]
         X = 2 ** c['grid']
-        label = name + (' (32 cols)' if k in FIXED_32_COLS else '')
+        label = kernel_label(k, N_COLS)
         ax.fill_between(X, c['e_lo'], c['e_hi'], color=col, alpha=0.13, lw=0)
         ax.plot(X, c['e'], color=col, lw=1.6, label=label)
     ax.axhline(0, color=INK2, lw=0.7)
@@ -125,7 +126,7 @@ def figure(res):
     ax.legend(loc='center left', bbox_to_anchor=(1.01, 0.5), frameon=False,
               handlelength=1.6)
     fig.tight_layout()
-    save(fig, 'elasticity_block_density_original')
+    save(fig, f'elasticity_block_density_original_nc{N_COLS}')
     plt.close(fig)
 
 
@@ -176,7 +177,7 @@ def figure_correlation(res):
         c = res[k]
         X = 2 ** c['grid']
         ok = ~np.isnan(c['r'])
-        label = name + (' (32 cols)' if k in FIXED_32_COLS else '')
+        label = kernel_label(k, N_COLS)
         ax.fill_between(X[ok], c['lo'][ok], c['hi'][ok], color=col, alpha=0.13, lw=0)
         ax.plot(X[ok], c['r'][ok], color=col, lw=1.6, label=label)
     ax.axhline(0, color=INK2, lw=0.7)
@@ -188,7 +189,7 @@ def figure_correlation(res):
     ax.legend(loc='center left', bbox_to_anchor=(1.01, 0.5), frameon=False,
               handlelength=1.6)
     fig.tight_layout()
-    save(fig, 'correlation_block_density_original')
+    save(fig, f'correlation_block_density_original_nc{N_COLS}')
     plt.close(fig)
 
 
@@ -227,7 +228,7 @@ def figure_matrix_density(res):
         c = res[k]
         X = 10 ** c['grid']
         ok = ~np.isnan(c['a'])
-        label = name + (' (32 cols)' if k in FIXED_32_COLS else '')
+        label = kernel_label(k, N_COLS)
         ax.fill_between(X[ok], c['lo'][ok], c['hi'][ok], color=col, alpha=0.13, lw=0)
         ax.plot(X[ok], c['a'][ok], color=col, lw=1.6, label=label)
     ax.axhline(0, color=INK2, lw=0.7)
@@ -239,7 +240,7 @@ def figure_matrix_density(res):
     ax.legend(loc='center left', bbox_to_anchor=(1.01, 0.5), frameon=False,
               handlelength=1.6)
     fig.tight_layout()
-    save(fig, 'elasticity_vs_matrix_density')
+    save(fig, f'elasticity_vs_matrix_density_nc{N_COLS}')
     plt.close(fig)
 
 
@@ -256,7 +257,7 @@ def main():
                                  r=np.interp(np.log2(d), c['grid'], c['r'])))
     rt = pd.DataFrame(rows).pivot(index='kernel', columns='density', values='r')
     print('local correlation r(d)'); print(rt.round(2).to_string())
-    rt.round(3).to_csv('analysis/density_response/figures/correlation_table.csv')
+    rt.round(3).to_csv(f'analysis/density_response/figures/correlation_table_nc{N_COLS}.csv')
     rm = alpha_vs_matrix_density(df, np.random.default_rng(11))
     figure_matrix_density(rm)
     for k, c in rm.items():
@@ -272,7 +273,7 @@ def main():
                              elasticity=np.interp(np.log2(d), c['grid'], c['e'])))
     table = pd.DataFrame(rows).pivot(index='kernel', columns='density', values='elasticity')
     print(table.round(2).to_string())
-    table.round(3).to_csv('analysis/density_response/figures/elasticity_table.csv')
+    table.round(3).to_csv(f'analysis/density_response/figures/elasticity_table_nc{N_COLS}.csv')
     figure(res)
 
 

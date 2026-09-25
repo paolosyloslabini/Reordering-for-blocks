@@ -19,16 +19,17 @@ A "highest predicted speedup from the density curve" policy is not listed: the
 fitted curves increase monotonically, so it always picks the same candidate as
 max_density.
 
-Dense operand: 256 columns, except SMaT and ASpT (their runs always used 32).
+Dense operand: --n-cols=32 or --n-cols=256 (default); at 256, SMaT and ASpT use
+their real 32-column runs. Output: figures/decision_table_nc<N>.csv.
 Runs whose padded 32x32 work would exceed the hardware peak are dropped for
 cuSPARSE-BSR and SMaT.
 """
 import numpy as np
 import pandas as pd
 
-from common import FIXED_32_COLS, KERNEL_NAMES, OUT, load_pipeline
+from common import KERNEL_NAMES, OUT, kernel_width, load_pipeline, n_cols_from_argv
 
-N_COLS = 256
+N_COLS = n_cols_from_argv()
 PEAK_TFLOPS = {'CUSPARSE_SPMM_BSR_bs32': 19.5, 'SMAT_SPMM_bs32': 312.0}
 POLICIES = ['best', 'max_density', 'density_reuse', 'always_RCM', 'always_AMD', 'never']
 
@@ -37,7 +38,7 @@ def data():
     parts = [load_pipeline(ds, pt) for ds in ('original', 'scrambled')
              for pt in ('SYMMETRIC', 'ROW')]
     df = pd.concat(parts, ignore_index=True)
-    width = np.where(df['kernel_id'].isin(FIXED_32_COLS), 32, N_COLS)
+    width = kernel_width(df['kernel_id'], N_COLS)
     df = df[(df['n_cols'] == width) & (df['strategy'] != 'Original')]
     for k, peak in PEAK_TFLOPS.items():
         executed = (2 * df['nonzero_blocks_32'] * 1024 * df['n_cols']
@@ -122,8 +123,8 @@ def main():
         print(near.loc[ds].reindex(kernels).round(2).join(n.loc[ds]).to_string())
     OUT.mkdir(exist_ok=True)
     table = geo.round(3).add_prefix('speedup_').join(near.round(3).add_prefix('within90_')).join(n)
-    table.to_csv(OUT / 'decision_table.csv')
-    print('saved', OUT / 'decision_table.csv')
+    table.to_csv(OUT / f'decision_table_nc{N_COLS}.csv')
+    print('saved', OUT / f'decision_table_nc{N_COLS}.csv')
 
 
 if __name__ == '__main__':

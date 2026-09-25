@@ -21,18 +21,20 @@ Strategies
 If a strategy's run is missing (reordering or kernel failed), it keeps the
 original ordering (speedup 1).
 
-Dense operand: 256 columns, except SMaT and ASpT (their runs always used 32).
+Dense operand: --n-cols=32 or --n-cols=256 (default); at 256, SMaT and ASpT use
+their real 32-column runs. Outputs carry an _nc<N> suffix.
 Impossible cuSPARSE-BSR / SMaT runs are dropped, as in decision_test.py.
 """
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from common import (FIXED_32_COLS, INK, INK2, KERNEL_NAMES, OUT, PAGE_W, PALETTE,
+from common import (kernel_label, kernel_width, n_cols_from_argv, FIXED_32_COLS, INK, INK2, KERNEL_NAMES, OUT, PAGE_W, PALETTE,
                     clean_axes, load_pipeline, save, style)
 from decision_test import PEAK_TFLOPS
 
 THRESHOLD = 0.10
+N_COLS = n_cols_from_argv()
 STRATEGIES = [  # (label, colour, linestyle)
     ('Highest block density', PALETTE[0], '-'),
     (f'Highest block density (d < {THRESHOLD:.0%})', PALETTE[0], '--'),
@@ -46,7 +48,7 @@ STRATEGIES = [  # (label, colour, linestyle)
 def data():
     df = pd.concat([load_pipeline('original', pt) for pt in ('SYMMETRIC', 'ROW')],
                    ignore_index=True)
-    width = np.where(df['kernel_id'].isin(FIXED_32_COLS), 32, 256)
+    width = kernel_width(df['kernel_id'], N_COLS)
     df = df[(df['n_cols'] == width) & (df['strategy'] != 'Original')
             & (df['speedup'] > 0) & np.isfinite(df['speedup'])
             & (df['block_density_16'] > 0) & (df['block_density_16_original'] > 0)]
@@ -100,7 +102,7 @@ def figure(R):
     ax.set_ylabel('Share of matrices')
     clean_axes(ax)
     kernel_handles = [Line2D([], [], color=col, lw=1.8,
-                             label=name + (' (32 cols)' if k in FIXED_32_COLS else ''))
+                             label=kernel_label(k, N_COLS))
                       for (k, name), col in zip(KERNEL_NAMES.items(), PALETTE)]
     style_handles = [Line2D([], [], color=INK2, lw=1.4, ls=ls,
                             label={'Never reorder': 'Never reorder'}.get(lab, lab.replace('Highest block density', 'Densest')))
@@ -113,7 +115,7 @@ def figure(R):
               bbox_to_anchor=(1.02, 0.0), frameon=False, handlelength=2.4,
               alignment='left')
     fig.tight_layout()
-    save(fig, 'strategy_profiles')
+    save(fig, f'strategy_profiles_nc{N_COLS}')
     plt.close(fig)
 
 
@@ -134,11 +136,11 @@ def figure_vs_start(R, bandwidth=0.15, min_eff_n=20):
             if w.sum() ** 2 / (w ** 2).sum() >= min_eff_n:
                 geo[i] = 2 ** ((w * y).sum() / w.sum())
         table[name] = {f'{d:g}': np.interp(np.log10(d), lg, geo) for d in (0.005, 0.01, 0.02, 0.05, 0.1, 0.2)}
-        label = name + (' (32 cols)' if k in FIXED_32_COLS else '')
+        label = kernel_label(k, N_COLS)
         ax.plot(grid, geo, color=col, lw=1.6, label=label)
     T = pd.DataFrame(table).T.round(3)
     print('densest speedup by starting block density'); print(T.to_string())
-    T.to_csv(OUT / 'densest_speedup_vs_start_density.csv')
+    T.to_csv(OUT / f'densest_speedup_vs_start_density_nc{N_COLS}.csv')
     ax.axhline(1, color=INK2, lw=0.8)
     ax.axvline(THRESHOLD, color=INK2, lw=0.8, ls='--')
     ax.text(THRESHOLD * 1.06, 0.97, 'cut-off: above it,\nkeep the original (1×)',
@@ -152,7 +154,7 @@ def figure_vs_start(R, bandwidth=0.15, min_eff_n=20):
     ax.legend(loc='center left', bbox_to_anchor=(1.01, 0.5), frameon=False,
               handlelength=1.6)
     fig.tight_layout()
-    save(fig, 'strategy_speedup_vs_start_density')
+    save(fig, f'strategy_speedup_vs_start_density_nc{N_COLS}')
     plt.close(fig)
 
 
@@ -174,7 +176,7 @@ def main():
     print(S.pivot(index='kernel', columns='strategy', values='geo_speedup')
           .reindex(list(KERNEL_NAMES.values()))[labels].round(3).to_string())
     OUT.mkdir(exist_ok=True)
-    S.round(3).to_csv(OUT / 'strategy_profiles_summary.csv', index=False)
+    S.round(3).to_csv(OUT / f'strategy_profiles_summary_nc{N_COLS}.csv', index=False)
     figure(R)
     figure_vs_start(R)
 

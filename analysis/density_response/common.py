@@ -50,6 +50,24 @@ KERNEL_NAMES = {
 FIXED_32_COLS = {'SMAT_SPMM_bs32', 'ASPT_SPMM'}
 
 
+def n_cols_from_argv(default=256):
+    """Dense-operand width from ``--n-cols=N`` on the command line (32 or 256)."""
+    for arg in sys.argv[1:]:
+        if arg.startswith('--n-cols='):
+            return int(arg.split('=', 1)[1])
+    return default
+
+
+def kernel_width(kernel_ids, n_cols):
+    """Width to select per row: SMaT/ASpT always use their real 32-column runs."""
+    return np.where(pd.Series(kernel_ids).isin(FIXED_32_COLS).values, 32, n_cols)
+
+
+def kernel_label(kernel_id, n_cols):
+    name = KERNEL_NAMES[kernel_id]
+    return name + (' (32 cols)' if kernel_id in FIXED_32_COLS and n_cols != 32 else '')
+
+
 def style():
     mpl.rcParams.update(RC)
 
