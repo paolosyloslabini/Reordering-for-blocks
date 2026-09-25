@@ -71,7 +71,8 @@ def outcomes(df):
             out[s] = sym.get(s, 1.0)
             out[f'{s} (d < {THRESHOLD:.0%})'] = sym.get(s, 1.0) if d0 < THRESHOLD else 1.0
         out['Never reorder'] = 1.0
-        rows.append({'kernel': KERNEL_NAMES[k], 'matrix': m, 'best': best,
+        rows.append({'kernel': KERNEL_NAMES[k], 'matrix': m, 'best': best, 'd0': d0,
+                     'densest_speedup': dense,
                      **{s: best / v for s, v in out.items()}})
     return pd.DataFrame(rows)
 
@@ -116,6 +117,45 @@ def figure(R):
     plt.close(fig)
 
 
+def figure_vs_start(R, bandwidth=0.15, min_eff_n=20):
+    """Speedup achieved by the densest candidate vs starting block density."""
+    fig, ax = plt.subplots(figsize=(PAGE_W * 0.72, 2.9))
+    lo, hi = np.quantile(R['d0'], [0.03, 0.97])
+    grid = np.geomspace(lo, hi, 120)
+    lg = np.log10(grid)
+    table = {}
+    for (k, name), col in zip(KERNEL_NAMES.items(), PALETTE):
+        t = R[R['kernel'] == name]
+        x = np.log10(t['d0'].values)
+        y = np.log2(t['densest_speedup'].values)
+        geo = np.full(len(grid), np.nan)
+        for i, c in enumerate(lg):
+            w = np.exp(-0.5 * ((x - c) / bandwidth) ** 2)
+            if w.sum() ** 2 / (w ** 2).sum() >= min_eff_n:
+                geo[i] = 2 ** ((w * y).sum() / w.sum())
+        table[name] = {f'{d:g}': np.interp(np.log10(d), lg, geo) for d in (0.005, 0.01, 0.02, 0.05, 0.1, 0.2)}
+        label = name + (' (32 cols)' if k in FIXED_32_COLS else '')
+        ax.plot(grid, geo, color=col, lw=1.6, label=label)
+    T = pd.DataFrame(table).T.round(3)
+    print('densest speedup by starting block density'); print(T.to_string())
+    T.to_csv(OUT / 'densest_speedup_vs_start_density.csv')
+    ax.axhline(1, color=INK2, lw=0.8)
+    ax.axvline(THRESHOLD, color=INK2, lw=0.8, ls='--')
+    ax.text(THRESHOLD * 1.06, 0.97, 'cut-off: above it,\nkeep the original (1×)',
+            transform=ax.get_xaxis_transform(), va='top', fontsize=6.5, color=INK2)
+    ax.set_xscale('log')
+    ax.set_yscale('log', base=2)
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f'{v:g}×'))
+    ax.set_xlabel(r'Block density before reordering ($16{\times}16$)')
+    ax.set_ylabel('Speedup of the densest candidate\n(geometric mean)')
+    clean_axes(ax)
+    ax.legend(loc='center left', bbox_to_anchor=(1.01, 0.5), frameon=False,
+              handlelength=1.6)
+    fig.tight_layout()
+    save(fig, 'strategy_speedup_vs_start_density')
+    plt.close(fig)
+
+
 def main():
     style()
     R = outcomes(data())
@@ -136,6 +176,7 @@ def main():
     OUT.mkdir(exist_ok=True)
     S.round(3).to_csv(OUT / 'strategy_profiles_summary.csv', index=False)
     figure(R)
+    figure_vs_start(R)
 
 
 if __name__ == '__main__':

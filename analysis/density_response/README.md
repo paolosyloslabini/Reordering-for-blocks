@@ -248,3 +248,31 @@ What it shows:
 
 The "best" reference is the maximum of noisy timings, so every strategy looks somewhat further from it
 than it really is.
+
+### Expected speedup by starting block density (`strategy_speedup_vs_start_density`)
+
+This shows the speedup actually achieved by the **densest** strategy, against the matrix's starting
+16×16 block density. Each line is a Gaussian-kernel-weighted geometric mean over matrices (bandwidth
+0.15 decades on log10 d), one line per kernel.
+
+The "densest, only below 10%" strategy is identical to this line left of the dashed marker and exactly
+1× right of it, so it is not drawn separately. Values are in `figures/densest_speedup_vs_start_density.csv`:
+
+| kernel | 0.5% | 1% | 2% | 5% | 10% | 20% |
+|---|---|---|---|---|---|---|
+| cuSPARSE-BSR | 3.92 | 3.03 | 1.65 | 1.25 | 1.18 | 1.09 |
+| SMaT (32 cols) | 1.88 | 1.80 | 1.46 | 1.11 | 1.11 | 1.02 |
+| FlashSparse | 1.19 | 1.22 | 1.12 | 1.07 | 1.07 | 1.04 |
+| DTC-SpMM | 1.06 | 1.15 | 1.11 | 1.08 | 1.08 | 1.01 |
+| Acc-SpMM | 1.09 | 1.11 | 1.06 | 1.03 | 1.05 | 1.01 |
+| cuSPARSE-CSR | 1.36 | 1.26 | 1.04 | 1.00 | 1.02 | 1.02 |
+| ASpT (32 cols) | 1.02 | 1.01 | 1.01 | 0.99 | 1.00 | 1.00 |
+
+What it shows:
+- **The expected gain falls steeply with starting block density** for the BSR kernels (cuSPARSE-BSR
+  about 4× at 0.5% but about 1.2× at 10%) and for cuSPARSE-CSR (1.36× at 0.5%, none above 2%).
+- **The tensor-core kernels gain about 1.1–1.2× below 2% and about 1.05× above.**
+- **The densest rule does not lose on average above 10%.** Because it keeps the original ordering when
+  nothing is denser, no curve drops below 1×. So the 10% cut-off gives up a little (cuSPARSE-BSR
+  1.18× → 1× at 10%) rather than protecting against losses.
+- These are averages. Individual matrices scatter widely around them (see the profiles above).
