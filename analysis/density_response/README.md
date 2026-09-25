@@ -13,7 +13,8 @@ inputs. The matrix set and filters are the paper's (`scripts/filter_config.yaml`
 
 ```
 python analysis/density_response/gain_figures.py        # figures 1-2 (~1 min)
-python analysis/density_response/elasticity_figure.py   # figure 3 (~10 min, bootstrap)
+python analysis/density_response/elasticity_figure.py   # figures 3-5 (~10 min, bootstrap)
+python analysis/density_response/decision_test.py       # decision table (~5 min)
 ```
 
 Use the repo's Windows venv (`.venv/Scripts/python.exe`). Outputs go to `figures/` (PDF sized for
@@ -155,3 +156,51 @@ How to read it:
   below 1%) and a poor one once it is well blocked (about 0.2 at 10%). This fits block density acting as
   a locality proxy for CSR.
 - **ASpT:** block density predicts nothing useful at any density.
+
+## Decision test: which reordering to pick (`decision_test.py`, `figures/decision_table.csv`)
+
+This tests how well simple rules choose a reordering. The unit is each (matrix, permutation type,
+kernel); the candidates are the original ordering and every reordering that ran.
+
+The rules:
+- **best:** the fastest candidate (an upper bound).
+- **max_density:** the candidate with the highest 16×16 block density, keeping the original ordering if
+  nothing raises it.
+- **density_reuse:** the highest predicted speedup from a model of the change in block density (a
+  spline) plus the change in mean reuse distance. It is fitted per kernel with 5-fold CV grouped by
+  matrix, so every prediction is for held-out matrices.
+- **always_RCM**, **always_AMD**, and **never** (keep the original ordering).
+
+A rule based only on the density curve is not listed: the curves rise monotonically, so it always makes
+the same choice as max_density.
+
+Same widths and exclusions as figure 3: 256 columns, SMaT and ASpT at their actual 32 columns, and the
+impossible BSR/SMaT runs dropped.
+
+**Original matrices, geometric-mean speedup (share of cases within 90% of the best):**
+
+| kernel | best | max_density | density_reuse | always RCM | always AMD |
+|---|---|---|---|---|---|
+| cuSPARSE-BSR | 1.61 | 1.55 (90%) | 1.56 (90%) | 1.15 (31%) | 1.18 (36%) |
+| SMaT (32 cols) | 1.52 | 1.25 (61%) | 1.27 (61%) | 1.13 (40%) | 0.91 (9%) |
+| FlashSparse | 1.30 | 1.12 (59%) | 1.16 (67%) | 1.07 (32%) | 1.05 (38%) |
+| DTC-SpMM | 1.28 | 1.09 (60%) | 1.14 (65%) | 1.08 (43%) | 1.04 (44%) |
+| Acc-SpMM | 1.25 | 1.07 (62%) | 1.09 (63%) | 1.04 (50%) | 1.03 (42%) |
+| cuSPARSE-CSR | 1.17 | 1.11 (85%) | 1.10 (85%) | 1.07 (68%) | 1.08 (75%) |
+| ASpT (32 cols) | 1.12 | 1.01 (62%) | 1.01 (61%) | 0.99 (56%) | 0.99 (51%) |
+
+Scrambled matrices show the same ordering of rules, at larger scale (e.g. FlashSparse: best 1.85,
+max_density 1.65, density_reuse 1.70, always RCM 1.60). See the CSV.
+
+What it shows:
+- **"Reorder for block density" works as a rule.** Picking the densest candidate beats always using
+  RCM or AMD for every kernel except ASpT.
+- **For the BSR kernels and cuSPARSE-CSR,** it gets close to the best: 85–90% of cases are within 90%.
+- **For the tensor-core kernels,** adding reuse distance improves the choice (DTC-SpMM 1.09 → 1.14,
+  FlashSparse 1.12 → 1.16), consistent with locality carrying information that block density does not.
+- **For ASpT,** no rule helps.
+
+Caveat: **best** takes the maximum over about 11 noisy timings, each a mean of 5 runs (ASpT's are single
+cold runs). So it partly selects lucky measurements, especially on original matrices, where true
+differences are a few percent. The real gap between the rules and the best choice is smaller than the
+table shows.
