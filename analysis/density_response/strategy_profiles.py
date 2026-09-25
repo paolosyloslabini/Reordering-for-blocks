@@ -1,4 +1,8 @@
-"""Performance profiles of simple reordering strategies, per kernel.
+"""Performance profiles of simple reordering strategies.
+
+Figure: one plot, three strategies per kernel (colour = kernel, line style =
+strategy): highest block density; highest block density only if the starting
+block density is below 10%; never reorder. The summary CSV covers every strategy.
 
 For every (matrix, kernel) on the original SuiteSparse matrices, the best
 available speedup is the maximum over the original ordering (1x) and every
@@ -8,6 +12,8 @@ best / achieved >= 1; its profile at x is the share of matrices with ratio <= x.
 Strategies
   Highest block density   the candidate with the highest 16x16 block density
                           (original ordering if no reordering raises it)
+  ... (d < 10%)           the same, only if the starting block density is
+                          below 10%, otherwise the original ordering
   RCM / AMD / Rabbit      always that reordering, symmetric
   ... (d < 10%)           that reordering only if the starting block density
                           is below 10%, otherwise the original ordering
@@ -29,6 +35,7 @@ from decision_test import PEAK_TFLOPS
 THRESHOLD = 0.10
 STRATEGIES = [  # (label, colour, linestyle)
     ('Highest block density', PALETTE[0], '-'),
+    (f'Highest block density (d < {THRESHOLD:.0%})', PALETTE[0], '--'),
     ('RCM', PALETTE[1], '-'), (f'RCM (d < {THRESHOLD:.0%})', PALETTE[1], '--'),
     ('AMD', PALETTE[2], '-'), (f'AMD (d < {THRESHOLD:.0%})', PALETTE[2], '--'),
     ('Rabbit', PALETTE[3], '-'), (f'Rabbit (d < {THRESHOLD:.0%})', PALETTE[3], '--'),
@@ -57,8 +64,9 @@ def outcomes(df):
         best = max(g['speedup'].max(), 1.0)
         densest = g.loc[g['block_density_16'].idxmax()]
         sym = g[g['perm_type'] == 'SYMMETRIC'].set_index('strategy')['speedup']
-        out = {'Highest block density':
-               densest['speedup'] if densest['block_density_16'] > d0 else 1.0}
+        dense = densest['speedup'] if densest['block_density_16'] > d0 else 1.0
+        out = {'Highest block density': dense,
+               f'Highest block density (d < {THRESHOLD:.0%})': dense if d0 < THRESHOLD else 1.0}
         for s in ('RCM', 'AMD', 'Rabbit'):
             out[s] = sym.get(s, 1.0)
             out[f'{s} (d < {THRESHOLD:.0%})'] = sym.get(s, 1.0) if d0 < THRESHOLD else 1.0
@@ -68,32 +76,41 @@ def outcomes(df):
     return pd.DataFrame(rows)
 
 
+FIGURE_STRATEGIES = [('Highest block density', '-'),
+                     (f'Highest block density (d < {THRESHOLD:.0%})', '--'),
+                     ('Never reorder', ':')]
+
+
 def figure(R):
-    kernels = list(KERNEL_NAMES)
-    fig, axes = plt.subplots(2, 4, figsize=(PAGE_W, 3.8), sharey=True)
-    for ax, k in zip(axes.flat, kernels):
-        name = KERNEL_NAMES[k]
+    from matplotlib.lines import Line2D
+    fig, ax = plt.subplots(figsize=(PAGE_W * 0.72, 3.0))
+    xs = np.geomspace(1, 4, 300)
+    for (k, name), col in zip(KERNEL_NAMES.items(), PALETTE):
         t = R[R['kernel'] == name]
-        xmax = 4 if k in ('CUSPARSE_SPMM_BSR_bs32', 'SMAT_SPMM_bs32') else 2
-        xs = np.geomspace(1, xmax, 200)
-        for label, col, ls in STRATEGIES:
+        for label, ls in FIGURE_STRATEGIES:
             ratio = t[label].values
             ax.plot(xs, [(ratio <= x * (1 + 1e-9)).mean() for x in xs],
-                    color=col, ls=ls, lw=1.4, label=label)
-        title = name + (' (32 cols)' if k in FIXED_32_COLS else '')
-        ax.set_title(f'{title}  (n={len(t)})', color=INK, fontsize=7.5)
-        ax.set_xscale('log', base=2)
-        ax.set_xlim(1, xmax)
-        ax.set_xlabel('Within a factor of the best')
-        ax.set_ylim(0, 1.02)
-        ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f'{v:g}×'))
-        clean_axes(ax)
-    legend_ax = axes.flat[-1]
-    legend_ax.axis('off')
-    h, l = axes.flat[0].get_legend_handles_labels()
-    legend_ax.legend(h, l, loc='center', frameon=False, handlelength=2.2, fontsize=7)
-    for ax in axes[:, 0]:
-        ax.set_ylabel('Share of matrices')
+                    color=col, ls=ls, lw=1.4)
+    ax.set_xscale('log', base=2)
+    ax.set_xlim(1, 4)
+    ax.set_ylim(0, 1.02)
+    ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f'{v:g}×'))
+    ax.set_xlabel('Within a factor of the best available speedup')
+    ax.set_ylabel('Share of matrices')
+    clean_axes(ax)
+    kernel_handles = [Line2D([], [], color=col, lw=1.8,
+                             label=name + (' (32 cols)' if k in FIXED_32_COLS else ''))
+                      for (k, name), col in zip(KERNEL_NAMES.items(), PALETTE)]
+    style_handles = [Line2D([], [], color=INK2, lw=1.4, ls=ls,
+                            label={'Never reorder': 'Never reorder'}.get(lab, lab.replace('Highest block density', 'Densest')))
+                     for lab, ls in FIGURE_STRATEGIES]
+    leg1 = ax.legend(handles=kernel_handles, title='Kernel', loc='upper left',
+                     bbox_to_anchor=(1.02, 1.0), frameon=False, handlelength=1.8,
+                     alignment='left')
+    ax.add_artist(leg1)
+    ax.legend(handles=style_handles, title='Strategy', loc='lower left',
+              bbox_to_anchor=(1.02, 0.0), frameon=False, handlelength=2.4,
+              alignment='left')
     fig.tight_layout()
     save(fig, 'strategy_profiles')
     plt.close(fig)
