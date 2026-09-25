@@ -266,7 +266,8 @@ than it really is.
 
 This shows the speedup actually achieved by the **densest** strategy, against the matrix's starting
 16×16 block density. Each line is a Gaussian-kernel-weighted geometric mean over matrices (bandwidth
-0.15 decades on log10 d), one line per kernel.
+0.15 decades on log10 d), one line per kernel. Bands are 95% bootstrap over matrices: uncertainty of
+the average, not the spread of single matrices.
 
 The "densest, only below 10%" strategy is identical to this line left of the dashed marker and exactly
 1× right of it, so it is not drawn separately. Values are in `figures/densest_speedup_vs_start_density_nc*.csv`:

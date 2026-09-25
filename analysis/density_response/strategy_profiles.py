@@ -120,21 +120,34 @@ def figure(R):
 
 
 def figure_vs_start(R, bandwidth=0.15, min_eff_n=20):
-    """Speedup achieved by the densest candidate vs starting block density."""
+    """Speedup achieved by the densest candidate vs starting block density.
+
+    Lines: kernel-weighted geometric mean over matrices; bands: 95% bootstrap
+    over matrices (uncertainty of the average, not the spread of single matrices).
+    """
     fig, ax = plt.subplots(figsize=(PAGE_W * 0.72, 2.9))
     lo, hi = np.quantile(R['d0'], [0.03, 0.97])
     grid = np.geomspace(lo, hi, 120)
     lg = np.log10(grid)
     table = {}
+    rng = np.random.default_rng(17)
     for (k, name), col in zip(KERNEL_NAMES.items(), PALETTE):
-        t = R[R['kernel'] == name]
+        t = R[R['kernel'] == name]          # one row per matrix
         x = np.log10(t['d0'].values)
         y = np.log2(t['densest_speedup'].values)
-        geo = np.full(len(grid), np.nan)
-        for i, c in enumerate(lg):
-            w = np.exp(-0.5 * ((x - c) / bandwidth) ** 2)
-            if w.sum() ** 2 / (w ** 2).sum() >= min_eff_n:
-                geo[i] = 2 ** ((w * y).sum() / w.sum())
+        W = np.exp(-0.5 * ((lg[:, None] - x[None, :]) / bandwidth) ** 2)
+        ok = W.sum(1) ** 2 / (W ** 2).sum(1) >= min_eff_n
+
+        def geomean(cnt):
+            Wc = W * cnt
+            return np.where(ok, 2 ** ((Wc @ y) / Wc.sum(1)), np.nan)
+
+        geo = geomean(np.ones(len(t)))
+        B = np.array([geomean(np.bincount(rng.integers(0, len(t), len(t)),
+                                          minlength=len(t)).astype(float))
+                      for _ in range(200)])
+        lo_b, hi_b = np.nanpercentile(B, 2.5, 0), np.nanpercentile(B, 97.5, 0)
+        ax.fill_between(grid[ok], lo_b[ok], hi_b[ok], color=col, alpha=0.13, lw=0)
         table[name] = {f'{d:g}': np.interp(np.log10(d), lg, geo) for d in (0.005, 0.01, 0.02, 0.05, 0.1, 0.2)}
         label = kernel_label(k, N_COLS)
         ax.plot(grid, geo, color=col, lw=1.6, label=label)
