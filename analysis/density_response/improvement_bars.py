@@ -144,17 +144,17 @@ def figure(results):
                 top.tick_params(axis='y', which='both', labelleft=False)
                 bot.tick_params(axis='y', labelleft=False)
             else:
-                top.set_ylabel('Speedup\nwhen improved', fontsize=7.5)
-                bot.set_ylabel('Matrices', fontsize=7.5)
+                top.set_ylabel('Speedup\nwhen improved', fontsize=8.5)
+                bot.set_ylabel('Matrices', fontsize=8.5)
     for c, pt in enumerate(('SYMMETRIC', 'ROW')):
-        axes[(0, c)][0].set_title(f"{TITLES[pt].capitalize()}", fontsize=8,
+        axes[(0, c)][0].set_title(f"{TITLES[pt].capitalize()}", fontsize=9,
                                   fontweight='bold', pad=3)
     for r, ds in enumerate(('original', 'scrambled')):
         y0 = axes[(r, 1)][1].get_position().y0
         y1 = axes[(r, 1)][0].get_position().y1
         x1 = axes[(r, 1)][0].get_position().x1
         fig.text(x1 + 0.004, (y0 + y1) / 2, TITLES[ds], rotation=270, ha='left',
-                 va='center', fontsize=8, fontweight='bold')
+                 va='center', fontsize=9, fontweight='bold')
     handles = [Patch(facecolor=col, edgecolor='#222222', linewidth=0.5, alpha=0.85, label=lab)
                for col, lab in ((GOOD, 'Faster'), (BAD, 'Slower'),
                                 (NEUTRAL, 'Kept original (no denser candidate)'))]
@@ -225,10 +225,10 @@ def strips_figure(raw, results, rng):
                 up, down = res.loc[name, 'improved'], res.loc[name, 'slower']
                 halo = [pe.withStroke(linewidth=1.8, foreground='white')]
                 ax.text(i, 0.985, f'{up:.0%}↑', color=GOOD, ha='center', va='top',
-                        transform=ax.get_xaxis_transform(), fontsize=6.3,
+                        transform=ax.get_xaxis_transform(), fontsize=7,
                         fontweight='bold', zorder=7, path_effects=halo)
                 ax.text(i, 0.015, f'{down:.0%}↓', color=BAD, ha='center', va='bottom',
-                        transform=ax.get_xaxis_transform(), fontsize=6.3,
+                        transform=ax.get_xaxis_transform(), fontsize=7,
                         fontweight='bold', zorder=7, path_effects=halo)
             ax.set_yscale('log')
             ax.set_ylim(lo, hi)
@@ -244,20 +244,28 @@ def strips_figure(raw, results, rng):
             if c == 1:   # shared y: no tick marks poking into the gap between columns
                 ax.tick_params(axis='y', which='both', length=0, labelleft=False)
     for c, pt in enumerate(('SYMMETRIC', 'ROW')):
-        axes[0][c].set_title(TITLES[pt].capitalize(), fontsize=8, fontweight='bold', pad=3)
+        axes[0][c].set_title(TITLES[pt].capitalize(), fontsize=9, fontweight='bold', pad=3)
         axes[1][c].set_xticks(np.arange(len(names)))
-        axes[1][c].set_xticklabels([n.replace('cuSPARSE-', 'cuSPARSE\n').replace('-SpMM', '-\nSpMM')
-                                    for n in names],
-                                   linespacing=0.9, fontsize=6.5)
+        labs = axes[1][c].set_xticklabels(
+            [n.replace('cuSPARSE-', 'cuSPARSE\n').replace('-SpMM', '-\nSpMM')
+              .replace('FlashSparse', 'Flash-\nSparse') for n in names],
+            linespacing=0.9, fontsize=7.5)
+        # the two adjacent "cuSPARSE" labels are wider than a strip: push apart
+        from matplotlib.transforms import ScaledTranslation
+        for lab, n in zip(labs, names):
+            dx = {'cuSPARSE-BSR': -2.5, 'cuSPARSE-CSR': 2.5}.get(n, 0)
+            if dx:
+                lab.set_transform(lab.get_transform()
+                                  + ScaledTranslation(dx / 72, 0, fig.dpi_scale_trans))
     fig.subplots_adjust(left=0.085, right=0.965, top=0.89, bottom=0.085, wspace=0.012,
                         hspace=0.05)
     for r, ds in enumerate(('original', 'scrambled')):
         pos = axes[r][1].get_position()
         fig.text(pos.x1 + 0.004, (pos.y0 + pos.y1) / 2, TITLES[ds], rotation=270,
-                 ha='left', va='center', fontsize=8, fontweight='bold')
+                 ha='left', va='center', fontsize=9, fontweight='bold')
     mid = (axes[0][0].get_position().y1 + axes[1][0].get_position().y0) / 2
     fig.text(0.028, mid, 'Speedup of the densest candidate', rotation=90,
-             ha='left', va='center', fontsize=8)
+             ha='left', va='center', fontsize=9)
     handles = [Patch(facecolor=GOOD, edgecolor='#222222', linewidth=0.5, label='Faster'),
                Patch(facecolor=BAD, edgecolor='#222222', linewidth=0.5, label='Slower'),
                Patch(facecolor=KEPT, edgecolor='#222222', linewidth=0.5,

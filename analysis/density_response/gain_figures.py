@@ -61,7 +61,7 @@ def figure(g, xcol, xlabel, name, pct=False):
         ax.grid(True, axis='x', which='minor', color='#e4e4e4', linewidth=0.4)
         ax.set_axisbelow(True)
         ax.text(0.985, 0.95, title, transform=ax.transAxes, ha='right', va='top',
-                fontsize=8, fontweight='bold', zorder=6,
+                fontsize=9, fontweight='bold', zorder=6,
                 bbox=dict(boxstyle='square,pad=0.15', fc='white', ec='none', alpha=0.85))
     axes[0].tick_params(axis='x', which='both', length=0)
     axes[0].yaxis.set_major_locator(mpl.ticker.FixedLocator([0.25, 0.5, 1, 2, 4]))
@@ -73,10 +73,10 @@ def figure(g, xcol, xlabel, name, pct=False):
         axes[1].xaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f'{v * 100:g}%'))
         axes[1].xaxis.set_minor_formatter(mpl.ticker.NullFormatter())
     axes[1].set_xlabel(xlabel)
-    fig.subplots_adjust(left=0.13, right=0.99, top=0.9, bottom=0.12, hspace=0.07)
+    fig.subplots_adjust(left=0.155, right=0.99, top=0.9, bottom=0.12, hspace=0.07)
     mid = (axes[0].get_position().y1 + axes[1].get_position().y0) / 2
     fig.text(0.0, mid, 'Block density gain (after / before)', rotation=90,
-             ha='left', va='center', fontsize=8)
+             ha='left', va='center', fontsize=9)
     handles = [Patch(facecolor=colors[s], edgecolor='#222222', linewidth=0.5, label=s)
                for s in TOP]
     fig.legend(handles=handles, loc='lower center', bbox_to_anchor=(0.555, 0.905),
