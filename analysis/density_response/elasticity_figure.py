@@ -8,6 +8,13 @@ Left panel: speed relative to the median-density ordering, 2^(f(d) - f(d_med)).
 Right panel: local elasticity alpha(d) = df/dlog2 d.
 Bands: 95% bootstrap over matrices. Curves span the 2nd-98th percentile of d.
 
+Second figure (elasticity_vs_matrix_density): elasticity with respect to 16x16
+block density for groups of matrices with similar plain density nnz/(m*n).
+Matrix density is fixed per matrix, so for each point on the x-axis we fit one
+within-matrix slope  alpha = sum w_i sum_j xw*yw / sum w_i sum_j xw^2  (xw, yw =
+log2 block density and log2 GFLOPS, demeaned per matrix), with Gaussian weights
+w_i on log10 matrix density (bandwidth 0.25 decades).
+
 Dense operand: 256 columns, except SMaT and ASpT, which always ran with 32.
 Runs whose padded 32x32 work would exceed the hardware peak (silent skips)
 are dropped for cuSPARSE-BSR and SMaT.
@@ -126,9 +133,66 @@ def figure(res):
     plt.close(fig)
 
 
+def alpha_vs_matrix_density(df, rng, bandwidth=0.25, min_eff_n=25):
+    res = {}
+    for k in KERNEL_NAMES:
+        t = df[df['kernel_id'] == k]
+        x = np.log2(t['block_density_16'].values)
+        y = np.log2(t['gflops'].values)
+        g = t['matrix'].values
+        xw = x - pd.Series(x).groupby(g).transform('mean').values
+        yw = y - pd.Series(y).groupby(g).transform('mean').values
+        per = pd.DataFrame({'m': g, 'sxy': xw * yw, 'sxx': xw * xw}).groupby('m').sum()
+        rho = np.log10(t.groupby('matrix')['density'].first().reindex(per.index).values)
+        sxy, sxx = per['sxy'].values, per['sxx'].values
+        grid = np.linspace(*np.quantile(rho, [.03, .97]), 80)
+
+        def curve(idx):
+            out = np.full(len(grid), np.nan)
+            for i, c in enumerate(grid):
+                w = np.exp(-0.5 * ((rho[idx] - c) / bandwidth) ** 2)
+                if w.sum() ** 2 / (w ** 2).sum() >= min_eff_n:
+                    out[i] = (w * sxy[idx]).sum() / (w * sxx[idx]).sum()
+            return out
+
+        a = curve(np.arange(len(rho)))
+        B = np.array([curve(rng.integers(0, len(rho), len(rho))) for _ in range(N_BOOT)])
+        res[k] = dict(grid=grid, a=a, lo=np.nanpercentile(B, 2.5, 0),
+                      hi=np.nanpercentile(B, 97.5, 0))
+    return res
+
+
+def figure_matrix_density(res):
+    fig, ax = plt.subplots(figsize=(PAGE_W * 0.62, 2.6))
+    for (k, name), col in zip(KERNEL_NAMES.items(), PALETTE):
+        c = res[k]
+        X = 10 ** c['grid']
+        ok = ~np.isnan(c['a'])
+        label = name + (' (32 cols)' if k in FIXED_32_COLS else '')
+        ax.fill_between(X[ok], c['lo'][ok], c['hi'][ok], color=col, alpha=0.13, lw=0)
+        ax.plot(X[ok], c['a'][ok], color=col, lw=1.6, label=label)
+    ax.axhline(0, color=INK2, lw=0.7)
+    ax.axhline(1, color=INK2, lw=0.7, ls=':')
+    ax.set_xscale('log')
+    ax.set_xlabel(r'Matrix density $\mathrm{nnz}/(m \cdot n)$')
+    ax.set_ylabel(r'Elasticity to block density ($16{\times}16$)')
+    clean_axes(ax)
+    ax.legend(loc='center left', bbox_to_anchor=(1.01, 0.5), frameon=False,
+              handlelength=1.6)
+    fig.tight_layout()
+    save(fig, 'elasticity_vs_matrix_density')
+    plt.close(fig)
+
+
 def main():
     style()
-    res = curves(data(), np.random.default_rng(7))
+    df = data()
+    rm = alpha_vs_matrix_density(df, np.random.default_rng(11))
+    figure_matrix_density(rm)
+    for k, c in rm.items():
+        pts = [(10 ** c['grid'][i], c['a'][i]) for i in np.linspace(0, len(c['grid']) - 1, 5).astype(int)]
+        print(f"{KERNEL_NAMES[k]:13s}", ' '.join(f'{r:.0e}:{a:5.2f}' for r, a in pts))
+    res = curves(df, np.random.default_rng(7))
     rows = []
     for k, c in res.items():
         for d in (0.005, 0.01, 0.02, 0.05, 0.1):

@@ -96,3 +96,27 @@ How to read it:
 The bands are confidence bands for the *average* curve. Individual matrices scatter much more around
 it: for the tensor-core kernels, predicting a held-out matrix's speedup from its density change is off
 by about ±15% typically.
+
+## Figure 4: elasticity at varying matrix density (`elasticity_vs_matrix_density`)
+
+This asks whether a kernel's sensitivity to block density depends on how sparse the matrix is overall.
+Matrix density nnz/(m·n) is fixed for a given matrix, so there is one within-matrix slope per window
+of matrix density, not a spline.
+
+- **Estimate:** `alpha = Σ_i w_i Σ_j xw·yw / Σ_i w_i Σ_j xw²`, where xw and yw are log2 block density
+  and log2 GFLOPS, demeaned per matrix.
+- **Weights:** Gaussian w_i on log10 matrix density, bandwidth 0.25 decades.
+- **Bands:** 95% bootstrap over matrices.
+- **Data:** the same as figure 3.
+
+What it shows:
+- **BSR kernels** are most sensitive on very sparse matrices. cuSPARSE-BSR drops from about 1.15 to
+  about 0.8, and SMaT from about 0.85 to about 0.6, as matrix density rises from 10⁻⁵ to 10⁻².
+- **The tensor-core kernels** sit at about 0.2–0.35 throughout, rising slightly (to about 0.35–0.45)
+  for the densest matrices.
+- **cuSPARSE-CSR** is sensitive only for the sparsest matrices (about 0.6 at 2·10⁻⁶), falling to about
+  0.1–0.2. This fits a locality effect that matters most when rows are very short.
+- **ASpT** stays near zero everywhere.
+
+Compared with figure 3, matrix density separates the kernels less than block density does. What
+matters is the ordering-dependent block density, not overall sparsity.
