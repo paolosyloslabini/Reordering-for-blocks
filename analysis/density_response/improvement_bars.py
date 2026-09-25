@@ -200,19 +200,15 @@ def strips_figure(raw, results, rng):
                                        linewidth=0.6, zorder=5))
                 ax.plot([i - half, i + half], [g, g], color='#111111', lw=1.4, zorder=6,
                         solid_capstyle='butt')
-                # shares: green above the highest dot, red below the lowest
+                # shares: faster along the top edge, slower along the bottom edge
                 up, down = res.loc[name, 'improved'], res.loc[name, 'slower']
                 halo = [pe.withStroke(linewidth=1.8, foreground='white')]
-                # label just past the extreme dot; if that falls outside the axes
-                # (dots clipped at the limit), put it inside, at the edge
-                room = 1.9    # ~ label height on these log axes
-                top, bot = np.exp(ls.max()) * 1.12, np.exp(ls.min()) / 1.12
-                ty, tva = (top, 'bottom') if top * room < hi else (hi / 1.04, 'top')
-                by, bva = (bot, 'top') if bot / room > lo else (lo * 1.04, 'bottom')
-                ax.text(i, ty, f'{up:.0%}↑', color=GOOD, ha='center', va=tva,
-                        fontsize=6.3, fontweight='bold', zorder=7, path_effects=halo)
-                ax.text(i, by, f'{down:.0%}↓', color=BAD, ha='center', va=bva,
-                        fontsize=6.3, fontweight='bold', zorder=7, path_effects=halo)
+                ax.text(i, 0.985, f'{up:.0%}↑', color=GOOD, ha='center', va='top',
+                        transform=ax.get_xaxis_transform(), fontsize=6.3,
+                        fontweight='bold', zorder=7, path_effects=halo)
+                ax.text(i, 0.015, f'{down:.0%}↓', color=BAD, ha='center', va='bottom',
+                        transform=ax.get_xaxis_transform(), fontsize=6.3,
+                        fontweight='bold', zorder=7, path_effects=halo)
             ax.set_yscale('log')
             ax.set_ylim(lo, hi)
             majors = [m for m in (0.2, 0.5, 1, 2, 5, 10, 20) if lo <= m <= hi]
