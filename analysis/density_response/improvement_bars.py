@@ -1,5 +1,9 @@
 """How often the densest reordering helps, and by how much when it does (N = 32).
 
+Two figures from the same data: improvement_bars_nc32 (shares + gain among
+improved) and improvement_strips_nc32 (the full per-matrix distribution as a
+sina plot, with the same shares and gain marked).
+
 Four cells: {original, scrambled} matrices x {symmetric, row} reordering.
 For every (matrix, kernel) the candidates are that cell's reorderings; the
 strategy keeps the candidate with the highest 16x16 block density, or the
@@ -159,12 +163,89 @@ def figure(results):
     plt.close(fig)
 
 
+def strips_figure(raw, results, rng):
+    """Sina plot of per-matrix speedups per kernel, paper style."""
+    import matplotlib as mpl
+    import matplotlib.patheffects as pe
+    from matplotlib.lines import Line2D
+    from matplotlib.ticker import LogLocator, NullFormatter
+    names = KERNEL_ORDER
+    by_name = {v: k for k, v in KERNEL_NAMES.items()}
+    ylims = {'original': (1 / 6, 12), 'scrambled': (1 / 6, 48)}
+    fig, axes = plt.subplots(2, 2, figsize=(PAGE_W, 4.4), sharex=True, sharey='row')
+    for r, ds in enumerate(('original', 'scrambled')):
+        lo, hi = ylims[ds]
+        for c, pt in enumerate(('SYMMETRIC', 'ROW')):
+            ax = axes[r][c]
+            d = raw[(ds, pt)]
+            res = results[(ds, pt)].set_index('kernel')
+            for i, name in enumerate(names):
+                s = d.loc[d['kernel_id'] == by_name[name], 'speedup'].values
+                ls = np.log(np.clip(s, lo, hi))
+                # sina jitter: horizontal spread proportional to local density
+                grid = np.linspace(np.log(lo), np.log(hi), 300)
+                bw = 0.12
+                dens = np.exp(-0.5 * ((grid[:, None] - ls[None, :]) / bw) ** 2).sum(1)
+                width = 0.42 * np.interp(ls, grid, dens) / dens.max()
+                xj = i + rng.uniform(-1, 1, len(s)) * width
+                col = np.where(s > 1, GOOD, np.where(s < 1, BAD, NEUTRAL))
+                ax.scatter(xj, np.exp(ls), s=1.6, c=col, alpha=0.55, lw=0,
+                           rasterized=True, zorder=3)
+                # gain among improved: tick + 95% interval, white halo
+                g, glo, ghi = res.loc[name, ['gain_improved', 'gain_lo', 'gain_hi']]
+                halo = [pe.Stroke(linewidth=3.2, foreground='white'), pe.Normal()]
+                ax.plot([i - 0.26, i + 0.26], [g, g], color='#111111', lw=1.6,
+                        zorder=5, path_effects=halo, solid_capstyle='butt')
+                ax.plot([i, i], [glo, ghi], color='#111111', lw=0.9, zorder=5,
+                        path_effects=halo)
+                up, down = res.loc[name, 'improved'], res.loc[name, 'slower']
+                ax.text(i, 0.985, f'{up:.0%}↑\n{down:.0%}↓',
+                        transform=ax.get_xaxis_transform(), ha='center', va='top',
+                        fontsize=6, color='#222222', zorder=6, linespacing=1.0)
+            # dots are clipped at `hi`; the band above it holds the share labels
+            ax.set_yscale('log')
+            ax.set_ylim(lo, hi * 3.2)
+            majors = [m for m in (0.2, 0.5, 1, 2, 5, 10, 20) if lo <= m <= hi]
+            ax.yaxis.set_major_locator(mpl.ticker.FixedLocator(majors))
+            ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f'{v:g}×'))
+            ax.yaxis.set_minor_locator(LogLocator(base=10, subs=np.arange(1, 10), numticks=100))
+            ax.yaxis.set_minor_formatter(NullFormatter())
+            ax.axhline(1, color='#CC0000', linestyle='--', linewidth=0.8, alpha=0.8, zorder=2)
+            ax.grid(True, axis='y', which='major', color='#b0b0b0', linewidth=0.6)
+            ax.grid(True, axis='y', which='minor', color='#e4e4e4', linewidth=0.4)
+            kernel_separators(ax, len(names))
+    for c, pt in enumerate(('SYMMETRIC', 'ROW')):
+        axes[0][c].set_title(TITLES[pt].capitalize(), fontsize=8, fontweight='bold', pad=3)
+        axes[1][c].set_xticks(np.arange(len(names)))
+        axes[1][c].set_xticklabels(names, rotation=25, ha='right', rotation_mode='anchor')
+    fig.subplots_adjust(left=0.085, right=0.965, top=0.9, bottom=0.11, wspace=0.012, hspace=0.1)
+    for r, ds in enumerate(('original', 'scrambled')):
+        pos = axes[r][1].get_position()
+        fig.text(pos.x1 + 0.004, (pos.y0 + pos.y1) / 2, TITLES[ds], rotation=270,
+                 ha='left', va='center', fontsize=8, fontweight='bold')
+    mid = (axes[0][0].get_position().y1 + axes[1][0].get_position().y0) / 2
+    fig.text(0.028, mid, 'Speedup of the densest candidate', rotation=90,
+             ha='left', va='center', fontsize=8)
+    handles = [Patch(facecolor=GOOD, edgecolor='#222222', linewidth=0.5, label='Faster'),
+               Patch(facecolor=BAD, edgecolor='#222222', linewidth=0.5, label='Slower'),
+               Patch(facecolor=NEUTRAL, edgecolor='#222222', linewidth=0.5,
+                     label='Kept original'),
+               Line2D([], [], color='#111111', lw=1.6,
+                      label='Gain among faster (95% CI)')]
+    fig.legend(handles=handles, loc='lower center', bbox_to_anchor=(0.52, 0.935),
+               ncol=4, frameon=False, handlelength=0.9, handleheight=0.9,
+               columnspacing=1.2, handletextpad=0.35)
+    save(fig, 'improvement_strips_nc32')
+    plt.close(fig)
+
+
 def main():
     style()
     rng = np.random.default_rng(0)
-    results, tables = {}, []
+    results, tables, raw = {}, [], {}
     for ds, pt in CELLS:
-        r = summarise(densest_speedups(ds, pt), rng)
+        raw[(ds, pt)] = densest_speedups(ds, pt)
+        r = summarise(raw[(ds, pt)], rng)
         results[(ds, pt)] = r
         tables.append(r.assign(dataset=ds, perm_type=pt))
         print(f'== {ds} / {pt}')
@@ -172,6 +253,7 @@ def main():
     OUT.mkdir(exist_ok=True)
     pd.concat(tables).round(4).to_csv(OUT / 'improvement_bars_nc32.csv', index=False)
     figure(results)
+    strips_figure(raw, results, np.random.default_rng(1))
 
 
 if __name__ == '__main__':

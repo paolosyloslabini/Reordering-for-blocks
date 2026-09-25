@@ -346,3 +346,18 @@ is the scrambled matrix.
   matrices), with smaller gains (1.2–1.5×).
 - **Scrambled matrices** are improved in 62–97% of cases. Gains reach 6.5× (cuSPARSE-BSR, symmetric)
   and 1.6–1.9× for the tensor-core kernels.
+
+### Same data as distributions (`improvement_strips_nc32`)
+
+This is a sina plot of the per-matrix speedups behind the bar figure: one dot per matrix, with each
+strip as wide as the local density of dots. Paper style, N = 32.
+
+- **Dots:** green = faster, red = slower, grey on the 1× line = kept original.
+- **Black tick:** geometric-mean speedup among faster matrices, with its 95% bootstrap interval.
+- **Numbers on top:** share of matrices faster (↑) and slower (↓).
+- **Clipping:** dots beyond the axis range (1/6× to 12× for original, 1/6× to 48× for scrambled) are
+  drawn at the limit.
+
+It carries everything the bars do, plus the spread. For example, the tensor-core kernels on original
+matrices show a roughly symmetric cloud around 1× with a long tail of large wins, while cuSPARSE-BSR is
+mostly green and far above 1×.
