@@ -117,3 +117,41 @@ What it shows:
 
 Compared with figure 3, matrix density separates the kernels less than block density does. What
 matters is the ordering-dependent block density, not overall sparsity.
+
+## Figure 5: local correlation with block density (`correlation_block_density_original`)
+
+This is the correlation counterpart of figure 3, on the same data. At each block density d it gives the
+**within-matrix Pearson r** between log2 GFLOPS and log2 16×16 block density.
+
+- **Weights:** configurations are weighted with a Gaussian on log2 d (bandwidth 0.75, about a quarter
+  of a decade).
+- **Within-matrix:** x and y are demeaned with per-matrix weighted means, so only changes between
+  orderings of the same matrix count.
+- **Correlation:** r = Sxy / √(Sxx·Syy).
+- **Bands:** 95% bootstrap over matrices.
+- **Where curves are drawn:** only where the window's effective sample size is at least 50.
+- **Bandwidth:** the same for every kernel. A narrower window leaves less spread in d and lowers r, so
+  compare kernels with each other, not with the global r values in the paper.
+
+α (figure 3) says **how much** speed changes per 1% of block density at that density. r says
+**how reliably** block density predicts speed there. Values from `figures/correlation_table.csv`:
+
+| kernel | 0.5% | 1% | 2% | 5% | 10% |
+|---|---|---|---|---|---|
+| cuSPARSE-BSR | 0.94 | 0.94 | 0.94 | 0.90 | 0.88 |
+| SMaT (32 cols) | 0.58 | 0.67 | 0.72 | 0.66 | 0.66 |
+| FlashSparse | 0.38 | 0.41 | 0.43 | 0.53 | 0.62 |
+| DTC-SpMM | 0.26 | 0.31 | 0.34 | 0.47 | 0.57 |
+| Acc-SpMM | 0.36 | 0.35 | 0.34 | 0.43 | 0.44 |
+| cuSPARSE-CSR | 0.73 | 0.74 | 0.62 | 0.36 | 0.21 |
+| ASpT (32 cols) | 0.20 | 0.14 | 0.11 | 0.10 | 0.07 |
+
+How to read it:
+- **cuSPARSE-BSR:** block density is a near-perfect predictor everywhere.
+- **Tensor-core kernels:** the correlation rises with density, from about 0.3–0.4 to about 0.45–0.6.
+  Unlike α, r has no trough at 1–2%. In that range, density changes still predict the *direction* of
+  speed changes about as well, but the changes themselves are small.
+- **cuSPARSE-CSR:** block density is a good predictor only while the matrix is scattered (r about 0.73
+  below 1%) and a poor one once it is well blocked (about 0.2 at 10%). This fits block density acting as
+  a locality proxy for CSR.
+- **ASpT:** block density predicts nothing useful at any density.
