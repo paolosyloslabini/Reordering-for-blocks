@@ -40,6 +40,7 @@ def gains():
 def figure(g, xcol, xlabel, name, pct=False):
     """Paper style: one column, symmetric over row, square-patch legend."""
     colors = {v['display']: v['color'] for v in PERMS.values()}
+    colors['DTC-LSH'] = '#707070'    # paper's light grey is unreadable as a thin line
     fig, axes = plt.subplots(2, 1, figsize=(COL_W, 3.0), sharex=True, sharey=True)
     for ax, (pt, title) in zip(axes, PANELS):
         sub = g[g['perm_type'] == pt]
@@ -62,6 +63,7 @@ def figure(g, xcol, xlabel, name, pct=False):
         ax.text(0.985, 0.95, title, transform=ax.transAxes, ha='right', va='top',
                 fontsize=8, fontweight='bold', zorder=6,
                 bbox=dict(boxstyle='square,pad=0.15', fc='white', ec='none', alpha=0.85))
+    axes[0].tick_params(axis='x', which='both', length=0)
     axes[0].yaxis.set_major_locator(mpl.ticker.FixedLocator([0.25, 0.5, 1, 2, 4]))
     axes[0].yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f'{v:g}×'))
     axes[0].yaxis.set_minor_locator(mpl.ticker.NullLocator())
