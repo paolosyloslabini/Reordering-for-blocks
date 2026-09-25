@@ -352,9 +352,10 @@ is the scrambled matrix.
 This is a sina plot of the per-matrix speedups behind the bar figure: one dot per matrix, with each
 strip as wide as the local density of dots. Paper style, N = 32.
 
-- **Dots:** green = faster, red = slower, grey on the 1× line = kept original.
-- **Black tick:** geometric-mean speedup among faster matrices, with its 95% bootstrap interval.
-- **Numbers on top:** share of matrices faster (↑) and slower (↓).
+- **Dots:** green = faster, red = slower, black on the 1× line = kept original.
+- **Crossbar:** the line is the geometric-mean speedup among faster matrices; the box is its 95%
+  bootstrap interval. The shares are the dot counts on each side of 1× (exact values in the bar figure
+  and its CSV).
 - **Clipping:** dots beyond the axis range (1/6× to 12× for original, 1/6× to 48× for scrambled) are
   drawn at the limit.
 

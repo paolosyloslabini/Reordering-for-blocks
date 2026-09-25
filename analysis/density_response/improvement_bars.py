@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.gridspec import GridSpec
-from matplotlib.patches import Patch
+from matplotlib.patches import Patch, Rectangle
 
 from common import KERNEL_NAMES, OUT, PAGE_W, load_pipeline, save, style
 from decision_test import PEAK_TFLOPS
@@ -31,6 +31,7 @@ from decision_test import PEAK_TFLOPS
 N_COLS = 32
 # Paper palette (scripts/paper_figures.py): improved, degraded, neutral.
 GOOD, BAD, NEUTRAL = '#006400', '#8B0000', '#A0A0A0'
+KEPT = '#000000'    # strips figure: kept-original dots sit on 1x and must stay visible
 KERNEL_ORDER = sorted(KERNEL_NAMES.values(), key=str.lower)   # as in the paper figures
 CELLS = [('original', 'SYMMETRIC'), ('original', 'ROW'),
          ('scrambled', 'SYMMETRIC'), ('scrambled', 'ROW')]
@@ -166,8 +167,6 @@ def figure(results):
 def strips_figure(raw, results, rng):
     """Sina plot of per-matrix speedups per kernel, paper style."""
     import matplotlib as mpl
-    import matplotlib.patheffects as pe
-    from matplotlib.lines import Line2D
     from matplotlib.ticker import LogLocator, NullFormatter
     names = KERNEL_ORDER
     by_name = {v: k for k, v in KERNEL_NAMES.items()}
@@ -188,29 +187,25 @@ def strips_figure(raw, results, rng):
                 dens = np.exp(-0.5 * ((grid[:, None] - ls[None, :]) / bw) ** 2).sum(1)
                 width = 0.42 * np.interp(ls, grid, dens) / dens.max()
                 xj = i + rng.uniform(-1, 1, len(s)) * width
-                col = np.where(s > 1, GOOD, np.where(s < 1, BAD, NEUTRAL))
+                col = np.where(s > 1, GOOD, np.where(s < 1, BAD, KEPT))
                 ax.scatter(xj, np.exp(ls), s=1.6, c=col, alpha=0.55, lw=0,
                            rasterized=True, zorder=3)
-                # gain among improved: tick + 95% interval, white halo
+                # gain among improved: crossbar = box over the 95% interval,
+                # thicker line at the geometric mean
                 g, glo, ghi = res.loc[name, ['gain_improved', 'gain_lo', 'gain_hi']]
-                halo = [pe.Stroke(linewidth=3.2, foreground='white'), pe.Normal()]
-                ax.plot([i - 0.26, i + 0.26], [g, g], color='#111111', lw=1.6,
-                        zorder=5, path_effects=halo, solid_capstyle='butt')
-                ax.plot([i, i], [glo, ghi], color='#111111', lw=0.9, zorder=5,
-                        path_effects=halo)
-                up, down = res.loc[name, 'improved'], res.loc[name, 'slower']
-                ax.text(i, 0.985, f'{up:.0%}↑\n{down:.0%}↓',
-                        transform=ax.get_xaxis_transform(), ha='center', va='top',
-                        fontsize=6, color='#222222', zorder=6, linespacing=1.0)
-            # dots are clipped at `hi`; the band above it holds the share labels
+                half = 0.24
+                ax.add_patch(Rectangle((i - half, glo), 2 * half, ghi - glo,
+                                       facecolor='white', alpha=0.75, edgecolor='#111111',
+                                       linewidth=0.6, zorder=5))
+                ax.plot([i - half, i + half], [g, g], color='#111111', lw=1.4, zorder=6,
+                        solid_capstyle='butt')
             ax.set_yscale('log')
-            ax.set_ylim(lo, hi * 3.2)
+            ax.set_ylim(lo, hi)
             majors = [m for m in (0.2, 0.5, 1, 2, 5, 10, 20) if lo <= m <= hi]
             ax.yaxis.set_major_locator(mpl.ticker.FixedLocator(majors))
             ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f'{v:g}×'))
             ax.yaxis.set_minor_locator(LogLocator(base=10, subs=np.arange(1, 10), numticks=100))
             ax.yaxis.set_minor_formatter(NullFormatter())
-            ax.axhline(1, color='#CC0000', linestyle='--', linewidth=0.8, alpha=0.8, zorder=2)
             ax.grid(True, axis='y', which='major', color='#b0b0b0', linewidth=0.6)
             ax.grid(True, axis='y', which='minor', color='#e4e4e4', linewidth=0.4)
             kernel_separators(ax, len(names))
@@ -228,10 +223,10 @@ def strips_figure(raw, results, rng):
              ha='left', va='center', fontsize=8)
     handles = [Patch(facecolor=GOOD, edgecolor='#222222', linewidth=0.5, label='Faster'),
                Patch(facecolor=BAD, edgecolor='#222222', linewidth=0.5, label='Slower'),
-               Patch(facecolor=NEUTRAL, edgecolor='#222222', linewidth=0.5,
+               Patch(facecolor=KEPT, edgecolor='#222222', linewidth=0.5,
                      label='Kept original'),
-               Line2D([], [], color='#111111', lw=1.6,
-                      label='Gain among faster (95% CI)')]
+               Patch(facecolor='white', edgecolor='#111111', linewidth=0.6,
+                     label='Gain among faster (line) and 95% CI (box)')]
     fig.legend(handles=handles, loc='lower center', bbox_to_anchor=(0.52, 0.935),
                ncol=4, frameon=False, handlelength=0.9, handleheight=0.9,
                columnspacing=1.2, handletextpad=0.35)
