@@ -354,8 +354,9 @@ strip as wide as the local density of dots. Paper style, N = 32.
 
 - **Dots:** green = faster, red = slower, black on the 1× line = kept original.
 - **Crossbar:** the line is the geometric-mean speedup among faster matrices; the box is its 95%
-  bootstrap interval. The shares are the dot counts on each side of 1× (exact values in the bar figure
-  and its CSV).
+  bootstrap interval.
+- **Green ↑ and red ↓ numbers:** share of matrices faster (placed above the highest dot) and slower
+  (below the lowest dot). Where dots are clipped at an axis limit, the label sits at that edge.
 - **Clipping:** dots beyond the axis range (1/6× to 12× for original, 1/6× to 48× for scrambled) are
   drawn at the limit.
 

@@ -167,6 +167,7 @@ def figure(results):
 def strips_figure(raw, results, rng):
     """Sina plot of per-matrix speedups per kernel, paper style."""
     import matplotlib as mpl
+    import matplotlib.patheffects as pe
     from matplotlib.ticker import LogLocator, NullFormatter
     names = KERNEL_ORDER
     by_name = {v: k for k, v in KERNEL_NAMES.items()}
@@ -199,12 +200,26 @@ def strips_figure(raw, results, rng):
                                        linewidth=0.6, zorder=5))
                 ax.plot([i - half, i + half], [g, g], color='#111111', lw=1.4, zorder=6,
                         solid_capstyle='butt')
+                # shares: green above the highest dot, red below the lowest
+                up, down = res.loc[name, 'improved'], res.loc[name, 'slower']
+                halo = [pe.withStroke(linewidth=1.8, foreground='white')]
+                # label just past the extreme dot; if that falls outside the axes
+                # (dots clipped at the limit), put it inside, at the edge
+                room = 1.9    # ~ label height on these log axes
+                top, bot = np.exp(ls.max()) * 1.12, np.exp(ls.min()) / 1.12
+                ty, tva = (top, 'bottom') if top * room < hi else (hi / 1.04, 'top')
+                by, bva = (bot, 'top') if bot / room > lo else (lo * 1.04, 'bottom')
+                ax.text(i, ty, f'{up:.0%}↑', color=GOOD, ha='center', va=tva,
+                        fontsize=6.3, fontweight='bold', zorder=7, path_effects=halo)
+                ax.text(i, by, f'{down:.0%}↓', color=BAD, ha='center', va=bva,
+                        fontsize=6.3, fontweight='bold', zorder=7, path_effects=halo)
             ax.set_yscale('log')
             ax.set_ylim(lo, hi)
             majors = [m for m in (0.2, 0.5, 1, 2, 5, 10, 20) if lo <= m <= hi]
             ax.yaxis.set_major_locator(mpl.ticker.FixedLocator(majors))
             ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f'{v:g}×'))
-            ax.yaxis.set_minor_locator(LogLocator(base=10, subs=np.arange(1, 10), numticks=100))
+            ax.yaxis.set_minor_locator(mpl.ticker.FixedLocator(
+                [m * k for m in (0.1, 1, 10) for k in range(2, 10) if lo <= m * k <= hi]))
             ax.yaxis.set_minor_formatter(NullFormatter())
             ax.grid(True, axis='y', which='major', color='#b0b0b0', linewidth=0.6)
             ax.grid(True, axis='y', which='minor', color='#e4e4e4', linewidth=0.4)
