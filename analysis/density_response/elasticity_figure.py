@@ -1,0 +1,146 @@
+"""Within-matrix response of SpMM speed to 16x16 block density (original
+SuiteSparse matrices, symmetric and row reorderings pooled).
+
+Model, per kernel:  log2 GFLOPS_ij = mu_i + f(log2 d_ij) + e_ij
+  i = matrix (fixed effect), j = ordering (incl. the original one),
+  f = natural cubic spline (knots at the 5/27.5/50/72.5/95% quantiles of log2 d).
+Left panel: speed relative to the median-density ordering, 2^(f(d) - f(d_med)).
+Right panel: local elasticity alpha(d) = df/dlog2 d.
+Bands: 95% bootstrap over matrices. Curves span the 2nd-98th percentile of d.
+
+Dense operand: 256 columns, except SMaT and ASpT, which always ran with 32.
+Runs whose padded 32x32 work would exceed the hardware peak (silent skips)
+are dropped for cuSPARSE-BSR and SMaT.
+"""
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+
+from common import (FIXED_32_COLS, INK, INK2, KERNEL_NAMES, PAGE_W, PALETTE,
+                    clean_axes, load_pipeline, save, style)
+
+N_COLS = 256
+PEAK_TFLOPS = {'CUSPARSE_SPMM_BSR_bs32': 19.5, 'SMAT_SPMM_bs32': 312.0}
+N_BOOT = 200
+
+
+def data():
+    parts = [load_pipeline('original', pt) for pt in ('SYMMETRIC', 'ROW')]
+    df = pd.concat(parts, ignore_index=True)
+    df.loc[df['strategy'] == 'Original', 'perm_type'] = '-'   # shared baseline
+    df = df.drop_duplicates(['kernel_id', 'matrix', 'perm_type', 'strategy', 'n_cols'])
+    width = np.where(df['kernel_id'].isin(FIXED_32_COLS), 32, N_COLS)
+    df = df[(df['n_cols'] == width) & (df['gflops'] > 0) & np.isfinite(df['gflops'])
+            & (df['block_density_16'] > 0)]
+    for k, peak in PEAK_TFLOPS.items():
+        m = df['kernel_id'] == k
+        executed = (2 * df['nonzero_blocks_32'] * 1024 * df['n_cols']
+                    / (df['time_operation_ms'] / 1e3) / 1e12)
+        bad = m & (executed > peak)
+        print(f'{KERNEL_NAMES[k]}: dropped {bad.sum()} impossible runs')
+        df = df[~bad]
+    return df
+
+
+def ns_basis(x, knots):
+    """Natural cubic spline basis (ESL 5.2.1): linear term + K-2 cubic terms."""
+    k_last = knots[-1]
+
+    def d(k):
+        return ((np.clip(x - knots[k], 0, None) ** 3
+                 - np.clip(x - k_last, 0, None) ** 3) / (k_last - knots[k]))
+    return np.column_stack([x] + [d(k) - d(len(knots) - 2)
+                                  for k in range(len(knots) - 2)])
+
+
+def fit(x, y, groups, knots):
+    B = ns_basis(x, knots)
+    Bw = B - pd.DataFrame(B).groupby(groups).transform('mean').values
+    yw = y - pd.Series(y).groupby(groups).transform('mean').values
+    return np.linalg.lstsq(Bw, yw, rcond=None)[0]
+
+
+def curves(df, rng):
+    res = {}
+    for k, name in KERNEL_NAMES.items():
+        t = df[df['kernel_id'] == k]
+        x = np.log2(t['block_density_16'].values)
+        y = np.log2(t['gflops'].values)
+        g = t['matrix'].values
+        knots = np.quantile(x, [.05, .275, .5, .725, .95])
+        grid = np.linspace(*np.quantile(x, [.02, .98]), 150)
+        ref = np.median(x)
+        Bg, Br = ns_basis(grid, knots), ns_basis(np.array([ref]), knots)
+
+        def shape(beta):
+            f = Bg @ beta - (Br @ beta)[0]
+            return f, np.gradient(f, grid)
+
+        f, e = shape(fit(x, y, g, knots))
+        mats = np.unique(g)
+        idx = {m: np.where(g == m)[0] for m in mats}
+        F, E = [], []
+        for _ in range(N_BOOT):
+            draw = rng.choice(mats, len(mats))
+            sel = np.concatenate([idx[m] for m in draw])
+            lab = np.concatenate([[i] * len(idx[m]) for i, m in enumerate(draw)])
+            fb, eb = shape(fit(x[sel], y[sel], lab, knots))
+            F.append(fb)
+            E.append(eb)
+        res[k] = dict(grid=grid, f=f, e=e,
+                      f_lo=np.percentile(F, 2.5, 0), f_hi=np.percentile(F, 97.5, 0),
+                      e_lo=np.percentile(E, 2.5, 0), e_hi=np.percentile(E, 97.5, 0),
+                      n=len(t), mats=len(mats))
+        print(f'{name:13s} configs={len(t):6d} matrices={len(mats)}')
+    return res
+
+
+def figure(res):
+    fig, (a, b) = plt.subplots(1, 2, figsize=(PAGE_W, 2.7))
+    for (k, name), col in zip(KERNEL_NAMES.items(), PALETTE):
+        c = res[k]
+        X = 2 ** c['grid']
+        label = name + (' (32 cols)' if k in FIXED_32_COLS else '')
+        a.fill_between(X, 2 ** c['f_lo'], 2 ** c['f_hi'], color=col, alpha=0.13, lw=0)
+        a.plot(X, 2 ** c['f'], color=col, lw=1.6, label=label)
+        b.fill_between(X, c['e_lo'], c['e_hi'], color=col, alpha=0.13, lw=0)
+        b.plot(X, c['e'], color=col, lw=1.6, label=label)
+    a.axhline(1, color=INK2, lw=0.7, ls=':')
+    a.set_yscale('log', base=2)
+    a.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f'{v:g}×'))
+    a.set_ylabel('Speed relative to the\nmedian-density ordering')
+    a.set_title('Response', color=INK)
+    b.axhline(0, color=INK2, lw=0.7)
+    b.axhline(1, color=INK2, lw=0.7, ls=':')
+    b.set_ylabel(r'Elasticity $\alpha(d)$')
+    b.set_title('Local elasticity', color=INK)
+    for ax in (a, b):
+        ax.set_xscale('log')
+        ax.set_xlabel(r'Block density $d$ ($16{\times}16$)')
+        clean_axes(ax)
+    h, l = a.get_legend_handles_labels()
+    fig.legend(h, l, loc='upper center', ncol=4, frameon=False,
+               bbox_to_anchor=(0.5, 1.13), handlelength=1.6, columnspacing=1.2)
+    fig.tight_layout()
+    save(fig, 'elasticity_block_density_original')
+    plt.close(fig)
+
+
+def main():
+    style()
+    res = curves(data(), np.random.default_rng(7))
+    rows = []
+    for k, c in res.items():
+        for d in (0.005, 0.01, 0.02, 0.05, 0.1):
+            if np.log2(d) < c['grid'][0] or np.log2(d) > c['grid'][-1]:
+                continue
+            rows.append(dict(kernel=KERNEL_NAMES[k], density=d,
+                             elasticity=np.interp(np.log2(d), c['grid'], c['e'])))
+    table = pd.DataFrame(rows).pivot(index='kernel', columns='density', values='elasticity')
+    print(table.round(2).to_string())
+    table.round(3).to_csv('analysis/density_response/figures/elasticity_table.csv')
+    figure(res)
+
+
+if __name__ == '__main__':
+    main()
