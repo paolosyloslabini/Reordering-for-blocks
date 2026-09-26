@@ -109,19 +109,6 @@ def style_ops_axis(ax, lo=1, hi=1e7):
     ax.set_axisbelow(True)
 
 
-def repel(ys, gap, lo=0.0, hi=1.0):
-    """Spread label positions at least `gap` apart, kept inside [lo, hi]."""
-    order = np.argsort(ys)[::-1]            # top to bottom
-    out = np.array(ys, float)
-    prev = hi + gap
-    for i in order:
-        out[i] = min(out[i], prev - gap)
-        prev = out[i]
-    if out.min() < lo:                      # pushed off the bottom: shift up
-        out += lo - out.min()
-    return out
-
-
 # ---------------------------------------------------------------------------
 # A: RCM, one curve per kernel, 2x2 pipelines (both effects in one line)
 # ---------------------------------------------------------------------------
