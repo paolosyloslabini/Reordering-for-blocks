@@ -29,6 +29,9 @@ Figures (original matrices, symmetric reordering, n_cols = 256 unless noted):
   sym_all_metrics.pdf       improvement of every structural metric (symmetric)
   speedup_grid_nc256.pdf    per-kernel speedup, original/scrambled x symmetric/row
   speedup_column_nc256.pdf  the same, four panels stacked in one column
+  pick_by_block_density.pdf speedup of picking, within a matrix, the ordering
+                            block density prefers over the one another metric
+                            prefers (symmetric / row, original matrices)
 
 Run from the repo root:
     .venv/Scripts/python.exe scripts/paper_figures.py [--out plots/paper] [--only NAME ...]
@@ -956,6 +959,123 @@ def fig_speedup_column(out, n_cols=256):
     plt.close(fig)
 
 
+# ---------------------------------------------------------------------------
+# Picking an ordering by block density vs. by another metric
+# ---------------------------------------------------------------------------
+
+PICK_T = 1.1           # a metric prefers an ordering if it is >= 10 % better
+PICK_MIN_MATRICES = 10  # leave a bar out if fewer matrices have a conflict
+PICK_PANELS = [('SYMMETRIC', 'original'), ('ROW', 'original')]
+PICK_BD = 'density_improvement_16'
+
+
+def _pick_candidates(dataset, perm_type, n_cols=256):
+    """All candidate orderings per matrix, 'Original' (no reordering) included
+    with every ratio 1. Ratios are relative to the unreordered matrix."""
+    df, _ = load_pipeline(dataset, perm_type)
+    d = df[df['n_cols'] == n_cols].copy()
+    orig = d['strategy'] == 'Original'
+    for m, *_ in METRICS:
+        d.loc[orig, m] = 1.0
+    d.loc[orig, 'speedup'] = 1.0
+    d = d.dropna(subset=['speedup', PICK_BD])
+    return d[d['speedup'] > 0]
+
+
+def pick_by_block_density(d, kernels):
+    """Within each matrix, every pair of orderings (R1, R2) where block density
+    prefers R1 and metric X prefers R2, each by at least PICK_T. Value: speedup
+    of R1 over R2, the gain of picking by block density instead of by X;
+    geomean per matrix, then over matrices. Also returns the share of ordering
+    pairs on which block density and at least one other metric conflict."""
+    cols = ['matrix', 'strategy', 'speedup'] + [m for m, *_ in METRICS]
+    rows, share = [], None
+    for k in kernels:
+        s = d.loc[d['kernel_id'] == k, cols]
+        p = s.merge(s, on='matrix', suffixes=('_1', '_2'))
+        p = p[p['strategy_1'] != p['strategy_2']]
+        bd_pref = p[PICK_BD + '_1'] / p[PICK_BD + '_2'] >= PICK_T
+        conflict = np.zeros(len(p), bool)
+        for m, label, *_ in METRICS[:-1]:
+            sel = bd_pref & (p[m + '_2'] / p[m + '_1'] >= PICK_T)
+            conflict |= sel.values
+            g = p[sel]
+            gain = np.log(g['speedup_1'] / g['speedup_2']).groupby(g['matrix']).mean()
+            adv = (np.exp(gain.mean()) if len(gain) >= PICK_MIN_MATRICES
+                   else np.nan)
+            rows.append((m, label, PAPER_KERNEL_NAMES.get(k, k),
+                         int(sel.sum()), len(gain), adv))
+        if share is None:   # ordered pairs: each conflict is counted once
+            share = 2 * conflict.sum() / len(p)
+    t = pd.DataFrame(rows, columns=['metric_id', 'vs_metric', 'kernel',
+                                    'n_pairs', 'n_matrices', 'advantage'])
+    return t, share
+
+
+def fig_pick_by_block_density(out, panels=PICK_PANELS,
+                              fname='pick_by_block_density.pdf', csv=None,
+                              n_cols=256):
+    """Bars start at 1x: up = picking the ordering block density prefers beat
+    picking the one the other metric prefers. Same fills as corr_by_metric."""
+    df, _ = load_pipeline('original', 'SYMMETRIC')
+    kernels = _ordered_kernels(df, KERNEL_NAMES)
+    fig, axes = plt.subplots(len(panels), 1,
+                             figsize=(COL_W, 0.3 + 1.5 * len(panels)),
+                             sharex=True)
+    others = METRICS[:-1]
+    n, width = len(others), 0.84 / len(others)
+    x = np.arange(len(kernels))
+    tabs = []
+    for ax, (perm_type, dataset) in zip(axes, panels):
+        t, share = pick_by_block_density(
+            _pick_candidates(dataset, perm_type, n_cols), kernels)
+        tabs.append(t.assign(reordering=perm_type.lower(), matrices=dataset,
+                             conflict_share=round(share, 4)))
+        for i, (m, label, color, hatch) in enumerate(others):
+            v = t[t['metric_id'] == m].set_index('kernel').loc[
+                [PAPER_KERNEL_NAMES.get(k, k) for k in kernels], 'advantage'].values
+            ax.bar(x + (i - (n - 1) / 2) * width, v - 1, width, bottom=1,
+                   label=label, color=color, hatch=hatch,
+                   edgecolor='#222222', linewidth=0.5, zorder=3)
+        ax.set_yscale('log')
+        ax.set_ylim(0.65, 2.3)
+        format_ratio_axis(ax.yaxis, (0.75, 1, 1.5, 2))
+        ax.axhline(1, color='#222222', lw=0.6, zorder=4)
+        ax.grid(True, axis='y', which='major', color='#b0b0b0', linewidth=0.6)
+        ax.grid(False, axis='x', which='both')
+        ax.tick_params(axis='x', which='both', length=0)
+        ax.set_axisbelow(True)
+        ax.set_xlim(-0.5, len(kernels) - 0.5)
+        pct = f'{100 * share:.0f}%' if share >= 0.01 else '<1%'
+        ax.set_title(f'{REORDER_TITLE[perm_type]}, {dataset} matrices '
+                     f'(conflicting verdicts: {pct})', fontsize=7.5, pad=2)
+    axes[-1].set_xticks(x)
+    labels = axes[-1].set_xticklabels(
+        [two_line(PAPER_KERNEL_NAMES.get(k, k)) for k in kernels],
+        linespacing=0.9, fontsize=7)
+    from matplotlib.transforms import ScaledTranslation
+    for lab, k in zip(labels, kernels):
+        dx = {'cuSPARSE-BSR': -1.5, 'cuSPARSE-CSR': 1.5}.get(
+            PAPER_KERNEL_NAMES.get(k, k), 0)
+        if dx:
+            lab.set_transform(lab.get_transform() + ScaledTranslation(
+                dx / 72, 0, fig.dpi_scale_trans))
+    shared_ylabel(fig, axes, 'Speedup by picking\naccording to block density',
+                  x=0.0)
+    h = fig.get_figheight()
+    handles, lbls = axes[0].get_legend_handles_labels()
+    fig.legend(handles, lbls, title='Block density vs.', loc='upper center',
+               bbox_to_anchor=(0.58, 1.0), ncol=3, frameon=False,
+               handlelength=1.1, handleheight=0.9, columnspacing=0.8,
+               handletextpad=0.3, labelspacing=0.25, borderaxespad=0.0)
+    fig.subplots_adjust(left=0.17, right=0.995, top=1 - 0.66 / h,
+                        bottom=0.33 / h, hspace=0.3)
+    fig.savefig(out / fname)
+    plt.close(fig)
+    if csv is not None:
+        pd.concat(tabs).drop(columns='metric_id').round(3).to_csv(csv, index=False)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     ap.add_argument('--out', default='plots/paper')
@@ -994,6 +1114,7 @@ def main():
         'sym_all_metrics': lambda: fig_all_metrics(out),
         'speedup_grid_nc256': lambda: fig_speedup_grid(out),
         'speedup_column_nc256': lambda: fig_speedup_column(out),
+        'pick_by_block_density': lambda: fig_pick_by_block_density(out),
     }
     for name in args.only or figures:
         figures[name]()
