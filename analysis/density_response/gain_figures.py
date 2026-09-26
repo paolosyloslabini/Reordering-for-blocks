@@ -73,7 +73,7 @@ def figure(g, xcol, xlabel, name, pct=False):
         axes[0].xaxis.set_major_locator(mpl.ticker.FixedLocator([0.01, 0.1]))
         axes[0].xaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f'{v * 100:g}%'))
         axes[0].xaxis.set_minor_formatter(mpl.ticker.NullFormatter())
-    fig.subplots_adjust(left=0.135, right=0.99, top=0.785, bottom=0.2, wspace=0.05)
+    fig.subplots_adjust(left=0.135, right=0.99, top=0.8, bottom=0.17, wspace=0.05)
     fig.text((axes[0].get_position().x0 + axes[1].get_position().x1) / 2, 0.005,
              xlabel, ha='center', va='bottom', fontsize=9)
     mid = (axes[0].get_position().y1 + axes[0].get_position().y0) / 2
@@ -81,10 +81,10 @@ def figure(g, xcol, xlabel, name, pct=False):
              ha='left', va='center', fontsize=9)
     handles = [Patch(facecolor=colors[s], edgecolor='#222222', linewidth=0.5, label=s)
                for s in TOP]
-    fig.legend(handles=handles, loc='lower center', bbox_to_anchor=(0.56, 0.9),
+    fig.legend(handles=handles, loc='lower center', bbox_to_anchor=(0.56, 0.845),
                ncol=4, frameon=False, handlelength=0.9, handleheight=0.9,
                columnspacing=0.9, handletextpad=0.35)
-    save(fig, name)
+    save(fig, name, tight=True)
     plt.close(fig)
 
 

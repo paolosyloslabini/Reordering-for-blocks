@@ -145,6 +145,9 @@ def fig_a(d, out, strategy='RCM', n_max=1e4):
         ticks[-1].set_ha('right')
         for lab in ticks:
             lab.set_fontsize(7)
+    for lab in axes[0][0].get_yticklabels():   # 0% would touch the 100% below
+        if lab.get_text() == '0%':
+            lab.set_visible(False)
     fig.subplots_adjust(left=0.13, right=0.95, top=0.78, bottom=0.12,
                         wspace=0.05, hspace=0.06)
     pf.shared_ylabel(fig, axes[:, 0], f'Matrices where {strategy} paid off')

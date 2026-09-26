@@ -95,10 +95,13 @@ def load_pipeline(dataset, perm_type):
     return df
 
 
-def save(fig, name):
+def save(fig, name, tight=False):
+    """tight: crop the page to the drawn content (no blank band above a
+    legend), as the paper places the PDF at its natural size."""
     OUT.mkdir(exist_ok=True)
+    kw = dict(bbox_inches='tight', pad_inches=0.01) if tight else {}
     for ext in ('pdf', 'png'):
-        fig.savefig(OUT / f'{name}.{ext}', dpi=300)
+        fig.savefig(OUT / f'{name}.{ext}', dpi=300, **kw)
     print('saved', OUT / name)
 
 

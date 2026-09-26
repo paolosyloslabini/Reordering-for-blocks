@@ -817,8 +817,8 @@ def fig_density_boxes_2x2(out, fname='density_boxes_2x2.pdf'):
                         wspace=0.04, hspace=0.06)
     shared_ylabel(fig, axes[:, 0], r'Block density improvement ($16{\times}16$)')
     _grid_titles(fig, axes)
-    square_legend(fig, labels, colors, y=0.875, ncol=6, x=0.53)
-    fig.savefig(out / fname)
+    square_legend(fig, labels, colors, y=0.855, ncol=6, x=0.53)
+    fig.savefig(out / fname, bbox_inches='tight', pad_inches=0.01)
     plt.close(fig)
 
 
@@ -875,8 +875,8 @@ def fig_profiles_2x2(out, fname='density_profiles_2x2.pdf'):
              'Block density threshold (relative to best)', ha='center', va='bottom',
              fontsize=9)
     _grid_titles(fig, axes)
-    square_legend(fig, labels, colors, y=0.875, ncol=6, x=0.53, alpha=1.0)
-    fig.savefig(out / fname)
+    square_legend(fig, labels, colors, y=0.855, ncol=6, x=0.53, alpha=1.0)
+    fig.savefig(out / fname, bbox_inches='tight', pad_inches=0.01)
     plt.close(fig)
 
 
@@ -971,6 +971,7 @@ PICK_T = 1.1           # a metric prefers an ordering if it is >= 10 % better
 PICK_MIN_MATRICES = 10  # leave a bar out if fewer matrices have a conflict
 PICK_PANELS = [('SYMMETRIC', 'original'), ('ROW', 'original')]
 PICK_BD = 'density_improvement_16'
+PICK_YLIM = (0.87, 1.78)
 PICK_WORSE_EDGE = '#d62020'  # outline of a bar below 1x: block density's pick was slower
 
 
@@ -1006,22 +1007,26 @@ def pick_by_block_density(d, kernels):
             conflict |= sel.values
             g = p[sel]
             gain = np.log(g['speedup_1'] / g['speedup_2']).groupby(g['matrix']).mean()
-            adv = (np.exp(gain.mean()) if len(gain) >= PICK_MIN_MATRICES
-                   else np.nan)
+            adv_all = np.exp(gain.mean()) if len(gain) else np.nan
+            adv = adv_all if len(gain) >= PICK_MIN_MATRICES else np.nan
             rows.append((m, label, PAPER_KERNEL_NAMES.get(k, k),
-                         int(sel.sum()), len(gain), adv))
+                         int(sel.sum()), len(gain), adv, adv_all))
         if share is None:   # ordered pairs: each conflict is counted once
             share = 2 * conflict.sum() / len(p)
     t = pd.DataFrame(rows, columns=['metric_id', 'vs_metric', 'kernel',
-                                    'n_pairs', 'n_matrices', 'advantage'])
+                                    'n_pairs', 'n_matrices', 'advantage',
+                                    'advantage_all'])
     return t, share
 
 
 def fig_pick_by_block_density(out, panels=PICK_PANELS,
                               fname='pick_by_block_density.pdf', csv=None,
                               n_cols=256):
-    """Bars start at 1x: up = picking the ordering block density prefers beat
-    picking the one the other metric prefers. Same fills as corr_by_metric."""
+    """Bars rise from the bottom of the axis (so values near 1x stay visible);
+    above the red dashed 1x line = picking the ordering block density prefers
+    beat picking the one the other metric prefers. Red outline: below 1x.
+    Dashed outline, faded fill: fewer than PICK_MIN_MATRICES matrices.
+    Same fills as corr_by_metric."""
     df, _ = load_pipeline('original', 'SYMMETRIC')
     kernels = _ordered_kernels(df, KERNEL_NAMES)
     fig, axes = plt.subplots(len(panels), 1,
@@ -1037,19 +1042,30 @@ def fig_pick_by_block_density(out, panels=PICK_PANELS,
         tabs.append(t.assign(reordering=perm_type.lower(), matrices=dataset,
                              conflict_share=round(share, 4)))
         for i, (m, label, color, hatch) in enumerate(others):
-            v = t[t['metric_id'] == m].set_index('kernel').loc[
-                [PAPER_KERNEL_NAMES.get(k, k) for k in kernels], 'advantage'].values
+            tm = t[t['metric_id'] == m].set_index('kernel').loc[
+                [PAPER_KERNEL_NAMES.get(k, k) for k in kernels]]
+            v = tm['advantage_all'].values
+            few = tm['advantage'].isna().values
+            # no conflicting pair at all: empty dashed placeholder up to 1x
+            v = np.where(np.isnan(v), 1.0, v)
+            empty = np.isnan(tm['advantage_all'].values)
             # bars below 1x (block density picked the slower ordering): red
             # outline, fill kept so the metric stays readable
             worse = v < 1
-            ax.bar(x + (i - (n - 1) / 2) * width, v - 1, width, bottom=1,
-                   label=label, color=color, hatch=hatch,
-                   edgecolor=np.where(worse, PICK_WORSE_EDGE, '#222222'),
-                   linewidth=np.where(worse, 1.1, 0.5), zorder=3)
+            edge = np.where(worse, PICK_WORSE_EDGE, '#222222')
+            lw = np.where(worse, 1.1, 0.5)
+            xs = x + (i - (n - 1) / 2) * width
+            for sel, ls, alpha in ((~few, '-', 1.0), (few, (0, (2, 1.2)), 0.35)):
+                fill = np.array([mpl.colors.to_rgba(color, 0 if e else alpha)
+                                 for e in empty[sel]]).reshape(-1, 4)
+                ax.bar(xs[sel], v[sel] - PICK_YLIM[0], width, bottom=PICK_YLIM[0],
+                       color=fill, hatch=hatch,
+                       edgecolor=edge[sel], linewidth=np.maximum(lw[sel], 0.7 * (ls != '-')),
+                       linestyle=ls, zorder=3)
         ax.set_yscale('log')
-        ax.set_ylim(0.87, 1.78)
+        ax.set_ylim(*PICK_YLIM)
         format_ratio_axis(ax.yaxis, (0.9, 1, 1.25, 1.5))
-        ax.axhline(1, color='#222222', lw=0.9, zorder=4)
+        ax.axhline(1, color='#CC0000', linestyle='--', lw=0.8, zorder=4)
         ax.grid(True, axis='y', which='major', color='#a0a0a0', linewidth=0.8)
         ax.grid(False, axis='x', which='both')
         ax.tick_params(axis='x', which='both', length=0)
@@ -1080,6 +1096,9 @@ def fig_pick_by_block_density(out, panels=PICK_PANELS,
                for _, label, color, hatch in others]
     handles.append(Patch(facecolor='white', edgecolor=PICK_WORSE_EDGE,
                          linewidth=1.1, label='Slower pick'))
+    handles.append(Patch(facecolor='white', edgecolor='#222222', linewidth=0.7,
+                         linestyle=(0, (2, 1.2)),
+                         label=f'< {PICK_MIN_MATRICES} matrices'))
     fig.legend(handles=handles, title='Block density vs.', loc='upper center',
                bbox_to_anchor=(0.58, 1.0), ncol=4, frameon=False,
                handlelength=1.1, handleheight=0.9, columnspacing=0.8,
