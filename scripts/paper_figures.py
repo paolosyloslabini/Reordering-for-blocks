@@ -114,14 +114,18 @@ NCOLS_HATCHES = ['', '//////', '']
 # Structural metrics (Fig. corr_by_metric). Neutral greys + hatches, so they
 # cannot be mistaken for the reordering palette; block density keeps the
 # purple of the block-size panel.
+# Structural metrics in the bar figures, in three families of two shades
+# (light, mid): envelope (blue), column locality (teal), access distance
+# (amber). Block density is the only dark, saturated bar. No hatches. Every
+# pair is >= 7 OKLab dE x100 under simulated protan/deutan/tritan vision.
 METRICS = [
-    ('bandwidth_improvement', 'Bandwidth', '#f7f7f7', ''),
-    ('col_spread_improvement', 'Column spread', '#dedede', '//////'),
-    ('vertical_adjacency_improvement', r'VAR', '#c4c4c4', ''),
-    ('profile_improvement', 'Profile', '#a8a8a8', 'xxxx'),
-    ('reuse_distance_improvement', 'Reuse distance', '#8c8c8c', ''),
-    ('index_distance_improvement', 'Index distance', '#6e6e6e', '\\\\\\\\\\\\'),
-    ('density_improvement_16', r'Block density', BS_COLORS[2], ''),
+    ('bandwidth_improvement', 'Bandwidth', '#9dc0e8', ''),
+    ('profile_improvement', 'Profile', '#3570b8', ''),
+    ('col_spread_improvement', 'Column spread', '#b5e3d3', ''),
+    ('vertical_adjacency_improvement', r'VAR', '#2a9d86', ''),
+    ('reuse_distance_improvement', 'Reuse distance', '#fbe3a3', ''),
+    ('index_distance_improvement', 'Index distance', '#e8a33a', ''),
+    ('density_improvement_16', r'Block density', '#6a2c91', ''),
 ]
 
 
@@ -967,7 +971,7 @@ PICK_T = 1.1           # a metric prefers an ordering if it is >= 10 % better
 PICK_MIN_MATRICES = 10  # leave a bar out if fewer matrices have a conflict
 PICK_PANELS = [('SYMMETRIC', 'original'), ('ROW', 'original')]
 PICK_BD = 'density_improvement_16'
-PICK_WORSE_COLOR = '#e06666'  # bar below 1x: block density's pick was slower
+PICK_WORSE_EDGE = '#d62020'  # outline of a bar below 1x: block density's pick was slower
 
 
 def _pick_candidates(dataset, perm_type, n_cols=256):
@@ -1035,11 +1039,13 @@ def fig_pick_by_block_density(out, panels=PICK_PANELS,
         for i, (m, label, color, hatch) in enumerate(others):
             v = t[t['metric_id'] == m].set_index('kernel').loc[
                 [PAPER_KERNEL_NAMES.get(k, k) for k in kernels], 'advantage'].values
-            # bars below 1x (block density picked the slower ordering) in red
-            fill = np.where(v < 1, PICK_WORSE_COLOR, color)
+            # bars below 1x (block density picked the slower ordering): red
+            # outline, fill kept so the metric stays readable
+            worse = v < 1
             ax.bar(x + (i - (n - 1) / 2) * width, v - 1, width, bottom=1,
-                   label=label, color=fill, hatch=hatch,
-                   edgecolor='#222222', linewidth=0.5, zorder=3)
+                   label=label, color=color, hatch=hatch,
+                   edgecolor=np.where(worse, PICK_WORSE_EDGE, '#222222'),
+                   linewidth=np.where(worse, 1.1, 0.5), zorder=3)
         ax.set_yscale('log')
         ax.set_ylim(0.87, 1.78)
         format_ratio_axis(ax.yaxis, (0.9, 1, 1.25, 1.5))
@@ -1072,8 +1078,10 @@ def fig_pick_by_block_density(out, panels=PICK_PANELS,
     handles = [Patch(facecolor=color, hatch=hatch, edgecolor='#222222',
                      linewidth=0.5, label=label)
                for _, label, color, hatch in others]
+    handles.append(Patch(facecolor='white', edgecolor=PICK_WORSE_EDGE,
+                         linewidth=1.1, label='Slower pick'))
     fig.legend(handles=handles, title='Block density vs.', loc='upper center',
-               bbox_to_anchor=(0.58, 1.0), ncol=3, frameon=False,
+               bbox_to_anchor=(0.58, 1.0), ncol=4, frameon=False,
                handlelength=1.1, handleheight=0.9, columnspacing=0.8,
                handletextpad=0.3, labelspacing=0.25, borderaxespad=0.0)
     fig.subplots_adjust(left=0.135, right=0.995, top=1 - 0.5 / h,
