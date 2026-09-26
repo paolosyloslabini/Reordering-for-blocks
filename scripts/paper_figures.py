@@ -69,6 +69,7 @@ PAPER_RC = {
     'legend.fontsize': 8,
     'legend.title_fontsize': 8.5,
     'axes.linewidth': 0.6,
+    'grid.alpha': 1.0,       # plot_utils' 0.3 made grids nearly invisible
     'axes.edgecolor': '#333333',
     'xtick.major.width': 0.6,
     'ytick.major.width': 0.6,
@@ -258,7 +259,7 @@ def _bars(ax, series, kernels):
     ax.yaxis.set_major_locator(MultipleLocator(0.2))
     ax.yaxis.set_minor_locator(MultipleLocator(0.1))
     ax.grid(True, axis='y', which='major', color='#b0b0b0', linewidth=0.6)
-    ax.grid(True, axis='y', which='minor', color='#d8d8d8', linewidth=0.4)
+    ax.grid(True, axis='y', which='minor', color='#e4e4e4', linewidth=0.4)
     ax.grid(False, axis='x', which='both')
     ax.tick_params(axis='x', which='both', length=0)
     ax.set_axisbelow(True)
@@ -589,7 +590,7 @@ def fig_profiles(out, perm_type, fname):
         ax.yaxis.set_major_locator(MultipleLocator(0.2))
         ax.yaxis.set_minor_locator(MultipleLocator(0.1))
         ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f'{v * 100:.0f}%'))
-        ax.grid(True, which='major', color='#b8b8b8', linewidth=0.6)
+        ax.grid(True, which='major', color='#b0b0b0', linewidth=0.6)
         ax.grid(True, axis='y', which='minor', color='#e4e4e4', linewidth=0.4)
         ax.set_axisbelow(True)
         panel_title(ax, title, loc='lower right')
@@ -688,7 +689,7 @@ def fig_profiles_pooled(out, perm_type, fname):
     ax.yaxis.set_major_locator(MultipleLocator(0.2))
     ax.yaxis.set_minor_locator(MultipleLocator(0.1))
     ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f'{v * 100:.0f}%'))
-    ax.grid(True, which='major', color='#b8b8b8', linewidth=0.6)
+    ax.grid(True, which='major', color='#b0b0b0', linewidth=0.6)
     ax.grid(True, axis='y', which='minor', color='#e4e4e4', linewidth=0.4)
     ax.set_axisbelow(True)
     ax.set_xlabel('Block density threshold (relative to best)')
@@ -719,7 +720,7 @@ def _profile_axis(ax, n, curves, labels, colors, xlo=2 ** -4, xhi=1.04):
     ax.yaxis.set_major_locator(MultipleLocator(0.2))
     ax.yaxis.set_minor_locator(MultipleLocator(0.1))
     ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f'{v * 100:.0f}%'))
-    ax.grid(True, which='major', color='#b8b8b8', linewidth=0.6)
+    ax.grid(True, which='major', color='#b0b0b0', linewidth=0.6)
     ax.grid(True, axis='y', which='minor', color='#e4e4e4', linewidth=0.4)
     ax.set_axisbelow(True)
 
@@ -860,7 +861,7 @@ def fig_profiles_2x2(out, fname='density_profiles_2x2.pdf'):
         ax.yaxis.set_major_locator(MultipleLocator(0.25))
         ax.yaxis.set_minor_locator(MultipleLocator(0.125))
         ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f'{v * 100:.0f}%'))
-        ax.grid(True, which='major', color='#b8b8b8', linewidth=0.6)
+        ax.grid(True, which='major', color='#b0b0b0', linewidth=0.6)
         ax.grid(True, axis='y', which='minor', color='#e4e4e4', linewidth=0.4)
         ax.set_axisbelow(True)
     for ax in axes[:, 1]:
@@ -1066,7 +1067,7 @@ def fig_pick_by_block_density(out, panels=PICK_PANELS,
         ax.set_ylim(*PICK_YLIM)
         format_ratio_axis(ax.yaxis, (0.9, 1, 1.25, 1.5))
         ax.axhline(1, color='#CC0000', linestyle='--', lw=0.8, zorder=4)
-        ax.grid(True, axis='y', which='major', color='#a0a0a0', linewidth=0.8)
+        ax.grid(True, axis='y', which='major', color='#b0b0b0', linewidth=0.6)
         ax.grid(False, axis='x', which='both')
         ax.tick_params(axis='x', which='both', length=0)
         ax.set_axisbelow(True)

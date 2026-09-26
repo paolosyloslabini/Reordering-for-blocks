@@ -129,7 +129,7 @@ def fig_a(d, out, strategy='RCM', n_max=1e4):
             y = paid_off(ns, grid)
             ax.plot(grid, y, color=KERNEL_COLORS[k], lw=1.0, zorder=3)
         style_ops_axis(ax, 1, n_max)
-        ax.grid(True, which='major', color='#b8b8b8', lw=0.7)
+        ax.grid(True, which='major', color='#b0b0b0', lw=0.6)
         ax.xaxis.set_major_locator(mpl.ticker.FixedLocator([1, 10, 100, 1e3, 1e4]))
         ax.set_ylim(0, 1.03)
         ax.yaxis.set_major_formatter(FuncFormatter(pct))
