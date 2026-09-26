@@ -4,7 +4,7 @@ starting state of the matrix (original SuiteSparse matrices only).
   gain_vs_start_block_density  x = 16x16 block density before reordering
   gain_vs_start_density        x = nnz / (rows * cols), which no permutation changes
 
-Lines are kernel-smoothed medians, bands the interquartile range.
+Lines are kernel-smoothed medians, bands the interquartile range (Gaussian kernel\nin log10 x, bandwidth 0.15; dropped where the effective sample is under 25).
 Run from anywhere:  python analysis/density_response/gain_figures.py
 """
 import matplotlib as mpl
@@ -38,10 +38,11 @@ def gains():
 
 
 def figure(g, xcol, xlabel, name, pct=False):
-    """Paper style: one column, symmetric over row, square-patch legend."""
+    """Paper style: one column, symmetric beside row, square-patch legend.
+    Bands are faint fills with a thin, slightly stronger edge line."""
     colors = {v['display']: v['color'] for v in PERMS.values()}
     colors['DTC-LSH'] = '#707070'    # paper's light grey is unreadable as a thin line
-    fig, axes = plt.subplots(2, 1, figsize=(COL_W, 3.0), sharex=True, sharey=True)
+    fig, axes = plt.subplots(1, 2, figsize=(COL_W, 1.95), sharex=True, sharey=True)
     for ax, (pt, title) in zip(axes, PANELS):
         sub = g[g['perm_type'] == pt]
         lo, hi = np.quantile(sub[xcol], [0.03, 0.97])
@@ -52,7 +53,10 @@ def figure(g, xcol, xlabel, name, pct=False):
                                  bandwidth=0.15)
             ok = ~np.isnan(q[:, 1])
             ax.fill_between(grid[ok], 2 ** q[ok, 0], 2 ** q[ok, 2], color=colors[s],
-                            alpha=0.15, lw=0)
+                            alpha=0.07, lw=0)
+            for j in (0, 2):
+                ax.plot(grid[ok], 2 ** q[ok, j], color=colors[s], lw=0.45,
+                        alpha=0.45, zorder=2.5)
             ax.plot(grid[ok], 2 ** q[ok, 1], color=colors[s], lw=1.1, zorder=3)
         ax.axhline(1, color='#CC0000', linestyle='--', linewidth=0.8, alpha=0.8, zorder=2)
         ax.set_xscale('log')
@@ -60,26 +64,24 @@ def figure(g, xcol, xlabel, name, pct=False):
         ax.grid(True, which='major', color='#b0b0b0', linewidth=0.6)
         ax.grid(True, axis='x', which='minor', color='#e4e4e4', linewidth=0.4)
         ax.set_axisbelow(True)
-        ax.text(0.985, 0.95, title, transform=ax.transAxes, ha='right', va='top',
-                fontsize=9, fontweight='bold', zorder=6,
-                bbox=dict(boxstyle='square,pad=0.15', fc='white', ec='none', alpha=0.85))
-    axes[0].tick_params(axis='x', which='both', length=0)
+        ax.set_title(title, fontsize=9, fontweight='bold', pad=3)
+    axes[1].tick_params(axis='y', which='both', length=0, labelleft=False)
     axes[0].yaxis.set_major_locator(mpl.ticker.FixedLocator([0.25, 0.5, 1, 2, 4]))
     axes[0].yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f'{v:g}×'))
     axes[0].yaxis.set_minor_locator(mpl.ticker.NullLocator())
     if pct:
-        axes[1].xaxis.set_major_locator(mpl.ticker.FixedLocator([0.005, 0.01, 0.02, 0.05,
-                                                                 0.1, 0.2]))
-        axes[1].xaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f'{v * 100:g}%'))
-        axes[1].xaxis.set_minor_formatter(mpl.ticker.NullFormatter())
-    axes[1].set_xlabel(xlabel)
-    fig.subplots_adjust(left=0.155, right=0.99, top=0.9, bottom=0.12, hspace=0.07)
-    mid = (axes[0].get_position().y1 + axes[1].get_position().y0) / 2
-    fig.text(0.0, mid, 'Block density gain (after / before)', rotation=90,
+        axes[0].xaxis.set_major_locator(mpl.ticker.FixedLocator([0.01, 0.1]))
+        axes[0].xaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f'{v * 100:g}%'))
+        axes[0].xaxis.set_minor_formatter(mpl.ticker.NullFormatter())
+    fig.subplots_adjust(left=0.135, right=0.99, top=0.785, bottom=0.2, wspace=0.05)
+    fig.text((axes[0].get_position().x0 + axes[1].get_position().x1) / 2, 0.005,
+             xlabel, ha='center', va='bottom', fontsize=9)
+    mid = (axes[0].get_position().y1 + axes[0].get_position().y0) / 2
+    fig.text(0.0, mid, 'Block density gain', rotation=90,
              ha='left', va='center', fontsize=9)
     handles = [Patch(facecolor=colors[s], edgecolor='#222222', linewidth=0.5, label=s)
                for s in TOP]
-    fig.legend(handles=handles, loc='lower center', bbox_to_anchor=(0.555, 0.905),
+    fig.legend(handles=handles, loc='lower center', bbox_to_anchor=(0.56, 0.9),
                ncol=4, frameon=False, handlelength=0.9, handleheight=0.9,
                columnspacing=0.9, handletextpad=0.35)
     save(fig, name)

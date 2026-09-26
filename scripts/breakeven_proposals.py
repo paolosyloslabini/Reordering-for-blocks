@@ -115,28 +115,27 @@ def style_ops_axis(ax, lo=1, hi=1e7):
 
 def fig_a(d, out, strategy='RCM', n_max=1e4):
     """Paid-off curves up to n_max operations (every curve has levelled off
-    by 1e4 except ASpT, which gains 2-5 points more later)."""
+    by 1e4 except ASpT, which gains 2-5 points more later). Laid out like the
+    paper's 2x2 profiles: reordering in columns, dataset in rows."""
     grid = np.logspace(0, np.log10(n_max), 300)
-    fig, axes = plt.subplots(2, 2, figsize=(pf.COL_W, 2.45), sharex=True,
+    fig, axes = plt.subplots(2, 2, figsize=(pf.COL_W, 2.3), sharex=True,
                              sharey=True)
-    panels = [(ds, pt) for ds in ('original', 'scrambled') for pt in ('SYMMETRIC', 'ROW')]
-    for (dataset, perm_type), ax in zip(panels, axes.flat):
+    for (dataset, perm_type), ax in zip(pf.CELLS_2X2, axes.flat):
         sub = d[(d.strategy == strategy) & (d.dataset == dataset) & (d.perm_type == perm_type)]
         for k in KERNELS:
             ns = sub.loc[sub.kernel_id == k, 'n_star']
             if ns.empty:
                 continue
             y = paid_off(ns, grid)
-            ax.plot(grid, y, color=KERNEL_COLORS[k], lw=1.0)
+            ax.plot(grid, y, color=KERNEL_COLORS[k], lw=1.0, zorder=3)
         style_ops_axis(ax, 1, n_max)
+        ax.grid(True, which='major', color='#b8b8b8', lw=0.7)
         ax.xaxis.set_major_locator(mpl.ticker.FixedLocator([1, 10, 100, 1e3, 1e4]))
-        ax.set_ylim(0, 1)
+        ax.set_ylim(0, 1.03)
         ax.yaxis.set_major_formatter(FuncFormatter(pct))
         ax.yaxis.set_major_locator(mpl.ticker.MultipleLocator(0.25))
-        short = {'SYMMETRIC': 'Symmetric', 'ROW': 'Row'}[perm_type]
-        ax.set_title(f'{short}, {dataset}', fontsize=8, loc='left', pad=2,
-                     fontweight='bold')
-    fig.supxlabel('SpMM operations after reordering', fontsize=8.5, y=0.02)
+    for ax in axes[:, 1]:
+        ax.tick_params(axis='y', which='both', length=0, labelleft=False)
     handles = [Line2D([], [], color=KERNEL_COLORS[k], lw=1.4, label=KNAME[k])
                for k in KERNELS]
     fig.canvas.draw()                  # end tick labels point inwards, so
@@ -144,12 +143,18 @@ def fig_a(d, out, strategy='RCM', n_max=1e4):
         ticks = ax.get_xticklabels()   # don't touch
         ticks[0].set_ha('left')
         ticks[-1].set_ha('right')
-    fig.subplots_adjust(left=0.14, right=0.985, top=0.8, bottom=0.14,
-                        wspace=0.07, hspace=0.3)
-    pf.shared_ylabel(fig, axes[:, 0], f'Matrices where {strategy} has paid off')
-    fig.legend(handles=handles, loc='lower center', bbox_to_anchor=(0.56, 0.845),
+        for lab in ticks:
+            lab.set_fontsize(7)
+    fig.subplots_adjust(left=0.13, right=0.95, top=0.78, bottom=0.12,
+                        wspace=0.05, hspace=0.06)
+    pf.shared_ylabel(fig, axes[:, 0], f'Matrices where {strategy} paid off')
+    fig.text((axes[1][0].get_position().x0 + axes[1][1].get_position().x1) / 2, 0.005,
+             'SpMM operations after reordering', ha='center', va='bottom', fontsize=9)
+    pf._grid_titles(fig, axes)
+    fig.legend(handles=handles, loc='lower center', bbox_to_anchor=(0.54, 0.855),
                ncol=4, frameon=False, fontsize=7, handlelength=1.2,
-               columnspacing=0.8, handletextpad=0.4, borderaxespad=0)
+               columnspacing=0.8, handletextpad=0.4, labelspacing=0.2,
+               borderaxespad=0)
     save(fig, out, f'A_paid_off_curves_{strategy.lower()}')
 
 

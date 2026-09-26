@@ -967,6 +967,7 @@ PICK_T = 1.1           # a metric prefers an ordering if it is >= 10 % better
 PICK_MIN_MATRICES = 10  # leave a bar out if fewer matrices have a conflict
 PICK_PANELS = [('SYMMETRIC', 'original'), ('ROW', 'original')]
 PICK_BD = 'density_improvement_16'
+PICK_WORSE_COLOR = '#e06666'  # bar below 1x: block density's pick was slower
 
 
 def _pick_candidates(dataset, perm_type, n_cols=256):
@@ -1020,7 +1021,7 @@ def fig_pick_by_block_density(out, panels=PICK_PANELS,
     df, _ = load_pipeline('original', 'SYMMETRIC')
     kernels = _ordered_kernels(df, KERNEL_NAMES)
     fig, axes = plt.subplots(len(panels), 1,
-                             figsize=(COL_W, 0.3 + 1.5 * len(panels)),
+                             figsize=(COL_W, 0.55 + 1.05 * len(panels)),
                              sharex=True)
     others = METRICS[:-1]
     n, width = len(others), 0.84 / len(others)
@@ -1034,21 +1035,26 @@ def fig_pick_by_block_density(out, panels=PICK_PANELS,
         for i, (m, label, color, hatch) in enumerate(others):
             v = t[t['metric_id'] == m].set_index('kernel').loc[
                 [PAPER_KERNEL_NAMES.get(k, k) for k in kernels], 'advantage'].values
+            # bars below 1x (block density picked the slower ordering) in red
+            fill = np.where(v < 1, PICK_WORSE_COLOR, color)
             ax.bar(x + (i - (n - 1) / 2) * width, v - 1, width, bottom=1,
-                   label=label, color=color, hatch=hatch,
+                   label=label, color=fill, hatch=hatch,
                    edgecolor='#222222', linewidth=0.5, zorder=3)
         ax.set_yscale('log')
-        ax.set_ylim(0.65, 2.3)
-        format_ratio_axis(ax.yaxis, (0.75, 1, 1.5, 2))
-        ax.axhline(1, color='#222222', lw=0.6, zorder=4)
-        ax.grid(True, axis='y', which='major', color='#b0b0b0', linewidth=0.6)
+        ax.set_ylim(0.87, 1.78)
+        format_ratio_axis(ax.yaxis, (0.9, 1, 1.25, 1.5))
+        ax.axhline(1, color='#222222', lw=0.9, zorder=4)
+        ax.grid(True, axis='y', which='major', color='#a0a0a0', linewidth=0.8)
         ax.grid(False, axis='x', which='both')
         ax.tick_params(axis='x', which='both', length=0)
         ax.set_axisbelow(True)
         ax.set_xlim(-0.5, len(kernels) - 0.5)
         pct = f'{100 * share:.0f}%' if share >= 0.01 else '<1%'
-        ax.set_title(f'{REORDER_TITLE[perm_type]}, {dataset} matrices '
-                     f'(conflicting verdicts: {pct})', fontsize=7.5, pad=2)
+        ax.text(0.985, 0.95, f'{REORDER_TITLE[perm_type]}\n'
+                f'conflicting verdicts: {pct}', transform=ax.transAxes,
+                ha='right', va='top', fontsize=7.5, linespacing=1.1, zorder=6,
+                bbox=dict(boxstyle='square,pad=0.15', fc='white', ec='none',
+                          alpha=0.85))
     axes[-1].set_xticks(x)
     labels = axes[-1].set_xticklabels(
         [two_line(PAPER_KERNEL_NAMES.get(k, k)) for k in kernels],
@@ -1060,16 +1066,18 @@ def fig_pick_by_block_density(out, panels=PICK_PANELS,
         if dx:
             lab.set_transform(lab.get_transform() + ScaledTranslation(
                 dx / 72, 0, fig.dpi_scale_trans))
-    shared_ylabel(fig, axes, 'Speedup by picking\naccording to block density',
-                  x=0.0)
+    shared_ylabel(fig, axes, 'Speedup of picking by block density', x=0.0)
     h = fig.get_figheight()
-    handles, lbls = axes[0].get_legend_handles_labels()
-    fig.legend(handles, lbls, title='Block density vs.', loc='upper center',
+    from matplotlib.patches import Patch
+    handles = [Patch(facecolor=color, hatch=hatch, edgecolor='#222222',
+                     linewidth=0.5, label=label)
+               for _, label, color, hatch in others]
+    fig.legend(handles=handles, title='Block density vs.', loc='upper center',
                bbox_to_anchor=(0.58, 1.0), ncol=3, frameon=False,
                handlelength=1.1, handleheight=0.9, columnspacing=0.8,
                handletextpad=0.3, labelspacing=0.25, borderaxespad=0.0)
-    fig.subplots_adjust(left=0.17, right=0.995, top=1 - 0.66 / h,
-                        bottom=0.33 / h, hspace=0.3)
+    fig.subplots_adjust(left=0.135, right=0.995, top=1 - 0.5 / h,
+                        bottom=0.28 / h, hspace=0)
     fig.savefig(out / fname)
     plt.close(fig)
     if csv is not None:
