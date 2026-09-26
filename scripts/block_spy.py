@@ -153,6 +153,52 @@ ax3.set_yticklabels(ticks)
 block_density = A.nnz / (nnz_blocks * block_size * block_size) * 100
 ax3.set_title(f"{block_density:.1f}% block density")
 
+# --- Paper variant: drawn at print size (one IEEE column, 3.49 in) ---
+# Nonzeros are drawn as dots rather than pixels so they stay visible when
+# printed; tick labels are dropped to give the panels the whole width.
+import os
+from matplotlib.patches import Rectangle
+os.makedirs("plots/paper", exist_ok=True)
+with plt.rc_context({"font.family": "serif", "pdf.fonttype": 42,
+                     "font.serif": ["Times New Roman", "DejaVu Serif"],
+                     "font.size": 9, "axes.titlesize": 9,
+                     "axes.titleweight": "normal"}):
+    figp, axs = plt.subplots(1, 3, figsize=(3.49, 1.3))
+    nz_r, nz_c = A.nonzero()
+    for k, ax in enumerate(axs):
+        if k == 1:
+            ax.imshow(block_occ, cmap="Blues", vmin=0, vmax=1.4,
+                      extent=(0, N, N, 0), interpolation="nearest")
+        if k == 2:
+            for br in range(n_blocks):
+                for bc in range(n_blocks):
+                    if block_occ[br, bc]:
+                        ax.add_patch(Rectangle(
+                            (bc * block_size, br * block_size),
+                            block_size, block_size, linewidth=0,
+                            facecolor="#9ecae1", alpha=0.6))
+        for i in range(n_blocks + 1):
+            ax.axhline(i * block_size, color="#999999", linewidth=0.3)
+            ax.axvline(i * block_size, color="#999999", linewidth=0.3)
+        if k != 1:
+            ax.scatter(nz_c + 0.5, nz_r + 0.5, s=0.9, c="black",
+                       linewidths=0, zorder=3)
+        ax.set_xlim(0, N)
+        ax.set_ylim(N, 0)
+        ax.set_aspect("equal")
+        ax.set_xticks([])
+        ax.set_yticks([])
+        for sp in ax.spines.values():
+            sp.set_linewidth(0.6)
+    axs[0].set_title(f"{A.nnz} nonzeros", pad=2)
+    axs[1].set_title(f"{nnz_blocks} nonzero blocks", pad=2)
+    axs[2].set_title(f"{block_density:.1f}% block density", pad=2)
+    figp.subplots_adjust(left=0.005, right=0.995, top=0.88, bottom=0.01,
+                         wspace=0.06)
+    figp.savefig("plots/paper/block_spy.pdf", dpi=600, bbox_inches="tight",
+                 pad_inches=0.01)
+    plt.close(figp)
+
 plt.tight_layout()
 plt.savefig("plots/spy_plots/block_spy.png", dpi=200)
 
@@ -199,4 +245,4 @@ ax_r.set_title(f"Reordered – {nnz_reord} blocks, {bd_reord:.1f}% block density
 
 fig2.tight_layout()
 fig2.savefig("plots/spy_plots/block_spy_reorder.png", dpi=200)
-plt.show()
+
