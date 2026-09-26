@@ -1094,17 +1094,18 @@ def fig_pick_by_block_density(out, panels=PICK_PANELS,
     handles = [Patch(facecolor=color, hatch=hatch, edgecolor='#222222',
                      linewidth=0.5, label=label)
                for _, label, color, hatch in others]
-    handles.append(Patch(facecolor='white', edgecolor=PICK_WORSE_EDGE,
-                         linewidth=1.1, label='Slower pick'))
-    # the dashed key sits inside the top panel, top left, where it is empty
-    axes[0].legend(handles=[Patch(facecolor='white', edgecolor='#222222',
+    # outline keys sit inside the top panel, top left, where it is empty
+    axes[0].legend(handles=[Patch(facecolor='white', edgecolor=PICK_WORSE_EDGE,
+                                  linewidth=1.1, label='Slower pick'),
+                            Patch(facecolor='white', edgecolor='#222222',
                                   linewidth=0.7, linestyle=(0, (2, 1.2)),
                                   label=f'< {PICK_MIN_MATRICES} matrices')],
+                   labelspacing=0.25,
                    loc='upper left', frameon=False, fontsize=7.5,
                    handlelength=1.1, handleheight=0.9, handletextpad=0.3,
                    borderaxespad=0.3)
     fig.legend(handles=handles, title='Block density vs.', loc='upper center',
-               bbox_to_anchor=(0.58, 1.0), ncol=4, frameon=False,
+               bbox_to_anchor=(0.58, 1.0), ncol=3, frameon=False,
                handlelength=1.1, handleheight=0.9, columnspacing=0.8,
                handletextpad=0.3, labelspacing=0.25, borderaxespad=0.0)
     fig.subplots_adjust(left=0.135, right=0.995, top=1 - 0.5 / h,
