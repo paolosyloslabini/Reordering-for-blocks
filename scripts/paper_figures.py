@@ -1096,9 +1096,13 @@ def fig_pick_by_block_density(out, panels=PICK_PANELS,
                for _, label, color, hatch in others]
     handles.append(Patch(facecolor='white', edgecolor=PICK_WORSE_EDGE,
                          linewidth=1.1, label='Slower pick'))
-    handles.append(Patch(facecolor='white', edgecolor='#222222', linewidth=0.7,
-                         linestyle=(0, (2, 1.2)),
-                         label=f'< {PICK_MIN_MATRICES} matrices'))
+    # the dashed key sits inside the top panel, top left, where it is empty
+    axes[0].legend(handles=[Patch(facecolor='white', edgecolor='#222222',
+                                  linewidth=0.7, linestyle=(0, (2, 1.2)),
+                                  label=f'< {PICK_MIN_MATRICES} matrices')],
+                   loc='upper left', frameon=False, fontsize=7.5,
+                   handlelength=1.1, handleheight=0.9, handletextpad=0.3,
+                   borderaxespad=0.3)
     fig.legend(handles=handles, title='Block density vs.', loc='upper center',
                bbox_to_anchor=(0.58, 1.0), ncol=4, frameon=False,
                handlelength=1.1, handleheight=0.9, columnspacing=0.8,
