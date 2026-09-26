@@ -58,7 +58,7 @@ def ops_label(x, pos=None):
     if x < 1:
         return ''
     e = int(round(np.log10(x)))
-    return {0: '1', 1: '10', 2: '100', 3: '1k'}.get(e, f'$10^{{{e}}}$')
+    return {0: '1', 1: '10', 2: '100', 3: '1k', 4: '10k'}.get(e, f'$10^{{{e}}}$')
 
 
 def pct(x, pos=None):
@@ -122,26 +122,29 @@ def repel(ys, gap, lo=0.0, hi=1.0):
     return out
 
 
-def end_labels(ax, finals, colors, gap=0.075, fs=6):
-    """Plateau value of each curve, just right of the axes, with a leader."""
-    names = list(finals)
-    ys = repel([finals[k] for k in names], gap)
+def end_labels(ax, finals, colors, x_leader=0.12, lo=0.04, hi=0.96, fs=6.5):
+    """Value of each curve at the right edge, labels spread evenly over the
+    full height in the same order as the curves (leaders never cross)."""
+    names = sorted(finals, key=lambda k: finals[k], reverse=True)
+    ys = np.linspace(hi, lo, len(names))
+    tr = mpl.transforms.blended_transform_factory(ax.transAxes, ax.transData)
     for k, y in zip(names, ys):
-        ax.annotate(f'{finals[k]:.0%}', xy=(1.0, finals[k]),
-                    xycoords=('axes fraction', 'data'),
-                    xytext=(1.09, y), textcoords=('axes fraction', 'data'),
-                    fontsize=fs, color='#222222', va='center', ha='left',
-                    annotation_clip=False,
-                    arrowprops=dict(arrowstyle='-', color=colors[k], lw=0.8,
-                                    shrinkA=0, shrinkB=0))
+        ax.plot([1.0, 1.0 + x_leader], [finals[k], y], color=colors[k], lw=0.9,
+                transform=tr, clip_on=False, solid_capstyle='butt')
+        ax.text(1.0 + x_leader + 0.02, y, f'{finals[k]:.0%}', transform=tr,
+                fontsize=fs, color='#222222', va='center', ha='left')
 
 
 # ---------------------------------------------------------------------------
 # A: RCM, one curve per kernel, 2x2 pipelines (both effects in one line)
 # ---------------------------------------------------------------------------
 
-def fig_a(d, out, strategy='RCM'):
-    fig, axes = plt.subplots(2, 2, figsize=(pf.COL_W, 3.3), sharex=True,
+def fig_a(d, out, strategy='RCM', n_max=1e4):
+    """Paid-off curves up to n_max operations (every curve has levelled off
+    by 1e4 except ASpT, which gains 2-5 points more later); the labels give
+    the value reached at n_max."""
+    grid = np.logspace(0, np.log10(n_max), 300)
+    fig, axes = plt.subplots(2, 2, figsize=(pf.COL_W, 2.9), sharex=True,
                              sharey=True)
     panels = [(ds, pt) for ds in ('original', 'scrambled') for pt in ('SYMMETRIC', 'ROW')]
     for (dataset, perm_type), ax in zip(panels, axes.flat):
@@ -151,10 +154,11 @@ def fig_a(d, out, strategy='RCM'):
             ns = sub.loc[sub.kernel_id == k, 'n_star']
             if ns.empty:
                 continue
-            ax.plot(N_GRID, paid_off(ns), color=KERNEL_COLORS[k], lw=1.0)
-            finals[k] = np.isfinite(ns).mean()
-        style_ops_axis(ax)
-        ax.xaxis.set_major_locator(mpl.ticker.FixedLocator([1, 1e2, 1e4, 1e6]))
+            y = paid_off(ns, grid)
+            ax.plot(grid, y, color=KERNEL_COLORS[k], lw=1.0)
+            finals[k] = y[-1]
+        style_ops_axis(ax, 1, n_max)
+        ax.xaxis.set_major_locator(mpl.ticker.FixedLocator([1, 10, 100, 1e3, 1e4]))
         ax.set_ylim(0, 1)
         ax.yaxis.set_major_formatter(FuncFormatter(pct))
         ax.yaxis.set_major_locator(mpl.ticker.MultipleLocator(0.25))
@@ -162,11 +166,11 @@ def fig_a(d, out, strategy='RCM'):
         ax.set_title(f'{short}, {dataset}', fontsize=8, loc='left', pad=2,
                      fontweight='bold')
         end_labels(ax, finals, KERNEL_COLORS)
-    fig.supxlabel('SpMM operations after reordering', fontsize=8.5, y=0.0)
+    fig.supxlabel('SpMM operations after reordering', fontsize=8.5, y=0.02)
     handles = [Line2D([], [], color=KERNEL_COLORS[k], lw=1.4, label=KNAME[k])
                for k in KERNELS]
-    fig.subplots_adjust(left=0.13, right=0.93, top=0.84, bottom=0.12,
-                        wspace=0.32, hspace=0.3)
+    fig.subplots_adjust(left=0.13, right=0.92, top=0.82, bottom=0.12,
+                        wspace=0.42, hspace=0.32)
     pf.shared_ylabel(fig, axes[:, 0], f'Matrices where {strategy} has paid off')
     fig.legend(handles=handles, loc='lower center', bbox_to_anchor=(0.5, 0.86),
                ncol=4, frameon=False, fontsize=7, handlelength=1.2,
