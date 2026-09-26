@@ -122,41 +122,25 @@ def repel(ys, gap, lo=0.0, hi=1.0):
     return out
 
 
-def end_labels(ax, finals, colors, x_leader=0.12, lo=0.04, hi=0.96, fs=6.5):
-    """Value of each curve at the right edge, labels spread evenly over the
-    full height in the same order as the curves (leaders never cross)."""
-    names = sorted(finals, key=lambda k: finals[k], reverse=True)
-    ys = np.linspace(hi, lo, len(names))
-    tr = mpl.transforms.blended_transform_factory(ax.transAxes, ax.transData)
-    for k, y in zip(names, ys):
-        ax.plot([1.0, 1.0 + x_leader], [finals[k], y], color=colors[k], lw=0.9,
-                transform=tr, clip_on=False, solid_capstyle='butt')
-        ax.text(1.0 + x_leader + 0.02, y, f'{finals[k]:.0%}', transform=tr,
-                fontsize=fs, color='#222222', va='center', ha='left')
-
-
 # ---------------------------------------------------------------------------
 # A: RCM, one curve per kernel, 2x2 pipelines (both effects in one line)
 # ---------------------------------------------------------------------------
 
 def fig_a(d, out, strategy='RCM', n_max=1e4):
     """Paid-off curves up to n_max operations (every curve has levelled off
-    by 1e4 except ASpT, which gains 2-5 points more later); the labels give
-    the value reached at n_max."""
+    by 1e4 except ASpT, which gains 2-5 points more later)."""
     grid = np.logspace(0, np.log10(n_max), 300)
-    fig, axes = plt.subplots(2, 2, figsize=(pf.COL_W, 2.9), sharex=True,
+    fig, axes = plt.subplots(2, 2, figsize=(pf.COL_W, 2.45), sharex=True,
                              sharey=True)
     panels = [(ds, pt) for ds in ('original', 'scrambled') for pt in ('SYMMETRIC', 'ROW')]
     for (dataset, perm_type), ax in zip(panels, axes.flat):
         sub = d[(d.strategy == strategy) & (d.dataset == dataset) & (d.perm_type == perm_type)]
-        finals = {}
         for k in KERNELS:
             ns = sub.loc[sub.kernel_id == k, 'n_star']
             if ns.empty:
                 continue
             y = paid_off(ns, grid)
             ax.plot(grid, y, color=KERNEL_COLORS[k], lw=1.0)
-            finals[k] = y[-1]
         style_ops_axis(ax, 1, n_max)
         ax.xaxis.set_major_locator(mpl.ticker.FixedLocator([1, 10, 100, 1e3, 1e4]))
         ax.set_ylim(0, 1)
@@ -165,14 +149,18 @@ def fig_a(d, out, strategy='RCM', n_max=1e4):
         short = {'SYMMETRIC': 'Symmetric', 'ROW': 'Row'}[perm_type]
         ax.set_title(f'{short}, {dataset}', fontsize=8, loc='left', pad=2,
                      fontweight='bold')
-        end_labels(ax, finals, KERNEL_COLORS)
     fig.supxlabel('SpMM operations after reordering', fontsize=8.5, y=0.02)
     handles = [Line2D([], [], color=KERNEL_COLORS[k], lw=1.4, label=KNAME[k])
                for k in KERNELS]
-    fig.subplots_adjust(left=0.13, right=0.92, top=0.82, bottom=0.12,
-                        wspace=0.42, hspace=0.32)
+    fig.canvas.draw()                  # end tick labels point inwards, so
+    for ax in axes[1]:                 # "10k" and "1" of adjacent panels
+        ticks = ax.get_xticklabels()   # don't touch
+        ticks[0].set_ha('left')
+        ticks[-1].set_ha('right')
+    fig.subplots_adjust(left=0.14, right=0.985, top=0.8, bottom=0.14,
+                        wspace=0.07, hspace=0.3)
     pf.shared_ylabel(fig, axes[:, 0], f'Matrices where {strategy} has paid off')
-    fig.legend(handles=handles, loc='lower center', bbox_to_anchor=(0.5, 0.86),
+    fig.legend(handles=handles, loc='lower center', bbox_to_anchor=(0.56, 0.845),
                ncol=4, frameon=False, fontsize=7, handlelength=1.2,
                columnspacing=0.8, handletextpad=0.4, borderaxespad=0)
     save(fig, out, f'A_paid_off_curves_{strategy.lower()}')
