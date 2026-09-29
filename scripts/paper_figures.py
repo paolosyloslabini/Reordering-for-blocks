@@ -215,32 +215,6 @@ def within_corr_table(df, n_cols, metrics, kernels):
     return pd.DataFrame(rows)
 
 
-def _tint(color, t):
-    """color mixed with white; t = 0 white, 1 full colour."""
-    c = np.array(mpl.colors.to_rgb(color))
-    return tuple(1 - t * (1 - c))
-
-
-def quadrant_hexbin(ax, x, y, gridsize):
-    """Hexbin of the (improvement, speedup) points, coloured by quadrant as
-    quadrant_scatter (both up / both down / disagreeing); darker = more
-    points (log counts). The three layers share one hexagon grid."""
-    x, y = np.asarray(x, float), np.asarray(y, float)
-    quad = np.where((x >= 1) & (y >= 1), 0, np.where((x < 1) & (y < 1), 1, 2))
-    x = np.clip(x, RATIO_XLIM[0] * 1.001, RATIO_XLIM[1] / 1.001)
-    y = np.clip(y, RATIO_YLIM[0] * 1.001, RATIO_YLIM[1] / 1.001)
-    extent = (*np.log10(RATIO_XLIM), *np.log10(RATIO_YLIM))
-    for q, color in enumerate((C_UP, C_DOWN, C_MIXED)):
-        sel = quad == q
-        if not sel.any():
-            continue
-        cmap = mpl.colors.LinearSegmentedColormap.from_list(
-            f'q{q}', [_tint(color, 0.25), color])
-        ax.hexbin(x[sel], y[sel], gridsize=gridsize, xscale='log',
-                  yscale='log', extent=extent, bins='log', mincnt=1,
-                  cmap=cmap, linewidths=0.05, zorder=3, rasterized=True)
-
-
 def quadrant_scatter(ax, x, y, size):
     x, y = np.asarray(x, float), np.asarray(y, float)
     colors = np.where((x >= 1) & (y >= 1), C_UP,
@@ -274,7 +248,7 @@ def fig_bsr_sanity(df, out):
     d = df[df['kernel_id'] == 'CUSPARSE_SPMM_BSR_bs32']
     d = d.dropna(subset=['density_improvement_32', 'speedup'])
     fig, ax = plt.subplots(figsize=(COL_W, 1.75))
-    quadrant_hexbin(ax, d['density_improvement_32'], d['speedup'], (60, 20))
+    quadrant_scatter(ax, d['density_improvement_32'], d['speedup'], 2)
     style_ratio_scatter(ax)
     annotate_fit(ax, d, 'density_improvement_32',
                  PAPER_KERNEL_NAMES['CUSPARSE_SPMM_BSR_bs32'])
@@ -291,7 +265,7 @@ def fig_improvement_vs_speedup(df, out):
                              sharey=True)
     for ax, k in zip(axes.flat, kernels):
         d = df[df['kernel_id'] == k].dropna(subset=['density_improvement_16', 'speedup'])
-        quadrant_hexbin(ax, d['density_improvement_16'], d['speedup'], 30)
+        quadrant_scatter(ax, d['density_improvement_16'], d['speedup'], 2)
         # No 10x label: it would collide with the next panel's first label.
         style_ratio_scatter(ax, x_majors=(0.1, 0.3, 1, 3))
         annotate_fit(ax, d, 'density_improvement_16',
@@ -312,7 +286,7 @@ def fig_improvement_vs_speedup_row(df, out):
     fig, axes = plt.subplots(1, 6, figsize=(PAGE_W, 1.5), sharex=True, sharey=True)
     for ax, k in zip(axes, kernels):
         d = df[df['kernel_id'] == k].dropna(subset=['density_improvement_16', 'speedup'])
-        quadrant_hexbin(ax, d['density_improvement_16'], d['speedup'], 22)
+        quadrant_scatter(ax, d['density_improvement_16'], d['speedup'], 1.2)
         style_ratio_scatter(ax, x_majors=(0.1, 1, 5))
         annotate_fit(ax, d, 'density_improvement_16',
                      PAPER_KERNEL_NAMES.get(k, k), fs=7.5)
