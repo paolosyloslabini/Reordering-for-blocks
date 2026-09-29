@@ -20,6 +20,14 @@ Figures (original matrices, symmetric reordering):
                          mid / high starting block density), original vs.
                          reordered; one panel per (matrix, kernel). Absolute
                          GFLOPS are only compared within a panel.
+  n_saturation_agg.pdf   the same over all matrices: rows = terciles of the
+                         original block density, columns = kernels. Both
+                         curves of a matrix are divided by the matrix's own
+                         original GFLOPS at N=32; geometric mean over the
+                         matrices (so the gap between the curves is the
+                         geomean speedup), band = interquartile range. Only
+                         matrices measured at every N for that kernel, so
+                         the set of matrices does not change along N.
 
 Run from the repo root:
     .venv/Scripts/python.exe scripts/n_density_figures.py [--out plots/n_density]
@@ -221,6 +229,80 @@ def fig_saturation(d, out):
     d[d['matrix'].isin(mats)].to_csv(out / 'n_saturation.csv', index=False)
 
 
+TERCILE_NAMES = ('Low', 'Mid', 'High')
+
+
+def fig_saturation_agg(d, out):
+    kernels = kernels_of(d)
+    per_matrix = d.drop_duplicates('matrix')['bd_original']
+    edges = np.quantile(per_matrix, [0, 1 / 3, 2 / 3, 1])
+    edges[0], edges[-1] = edges[0] * 0.999, edges[-1] * 1.001
+    d = d.assign(tercile=pd.cut(d['bd_original'], edges, labels=False))
+    fig, axes = plt.subplots(3, len(kernels), figsize=(PAGE_W, 3.7),
+                             sharex=True, sharey='col')
+    rows = []
+    for c, k in enumerate(kernels):
+        s = d[d['kernel_id'] == k]
+        full = s.groupby('matrix')['n_cols'].nunique()
+        s = s[s['matrix'].isin(full[full == len(N_VALUES)].index)]
+        ref = s[s['n_cols'] == N_VALUES[0]].set_index('matrix')['gflops_original']
+        s = s.assign(orig=s['gflops_original'] / s['matrix'].map(ref),
+                     reord=s['gflops'] / s['matrix'].map(ref))
+        for r in range(3):
+            ax = axes[2 - r][c]          # high density on top, as in the heatmap
+            t = s[s['tercile'] == r]
+            nm = t['matrix'].nunique()
+            for col, color, ls in (('orig', C_ORIG, '-'), ('reord', C_REORD, '--')):
+                g = t.groupby('n_cols')[col]
+                gm = g.apply(lambda x: np.exp(np.log(x).mean())).reindex(N_VALUES)
+                q1 = g.quantile(0.25).reindex(N_VALUES)
+                q3 = g.quantile(0.75).reindex(N_VALUES)
+                ax.fill_between(N_VALUES, q1, q3, color=color, alpha=0.13, lw=0)
+                ax.plot(N_VALUES, gm, ls, color=color, lw=1.2, marker='o', ms=2.8)
+                for n in N_VALUES:
+                    rows.append((PAPER_KERNEL_NAMES.get(k, k), TERCILE_NAMES[r],
+                                 col, n, gm[n], q1[n], q3[n], nm))
+            ax.text(0.04, 0.96, f'$n$={nm}', transform=ax.transAxes,
+                    ha='left', va='top', fontsize=6.5, color='#555555')
+            ax.set_xscale('log', base=2)
+            ax.set_yscale('log', base=2)
+            ax.set_xticks(N_VALUES)
+            ax.set_xticklabels(['32', '256', '1k'])
+            ax.set_xlim(N_VALUES[0] / 1.6, N_VALUES[-1] * 1.6)
+            ax.xaxis.set_minor_locator(mpl.ticker.NullLocator())
+            ax.yaxis.set_minor_locator(mpl.ticker.NullLocator())
+            ax.tick_params(axis='y', labelsize=6.5)
+            ax.yaxis.set_major_formatter(mpl.ticker.FuncFormatter(
+                lambda y, _: f'{y:g}×'))
+            ax.grid(True, which='major', color='#b0b0b0', lw=0.6)
+        axes[0][c].set_title(PAPER_KERNEL_NAMES.get(k, k), fontsize=8.5, pad=3)
+    for r in range(3):
+        a, b = edges[r], edges[r + 1]
+        axes[2 - r][0].set_ylabel(f'{TERCILE_NAMES[r]} $\\rho_{{16}}$\n'
+                                  f'({_fmt(a)}–{_fmt(b)})', fontsize=7.5)
+    fig.supxlabel(r'Dense operand width $N$ (columns of $B$)', fontsize=9,
+                  y=0.0)
+    fig.supylabel(r'GFLOPS / GFLOPS$_{\mathrm{original}}(N{=}32)$',
+                  fontsize=8.5, x=0.0)
+    fig.subplots_adjust(left=0.105, right=0.995, top=0.88, bottom=0.1,
+                        wspace=0.3, hspace=0.1)
+    handles = [Line2D([], [], color=C_ORIG, marker='o', ms=2.8, lw=1.2,
+                      label='Original'),
+               Line2D([], [], color=C_REORD, ls='--', marker='o', ms=2.8,
+                      lw=1.2, label='Reordered (highest block density)'),
+               mpl.patches.Patch(color='#888888', alpha=0.3,
+                                 label='Interquartile range')]
+    fig.legend(handles=handles, loc='upper center', ncol=3, frameon=False,
+               bbox_to_anchor=(0.55, 1.0))
+    fig.savefig(out / 'n_saturation_agg.pdf')
+    fig.savefig(out / 'n_saturation_agg.png', dpi=300)
+    plt.close(fig)
+    pd.DataFrame(rows, columns=['kernel', 'bd_original_tercile', 'curve',
+                                'n_cols', 'geomean', 'q1', 'q3',
+                                'n_matrices']).to_csv(
+        out / 'n_saturation_agg.csv', index=False)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     ap.add_argument('--out', default='plots/n_density')
@@ -233,6 +315,7 @@ def main():
     print(d.groupby('pick')['matrix'].nunique().sort_values(ascending=False))
     fig_heatmap(d, out)
     fig_saturation(d, out)
+    fig_saturation_agg(d, out)
     print(f'Saved to {out}')
 
 
