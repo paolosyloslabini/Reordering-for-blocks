@@ -20,14 +20,11 @@ Figures (original matrices, symmetric reordering):
                          mid / high starting block density), original vs.
                          reordered; one panel per (matrix, kernel). Absolute
                          GFLOPS are only compared within a panel.
-  n_saturation_agg.pdf   the same over all matrices: rows = terciles of the
-                         original block density, columns = kernels. Both
-                         curves of a matrix are divided by the matrix's own
-                         original GFLOPS at N=32; geometric mean over the
-                         matrices (so the gap between the curves is the
-                         geomean speedup), band = interquartile range. Only
-                         matrices measured at every N for that kernel, so
-                         the set of matrices does not change along N.
+  n_speedup_scatter.pdf  one point per matrix: speedup at N=32 (x) vs.
+                         at N=1024 (y), colour = original block density;
+                         one panel per kernel. Above the diagonal, the
+                         reordering pays more with the wider dense operand
+                         (above / below counted with a 5 % tolerance).
 
 Run from the repo root:
     .venv/Scripts/python.exe scripts/n_density_figures.py [--out plots/n_density]
@@ -86,8 +83,7 @@ def picked(dataset='original', perm_type='SYMMETRIC'):
 
 
 def kernels_of(d):
-    ks = _ordered_kernels(d, KERNEL_NAMES)
-    return [k for k in ks if k != 'CUSPARSE_SPMM_BSR_bs32']
+    return _ordered_kernels(d, KERNEL_NAMES)
 
 
 def density_bins(d):
@@ -109,7 +105,7 @@ def fig_heatmap(d, out):
     labels = [f'{_fmt(a)}–{_fmt(b)}' for a, b in zip(edges[:-1], edges[1:])]
     norm = LogNorm(*SPEEDUP_LIM)
 
-    fig, axes = plt.subplots(1, len(kernels), figsize=(PAGE_W, 1.95),
+    fig, axes = plt.subplots(1, len(kernels), figsize=(PAGE_W, 2.1),
                              sharey=True)
     rows = []
     for ax, k in zip(axes, kernels):
@@ -131,21 +127,24 @@ def fig_heatmap(d, out):
                 rows.append((PAPER_KERNEL_NAMES.get(k, k), labels[i], n, v,
                              int(cnt.values[i, j])))
         ax.set_xticks(range(len(N_VALUES)))
-        ax.set_xticklabels(N_VALUES)
+        ax.set_xticklabels(['32', '256', '1k'])
         ax.set_yticks(range(N_BINS))
         ax.set_yticklabels(labels)
         ax.tick_params(length=0)
         for sp in ax.spines.values():
             sp.set_visible(False)
-        ax.set_title(PAPER_KERNEL_NAMES.get(k, k), fontsize=8.5, pad=3)
+        title = PAPER_KERNEL_NAMES.get(k, k)
+        if len(title) > 11:           # cuSPARSE-BSR / -CSR: too wide for a panel
+            title = title.replace('-', '-\n', 1)
+        ax.set_title(title, fontsize=7.5, pad=3, linespacing=0.95)
         ax.grid(False)
     axes[0].set_ylabel('Original block density\n'
                        r'($16\times16$, quintiles)')
     fig.supxlabel(r'Dense operand width $N$ (columns of $B$)', fontsize=9,
                   y=0.0)
-    fig.subplots_adjust(left=0.115, right=0.9, top=0.86, bottom=0.2,
-                        wspace=0.08)
-    cax = fig.add_axes([0.915, 0.2, 0.012, 0.66])
+    fig.subplots_adjust(left=0.115, right=0.9, top=0.8, bottom=0.2,
+                        wspace=0.1)
+    cax = fig.add_axes([0.915, 0.2, 0.012, 0.6])
     cb = fig.colorbar(mpl.cm.ScalarMappable(norm=norm, cmap=CMAP), cax=cax)
     ticks = [0.5, 0.71, 1, 1.41, 2]
     cb.set_ticks(ticks)
@@ -197,8 +196,8 @@ def fig_saturation(d, out):
             ax.set_xscale('log', base=2)
             ax.set_yscale('log')
             ax.set_xticks(N_VALUES)
-            ax.set_xticklabels(N_VALUES)
-            ax.yaxis.set_major_locator(mpl.ticker.LogLocator(subs=(1, 2, 5)))
+            ax.set_xticklabels(['32', '256', '1k'])
+            ax.set_xlim(N_VALUES[0] / 1.6, N_VALUES[-1] * 1.6)
             ax.yaxis.set_minor_locator(mpl.ticker.NullLocator())
             ax.xaxis.set_minor_locator(mpl.ticker.NullLocator())
             ax.yaxis.set_major_formatter(mpl.ticker.FuncFormatter(_gflops))
@@ -207,8 +206,10 @@ def fig_saturation(d, out):
             lo = min(s['gflops_original'].min(), s['gflops'].min())
             hi = max(s['gflops_original'].max(), s['gflops'].max())
             ax.set_ylim(lo / 1.5, hi * 1.5)
+            subs = (1, 2, 5) if hi / lo > 4 else (1, 1.5, 2, 3, 5, 7)
+            ax.yaxis.set_major_locator(mpl.ticker.LogLocator(subs=subs))
             if r == 0:
-                ax.set_title(PAPER_KERNEL_NAMES.get(k, k), fontsize=8.5, pad=3)
+                ax.set_title(PAPER_KERNEL_NAMES.get(k, k), fontsize=7.5, pad=3)
         name = m.removesuffix('.mtx')
         axes[r][0].set_ylabel(
             f'{name}\n$\\rho_{{16}}$ {info.bd_original:.2f}→{info.bd_picked:.2f}'
@@ -229,78 +230,86 @@ def fig_saturation(d, out):
     d[d['matrix'].isin(mats)].to_csv(out / 'n_saturation.csv', index=False)
 
 
-TERCILE_NAMES = ('Low', 'Mid', 'High')
+SCATTER_LIM = (1 / 4, 16)
+DIAG_TOL = 1.05   # above / below the diagonal only if > 5 % apart
+BD_CMAP = LinearSegmentedColormap.from_list('bd', ['#9ecae1', '#6baed6',
+                                                   '#2171b5', '#08306b'])
 
 
-def fig_saturation_agg(d, out):
+def fig_speedup_n_scatter(d, out, n_lo=N_VALUES[0], n_hi=N_VALUES[-1]):
+    """One point per matrix: speedup at n_lo (x) vs at n_hi (y), colour =
+    original block density. Above the diagonal: reordering pays more at the
+    wider dense operand."""
     kernels = kernels_of(d)
-    per_matrix = d.drop_duplicates('matrix')['bd_original']
-    edges = np.quantile(per_matrix, [0, 1 / 3, 2 / 3, 1])
-    edges[0], edges[-1] = edges[0] * 0.999, edges[-1] * 1.001
-    d = d.assign(tercile=pd.cut(d['bd_original'], edges, labels=False))
-    fig, axes = plt.subplots(3, len(kernels), figsize=(PAGE_W, 3.7),
-                             sharex=True, sharey='col')
+    w = (d[d['n_cols'].isin([n_lo, n_hi])]
+         .pivot_table(index=['kernel_id', 'matrix'], columns='n_cols',
+                      values='speedup')
+         .dropna().reset_index())
+    bd = d.drop_duplicates('matrix').set_index('matrix')['bd_original']
+    w['bd'] = w['matrix'].map(bd)
+    norm = LogNorm(bd.min(), bd.max())
+    ncol = 4
+    fig, axes = plt.subplots(2, ncol, figsize=(PAGE_W, 3.75), sharex=True,
+                             sharey=True)
+    axes = axes.ravel()
+    lo, hi = SCATTER_LIM
     rows = []
-    for c, k in enumerate(kernels):
-        s = d[d['kernel_id'] == k]
-        full = s.groupby('matrix')['n_cols'].nunique()
-        s = s[s['matrix'].isin(full[full == len(N_VALUES)].index)]
-        ref = s[s['n_cols'] == N_VALUES[0]].set_index('matrix')['gflops_original']
-        s = s.assign(orig=s['gflops_original'] / s['matrix'].map(ref),
-                     reord=s['gflops'] / s['matrix'].map(ref))
-        for r in range(3):
-            ax = axes[2 - r][c]          # high density on top, as in the heatmap
-            t = s[s['tercile'] == r]
-            nm = t['matrix'].nunique()
-            for col, color, ls in (('orig', C_ORIG, '-'), ('reord', C_REORD, '--')):
-                g = t.groupby('n_cols')[col]
-                gm = g.apply(lambda x: np.exp(np.log(x).mean())).reindex(N_VALUES)
-                q1 = g.quantile(0.25).reindex(N_VALUES)
-                q3 = g.quantile(0.75).reindex(N_VALUES)
-                ax.fill_between(N_VALUES, q1, q3, color=color, alpha=0.13, lw=0)
-                ax.plot(N_VALUES, gm, ls, color=color, lw=1.2, marker='o', ms=2.8)
-                for n in N_VALUES:
-                    rows.append((PAPER_KERNEL_NAMES.get(k, k), TERCILE_NAMES[r],
-                                 col, n, gm[n], q1[n], q3[n], nm))
-            ax.text(0.04, 0.96, f'$n$={nm}', transform=ax.transAxes,
-                    ha='left', va='top', fontsize=6.5, color='#555555')
-            ax.set_xscale('log', base=2)
-            ax.set_yscale('log', base=2)
-            ax.set_xticks(N_VALUES)
-            ax.set_xticklabels(['32', '256', '1k'])
-            ax.set_xlim(N_VALUES[0] / 1.6, N_VALUES[-1] * 1.6)
-            ax.xaxis.set_minor_locator(mpl.ticker.NullLocator())
-            ax.yaxis.set_minor_locator(mpl.ticker.NullLocator())
-            ax.tick_params(axis='y', labelsize=6.5)
-            ax.yaxis.set_major_formatter(mpl.ticker.FuncFormatter(
-                lambda y, _: f'{y:g}×'))
-            ax.grid(True, which='major', color='#b0b0b0', lw=0.6)
-        axes[0][c].set_title(PAPER_KERNEL_NAMES.get(k, k), fontsize=8.5, pad=3)
-    for r in range(3):
-        a, b = edges[r], edges[r + 1]
-        axes[2 - r][0].set_ylabel(f'{TERCILE_NAMES[r]} $\\rho_{{16}}$\n'
-                                  f'({_fmt(a)}–{_fmt(b)})', fontsize=7.5)
-    fig.supxlabel(r'Dense operand width $N$ (columns of $B$)', fontsize=9,
-                  y=0.0)
-    fig.supylabel(r'GFLOPS / GFLOPS$_{\mathrm{original}}(N{=}32)$',
-                  fontsize=8.5, x=0.0)
-    fig.subplots_adjust(left=0.105, right=0.995, top=0.88, bottom=0.1,
-                        wspace=0.3, hspace=0.1)
-    handles = [Line2D([], [], color=C_ORIG, marker='o', ms=2.8, lw=1.2,
-                      label='Original'),
-               Line2D([], [], color=C_REORD, ls='--', marker='o', ms=2.8,
-                      lw=1.2, label='Reordered (highest block density)'),
-               mpl.patches.Patch(color='#888888', alpha=0.3,
-                                 label='Interquartile range')]
-    fig.legend(handles=handles, loc='upper center', ncol=3, frameon=False,
-               bbox_to_anchor=(0.55, 1.0))
-    fig.savefig(out / 'n_saturation_agg.pdf')
-    fig.savefig(out / 'n_saturation_agg.png', dpi=300)
+    for ax, k in zip(axes, kernels):
+        s = w[w['kernel_id'] == k].sort_values('bd', ascending=False)
+        x = s[n_lo].clip(lo * 1.05, hi / 1.05)
+        y = s[n_hi].clip(lo * 1.05, hi / 1.05)
+        ax.plot([lo, hi], [lo, hi], color='#777777', lw=0.7, zorder=1)
+        ax.axhline(1, color='#bbbbbb', lw=0.5, zorder=1)
+        ax.axvline(1, color='#bbbbbb', lw=0.5, zorder=1)
+        ax.scatter(x, y, c=s['bd'], cmap=BD_CMAP, norm=norm, s=7, lw=0.25,
+                   edgecolors='white', zorder=2, rasterized=True)
+        ratio = s[n_hi] / s[n_lo]
+        above = (ratio > DIAG_TOL).mean()
+        below = (ratio < 1 / DIAG_TOL).mean()
+        ax.text(0.04, 0.96, f'above: {above:.0%}, below: {below:.0%}\n'
+                f'$n$={len(s)}',
+                transform=ax.transAxes, ha='left', va='top', fontsize=6.5,
+                color='#333333', linespacing=1.1)
+        ax.set_xscale('log', base=2)
+        ax.set_yscale('log', base=2)
+        ax.set_xlim(lo, hi)
+        ax.set_ylim(lo, hi)
+        ax.set_aspect('equal')
+        ticks = [0.5, 1, 2, 4, 8, 16]
+        ax.set_xticks(ticks)
+        ax.set_yticks(ticks)
+        fmt = mpl.ticker.FuncFormatter(lambda v, _: f'{v:g}×')
+        ax.xaxis.set_major_formatter(fmt)
+        ax.yaxis.set_major_formatter(fmt)
+        ax.xaxis.set_minor_locator(mpl.ticker.NullLocator())
+        ax.yaxis.set_minor_locator(mpl.ticker.NullLocator())
+        ax.tick_params(labelsize=6.5)
+        ax.grid(True, color='#e4e4e4', lw=0.4)
+        ax.set_title(PAPER_KERNEL_NAMES.get(k, k), fontsize=8, pad=2)
+        rows.append((PAPER_KERNEL_NAMES.get(k, k), len(s), above, below,
+                     float(np.exp(np.log(s[n_lo]).mean())),
+                     float(np.exp(np.log(s[n_hi]).mean()))))
+    # Last slot: colour bar for the original block density.
+    cax = axes[-1]
+    cax.set_visible(False)
+    pos = cax.get_position()
+    fig.subplots_adjust(left=0.08, right=0.99, top=0.93, bottom=0.11,
+                        wspace=0.12, hspace=0.25)
+    pos = axes[-1].get_position()
+    bar = fig.add_axes([pos.x0 + 0.02, pos.y0 + 0.02, 0.018, pos.height - 0.04])
+    cb = fig.colorbar(mpl.cm.ScalarMappable(norm=norm, cmap=BD_CMAP), cax=bar)
+    cb.set_label('Original block density\n' r'($16\times16$)', fontsize=7.5)
+    cb.ax.tick_params(labelsize=6.5)
+    cb.outline.set_linewidth(0.4)
+    fig.supxlabel(f'Speedup at $N={n_lo}$', fontsize=9, y=0.0)
+    fig.supylabel(f'Speedup at $N={n_hi}$', fontsize=9, x=0.0)
+    fig.savefig(out / 'n_speedup_scatter.pdf')
+    fig.savefig(out / 'n_speedup_scatter.png', dpi=300)
     plt.close(fig)
-    pd.DataFrame(rows, columns=['kernel', 'bd_original_tercile', 'curve',
-                                'n_cols', 'geomean', 'q1', 'q3',
-                                'n_matrices']).to_csv(
-        out / 'n_saturation_agg.csv', index=False)
+    pd.DataFrame(rows, columns=['kernel', 'n_matrices', 'share_above', 'share_below',
+                                f'geomean_speedup_N{n_lo}',
+                                f'geomean_speedup_N{n_hi}']).to_csv(
+        out / 'n_speedup_scatter.csv', index=False)
 
 
 def main():
@@ -315,7 +324,7 @@ def main():
     print(d.groupby('pick')['matrix'].nunique().sort_values(ascending=False))
     fig_heatmap(d, out)
     fig_saturation(d, out)
-    fig_saturation_agg(d, out)
+    fig_speedup_n_scatter(d, out)
     print(f'Saved to {out}')
 
 
