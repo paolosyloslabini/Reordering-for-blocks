@@ -312,6 +312,199 @@ def fig_speedup_n_scatter(d, out, n_lo=N_VALUES[0], n_hi=N_VALUES[-1]):
         out / 'n_speedup_scatter.csv', index=False)
 
 
+# ---------------------------------------------------------------------------
+# All reorderings of a matrix: within-matrix elasticity of speedup to block
+# density, and whether the fastest reordering changes with N.
+# ---------------------------------------------------------------------------
+
+ELAST_MIN_REORD = 4           # reorderings needed to fit a matrix's slope
+ELAST_MIN_RANGE = np.log(1.5)  # ... spanning >= 1.5x in block density
+N_BOOT = 2000
+# Okabe-Ito (colour-blind safe); lines are also labelled directly.
+KERNEL_COLORS = {
+    'ACCSPMM_SPMM': '#E69F00', 'ASPT_SPMM': '#999999',
+    'CUSPARSE_SPMM_BSR_bs32': '#0072B2', 'CUSPARSE_SPMM_CSR': '#56B4E9',
+    'DTC_SPMM': '#D55E00', 'FLASHSPARSE_SPMM': '#009E73',
+    'SMAT_SPMM_bs32': '#CC79A7',
+}
+CENTRED_KERNELS = ('DTC_SPMM', 'CUSPARSE_SPMM_BSR_bs32', 'CUSPARSE_SPMM_CSR')
+
+
+def all_reorderings(dataset='original', perm_type='SYMMETRIC'):
+    """(matrix, kernel, N, reordering): log speedup and log block-density
+    improvement, both relative to the same matrix unreordered. The original
+    ordering is included as the point (0, 0)."""
+    df, _ = load_pipeline(dataset, perm_type)
+    d = df[df['strategy'] != 'Original'].dropna(
+        subset=['speedup', f'density_improvement_16'])
+    d = d[(d['speedup'] > 0) & (d['density_improvement_16'] > 0)]
+    d = (d.groupby(['matrix', 'kernel_id', 'n_cols', 'strategy'], as_index=False)
+          .agg(speedup=('speedup', 'mean'),
+               dens=('density_improvement_16', 'first')))
+    d['ly'], d['lx'] = np.log(d['speedup']), np.log(d['dens'])
+    orig = d[['matrix', 'kernel_id', 'n_cols']].drop_duplicates().assign(
+        strategy='Original', speedup=1.0, dens=1.0, ly=0.0, lx=0.0)
+    return pd.concat([d, orig], ignore_index=True)
+
+
+def matrix_slopes(r):
+    """OLS slope of log speedup on log block-density improvement, per
+    (matrix, kernel, N). Only matrices whose reorderings vary enough in block
+    density, and that qualify at every N for that kernel."""
+    rows = []
+    for (m, k, n), g in r.groupby(['matrix', 'kernel_id', 'n_cols']):
+        if len(g) - 1 < ELAST_MIN_REORD or np.ptp(g['lx']) < ELAST_MIN_RANGE:
+            continue
+        x = g['lx'] - g['lx'].mean()
+        rows.append((m, k, n, float((x * g['ly']).sum() / (x * x).sum())))
+    b = pd.DataFrame(rows, columns=['matrix', 'kernel_id', 'n_cols', 'beta'])
+    full = b.groupby(['kernel_id', 'matrix'])['n_cols'].transform('nunique')
+    return b[full == len(N_VALUES)]
+
+
+def _boot_median(v, rng):
+    idx = rng.integers(0, len(v), (N_BOOT, len(v)))
+    return np.quantile(np.median(v[idx], axis=1), [0.025, 0.975])
+
+
+def fig_elasticity(r, out):
+    b = matrix_slopes(r)
+    kernels = kernels_of(b)
+    rng = np.random.default_rng(0)
+    fig, ax = plt.subplots(figsize=(COL_W, 2.5))
+    rows, ends = [], []
+    for k in kernels:
+        s = b[b['kernel_id'] == k]
+        med, lo, hi = [], [], []
+        for n in N_VALUES:
+            v = s.loc[s['n_cols'] == n, 'beta'].to_numpy()
+            med.append(np.median(v))
+            ci = _boot_median(v, rng)
+            lo.append(ci[0]); hi.append(ci[1])
+            rows.append((PAPER_KERNEL_NAMES.get(k, k), n, med[-1], ci[0],
+                         ci[1], s['matrix'].nunique()))
+        c = KERNEL_COLORS.get(k, '#333333')
+        ax.fill_between(N_VALUES, lo, hi, color=c, alpha=0.15, lw=0)
+        ax.plot(N_VALUES, med, '-o', color=c, lw=1.3, ms=3)
+        ends.append([med[-1], PAPER_KERNEL_NAMES.get(k, k), c,
+                     s['matrix'].nunique()])
+    # Direct labels at the right end, nudged apart so they do not overlap.
+    ends.sort()
+    ymin, ymax = ax.get_ylim()
+    gap = 0.065 * (ymax - ymin)
+    for i in range(1, len(ends)):
+        ends[i][0] = max(ends[i][0], ends[i - 1][0] + gap)
+    for y, name, c, nm in ends:
+        ax.text(N_VALUES[-1] * 1.25, y, f'{name} ({nm})', color=c,
+                fontsize=7, va='center', ha='left', fontweight='bold')
+    ax.axhline(0, color='#777777', lw=0.6)
+    ax.set_xscale('log', base=2)
+    ax.set_xticks(N_VALUES)
+    ax.set_xticklabels(N_VALUES)
+    ax.xaxis.set_minor_locator(mpl.ticker.NullLocator())
+    ax.set_xlim(N_VALUES[0] / 1.4, N_VALUES[-1] * 8)
+    ax.spines['right'].set_visible(False)
+    ax.spines['top'].set_visible(False)
+    ax.grid(True, axis='y', color='#e4e4e4', lw=0.4)
+    ax.grid(False, axis='x')
+    for n in N_VALUES:
+        ax.axvline(n, color='#e4e4e4', lw=0.4, zorder=0)
+    ax.set_xlabel(r'Dense operand width $N$')
+    ax.set_ylabel('Within-matrix elasticity $\\beta$\n'
+                  r'(speedup vs. block density, median)')
+    fig.savefig(out / 'n_elasticity.pdf')
+    fig.savefig(out / 'n_elasticity.png', dpi=300)
+    plt.close(fig)
+    pd.DataFrame(rows, columns=['kernel', 'n_cols', 'median_beta', 'ci_lo',
+                                'ci_hi', 'n_matrices']).to_csv(
+        out / 'n_elasticity.csv', index=False)
+    b.to_csv(out / 'n_elasticity_per_matrix.csv', index=False)
+    return b
+
+
+def fig_elasticity_centred(r, b, out, n_show=(N_VALUES[0], N_VALUES[-1])):
+    """Every (matrix, reordering) point, both axes centred on the matrix's own
+    mean: only within-matrix variation is left. Same matrices as the slopes."""
+    kernels = [k for k in CENTRED_KERNELS if k in set(b['kernel_id'])]
+    fig, axes = plt.subplots(len(n_show), len(kernels),
+                             figsize=(PAGE_W, 1.95 * len(n_show) + 0.35),
+                             sharex=True, sharey=True)
+    lim = 1.6
+    for c, k in enumerate(kernels):
+        keep = set(b.loc[b['kernel_id'] == k, 'matrix'])
+        for rr, n in enumerate(n_show):
+            ax = axes[rr][c]
+            g = r[(r['kernel_id'] == k) & (r['n_cols'] == n)
+                  & r['matrix'].isin(keep)].copy()
+            g['cx'] = g['lx'] - g.groupby('matrix')['lx'].transform('mean')
+            g['cy'] = g['ly'] - g.groupby('matrix')['ly'].transform('mean')
+            ax.hexbin(g['cx'], g['cy'], gridsize=34, bins='log', mincnt=1,
+                      cmap='Greys', extent=(-lim, lim, -lim, lim),
+                      linewidths=0.1, rasterized=True)
+            beta = float((g['cx'] * g['cy']).sum() / (g['cx'] ** 2).sum())
+            xs = np.array([-lim, lim])
+            ax.plot(xs, beta * xs, color=KERNEL_COLORS[k], lw=1.4)
+            ax.axhline(0, color='#bbbbbb', lw=0.5)
+            ax.axvline(0, color='#bbbbbb', lw=0.5)
+            ax.text(0.04, 0.96, f'pooled $\\beta$ = {beta:.2f}\n'
+                    f'{g["matrix"].nunique()} matrices',
+                    transform=ax.transAxes, ha='left', va='top', fontsize=7,
+                    color='#222222')
+            ax.set_xlim(-lim, lim)
+            ax.set_ylim(-lim, lim)
+            ax.set_aspect('equal')
+            ticks = np.log([1 / 4, 1 / 2, 1, 2, 4])
+            ax.set_xticks(ticks)
+            ax.set_yticks(ticks)
+            f = mpl.ticker.FuncFormatter(lambda v, _: f'{np.exp(v):g}×')
+            ax.xaxis.set_major_formatter(f)
+            ax.yaxis.set_major_formatter(f)
+            ax.tick_params(labelsize=7)
+            ax.grid(False)
+            if rr == 0:
+                ax.set_title(PAPER_KERNEL_NAMES.get(k, k), fontsize=8.5, pad=3)
+        for rr, n in enumerate(n_show):
+            axes[rr][-1].yaxis.set_label_position('right')
+            axes[rr][-1].set_ylabel(f'$N={n}$', rotation=270, labelpad=10,
+                                    fontweight='bold')
+    fig.supxlabel('Block-density improvement, relative to the matrix mean',
+                  fontsize=9, y=0.0)
+    fig.supylabel('Speedup, relative to the matrix mean', fontsize=9, x=0.0)
+    fig.subplots_adjust(left=0.1, right=0.93, top=0.93, bottom=0.1,
+                        wspace=0.08, hspace=0.1)
+    fig.savefig(out / 'n_elasticity_centred.pdf')
+    fig.savefig(out / 'n_elasticity_centred.png', dpi=300)
+    plt.close(fig)
+
+
+def best_reordering_changes(r, out, n_lo=N_VALUES[0], n_hi=N_VALUES[-1]):
+    """Share of matrices whose fastest ordering (original included) at n_lo
+    is not the fastest at n_hi; and the speedup lost at n_hi by keeping the
+    n_lo choice. Only orderings measured at both N compete."""
+    rows = []
+    for k, s in r.groupby('kernel_id'):
+        w = s[s['n_cols'].isin([n_lo, n_hi])].pivot_table(
+            index=['matrix', 'strategy'], columns='n_cols', values='speedup'
+        ).dropna().reset_index()
+        changed, loss = [], []
+        for m, g in w.groupby('matrix'):
+            if len(g) < 3:
+                continue
+            a = g.loc[g[n_lo].idxmax()]
+            best_hi = g[n_hi].max()
+            changed.append(a['strategy'] != g.loc[g[n_hi].idxmax(), 'strategy'])
+            loss.append(best_hi / a[n_hi])
+        rows.append((PAPER_KERNEL_NAMES.get(k, k), len(changed),
+                     float(np.mean(changed)), float(np.median(loss)),
+                     float(np.mean(np.array(loss) > 1.05))))
+    t = pd.DataFrame(rows, columns=['kernel', 'n_matrices',
+                                    f'share_best_changes_{n_lo}_to_{n_hi}',
+                                    f'median_loss_keeping_N{n_lo}_pick',
+                                    'share_loss_over_5pct'])
+    t.to_csv(out / 'n_best_reordering_changes.csv', index=False)
+    print(t.to_string(index=False))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     ap.add_argument('--out', default='plots/n_density')
@@ -325,6 +518,10 @@ def main():
     fig_heatmap(d, out)
     fig_saturation(d, out)
     fig_speedup_n_scatter(d, out)
+    r = all_reorderings()
+    b = fig_elasticity(r, out)
+    fig_elasticity_centred(r, b, out)
+    best_reordering_changes(r, out)
     print(f'Saved to {out}')
 
 
