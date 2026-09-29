@@ -25,9 +25,10 @@ Figures (original matrices, symmetric reordering):
                          one panel per kernel. Above the diagonal, the
                          reordering pays more with the wider dense operand
                          (above / below counted with a 5 % tolerance).
-  corr_blocksize_ncols_beta.pdf
+  corr_blocksize_ncols_alpha.pdf
                          the paper's corr_blocksize_ncols plus a third panel:
-                         median within-matrix elasticity beta by N (95 % CI)
+                         median within-matrix elasticity alpha by N (95 % CI);
+                         r panels green, alpha panel purple
 
 Run from the repo root:
     .venv/Scripts/python.exe scripts/n_density_figures.py [--out plots/n_density]
@@ -508,12 +509,19 @@ def best_reordering_changes(r, out, n_lo=N_VALUES[0], n_hi=N_VALUES[-1]):
     print(t.to_string(index=False))
 
 
+# Colour = quantity: correlation r green, elasticity alpha purple
+# (light -> dark = small -> large block size / N).
+R_BS_COLORS = ['#e5f5e0', '#c7e9c0', '#a1d99b', '#74c476', '#31a354', '#006d2c']
+R_NCOLS_COLORS = ['#c7e9c0', '#74c476', '#006d2c']
+ALPHA_NCOLS_COLORS = ['#dadaeb', '#9e9ac8', '#54278f']
+
+
 def fig_corr_with_beta(out):
     """The paper's corr_blocksize_ncols (r by block size at N=256; r by N at
-    16x16) with a third panel: median within-matrix elasticity beta by N,
-    bootstrap 95 % CI. Same kernels, same N colours."""
-    from paper_figures import (_bars, _corr_values, _legend_top, BS_COLORS,
-                               NCOLS_COLORS, NCOLS_HATCHES)
+    16x16) with a third panel: median within-matrix elasticity alpha (the
+    paper's \\elast) by N, bootstrap 95 % CI. Colour = quantity: r green,
+    alpha purple."""
+    from paper_figures import _bars, _corr_values, _legend_top, NCOLS_HATCHES
     from settings import BLOCK_SIZES
     from correlation_table import compute_imp_correlations
     df, _ = load_pipeline('original', 'SYMMETRIC')
@@ -522,10 +530,10 @@ def fig_corr_with_beta(out):
     corr = compute_imp_correlations(df, 256, bs_metrics, kernels,
                                     method='pearson', log_transform=True)
     top = [(_corr_values(corr, kernels, m), f'${bs}{{\\times}}{bs}$', c, '')
-           for m, bs, c in zip(bs_metrics, BLOCK_SIZES, BS_COLORS)]
+           for m, bs, c in zip(bs_metrics, BLOCK_SIZES, R_BS_COLORS)]
     ncols = sorted(df['n_cols'].unique())
     mid = []
-    for nc, c, h in zip(ncols, NCOLS_COLORS, NCOLS_HATCHES):
+    for nc, c, h in zip(ncols, R_NCOLS_COLORS, NCOLS_HATCHES):
         cd = compute_imp_correlations(df, nc, ['density_improvement_16'],
                                       kernels, method='pearson',
                                       log_transform=True)
@@ -535,7 +543,7 @@ def fig_corr_with_beta(out):
     b = matrix_slopes(all_reorderings())
     rng = np.random.default_rng(0)
     bottom, errs, rows = [], [], []
-    for nc, c, h in zip(ncols, NCOLS_COLORS, NCOLS_HATCHES):
+    for nc, c, h in zip(ncols, ALPHA_NCOLS_COLORS, NCOLS_HATCHES):
         med, lo, hi = [], [], []
         for k in kernels:
             v = b.loc[(b['kernel_id'] == k) & (b['n_cols'] == nc), 'beta'].to_numpy()
@@ -571,14 +579,14 @@ def fig_corr_with_beta(out):
     fig.text(0.0, ymid, 'Pearson correlation of block density and speedup',
              rotation=90, ha='left', va='center', fontsize=9)
     p3 = a3.get_position()
-    fig.text(0.0, (p3.y0 + p3.y1) / 2, 'Elasticity $\\beta$',
+    fig.text(0.0, (p3.y0 + p3.y1) / 2, r'Elasticity $\alpha$ (within-matrix)',
              rotation=90, ha='left', va='center', fontsize=9)
-    fig.savefig(out / 'corr_blocksize_ncols_beta.pdf')
-    fig.savefig(out / 'corr_blocksize_ncols_beta.png', dpi=300)
+    fig.savefig(out / 'corr_blocksize_ncols_alpha.pdf')
+    fig.savefig(out / 'corr_blocksize_ncols_alpha.png', dpi=300)
     plt.close(fig)
-    pd.DataFrame(rows, columns=['kernel', 'n_cols', 'median_beta', 'ci_lo',
+    pd.DataFrame(rows, columns=['kernel', 'n_cols', 'median_alpha', 'ci_lo',
                                 'ci_hi', 'n_matrices']).to_csv(
-        out / 'corr_blocksize_ncols_beta.csv', index=False)
+        out / 'corr_blocksize_ncols_alpha.csv', index=False)
 
 
 def main():
