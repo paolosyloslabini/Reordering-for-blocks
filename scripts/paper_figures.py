@@ -108,8 +108,11 @@ RATIO_XLIM = (0.05, 10)
 C_UP, C_DOWN, C_MIXED = '#006400', '#8B0000', '#A0A0A0'
 
 # Block-size shades (purple) and n_cols shades (teal), as in the thesis.
-BS_COLORS = ['#f0d9f0', '#d9a6d9', '#b06cb0', '#8c3f8c', '#6a1b6a', '#3d003d']
-NCOLS_COLORS = ['#b2dfdb', '#4db6ac', '#00695c']
+# Colour = quantity: correlation r green, elasticity alpha purple
+# (light -> dark = small -> large block size / n_cols).
+BS_COLORS = ['#e5f5e0', '#c7e9c0', '#a1d99b', '#74c476', '#31a354', '#006d2c']
+NCOLS_COLORS = ['#c7e9c0', '#74c476', '#006d2c']
+ALPHA_NCOLS_COLORS = ['#dadaeb', '#9e9ac8', '#54278f']
 NCOLS_HATCHES = ['', '//////', '']
 
 # Structural metrics (Fig. corr_by_metric). Neutral greys + hatches, so they
@@ -156,6 +159,88 @@ def style_ratio_scatter(ax, x_majors=(0.1, 0.3, 1, 3, 10)):
     ax.axvline(1, color='#CC0000', linestyle='--', linewidth=0.8, alpha=0.8, zorder=2)
 
 
+# ---------------------------------------------------------------------------
+# Within-matrix fit. Every ratio is already relative to the same matrix
+# unreordered; pooling them across matrices would still let differences
+# between matrices drive r and alpha. So log ratios are centred on each
+# matrix's own mean before fitting: r and alpha then measure only how block
+# density explains the differences between reorderings of the same matrix.
+# ---------------------------------------------------------------------------
+
+WITHIN_MIN_REORD = 3   # reorderings a matrix needs to enter the fit
+
+
+def _centred(d, xcol, ycol='speedup'):
+    """Per-matrix centred log x and log y (one row per matrix/reordering)."""
+    g = d[['matrix', 'strategy', xcol, ycol]].dropna()
+    g = g[(g[xcol] > 0) & (g[ycol] > 0) & np.isfinite(g[xcol])]
+    g = g.groupby(['matrix', 'strategy'], as_index=False)[[xcol, ycol]].mean()
+    g = g[g.groupby('matrix')['strategy'].transform('size') >= WITHIN_MIN_REORD]
+    lx, ly = np.log(g[xcol]), np.log(g[ycol])
+    cx = lx - lx.groupby(g['matrix']).transform('mean')
+    cy = ly - ly.groupby(g['matrix']).transform('mean')
+    return g['matrix'].to_numpy(), cx.to_numpy(), cy.to_numpy()
+
+
+def within_fit(d, xcol, ycol='speedup'):
+    """(r, alpha, n_matrices) of the within-matrix log-log fit."""
+    m, cx, cy = _centred(d, xcol, ycol)
+    if len(cx) < 10 or (cx ** 2).sum() == 0:
+        return np.nan, np.nan, 0
+    r = float(np.corrcoef(cx, cy)[0, 1])
+    alpha = float((cx * cy).sum() / (cx * cx).sum())
+    return r, alpha, len(set(m))
+
+
+def within_alpha_ci(d, xcol, ycol='speedup', n_boot=2000, seed=0):
+    """Bootstrap (over matrices) 95 % CI of the within-matrix alpha."""
+    m, cx, cy = _centred(d, xcol, ycol)
+    t = pd.DataFrame({'m': m, 'xy': cx * cy, 'xx': cx * cx}).groupby('m').sum()
+    xy, xx = t['xy'].to_numpy(), t['xx'].to_numpy()
+    idx = np.random.default_rng(seed).integers(0, len(t), (n_boot, len(t)))
+    return np.quantile(xy[idx].sum(1) / xx[idx].sum(1), [0.025, 0.975])
+
+
+def within_corr_table(df, n_cols, metrics, kernels):
+    """Like correlation_table.compute_imp_correlations, within-matrix r."""
+    d = df[(df['n_cols'] == n_cols) & (df['strategy'] != 'Original')]
+    rows = []
+    for k in kernels:
+        dk = d[d['kernel_id'] == k]
+        row = {'kernel': k}
+        for mt in metrics:
+            row[f'{mt}_corr'] = (within_fit(dk, mt)[0] if mt in dk.columns
+                                 else np.nan)
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def _tint(color, t):
+    """color mixed with white; t = 0 white, 1 full colour."""
+    c = np.array(mpl.colors.to_rgb(color))
+    return tuple(1 - t * (1 - c))
+
+
+def quadrant_hexbin(ax, x, y, gridsize):
+    """Hexbin of the (improvement, speedup) points, coloured by quadrant as
+    quadrant_scatter (both up / both down / disagreeing); darker = more
+    points (log counts). The three layers share one hexagon grid."""
+    x, y = np.asarray(x, float), np.asarray(y, float)
+    quad = np.where((x >= 1) & (y >= 1), 0, np.where((x < 1) & (y < 1), 1, 2))
+    x = np.clip(x, RATIO_XLIM[0] * 1.001, RATIO_XLIM[1] / 1.001)
+    y = np.clip(y, RATIO_YLIM[0] * 1.001, RATIO_YLIM[1] / 1.001)
+    extent = (*np.log10(RATIO_XLIM), *np.log10(RATIO_YLIM))
+    for q, color in enumerate((C_UP, C_DOWN, C_MIXED)):
+        sel = quad == q
+        if not sel.any():
+            continue
+        cmap = mpl.colors.LinearSegmentedColormap.from_list(
+            f'q{q}', [_tint(color, 0.25), color])
+        ax.hexbin(x[sel], y[sel], gridsize=gridsize, xscale='log',
+                  yscale='log', extent=extent, bins='log', mincnt=1,
+                  cmap=cmap, linewidths=0.05, zorder=3, rasterized=True)
+
+
 def quadrant_scatter(ax, x, y, size):
     x, y = np.asarray(x, float), np.asarray(y, float)
     colors = np.where((x >= 1) & (y >= 1), C_UP,
@@ -164,9 +249,12 @@ def quadrant_scatter(ax, x, y, size):
                zorder=3, rasterized=True)
 
 
-def annotate_fit(ax, x, y, label, fs=8.5):
-    r = pu._correlation_for_scatter(x, y, 'pearson', log_x=True, log_y=True)
-    alpha = pu._loglog_slope(x, y, log_x=True, log_y=True)
+def annotate_fit(ax, d, xcol, label, fs=8.5):
+    """Within-matrix r and alpha, and the fit line speedup = improvement^alpha
+    through (1, 1)."""
+    r, alpha, _ = within_fit(d, xcol)
+    xs = np.geomspace(*RATIO_XLIM, 50)
+    ax.plot(xs, xs ** alpha, color='#222222', lw=0.9, zorder=4)
     ax.text(0.03, 0.97, f'$r_{{\\log}}={r:.2f}$\n$\\alpha={alpha:.2f}$',
             transform=ax.transAxes, va='top', ha='left', fontsize=fs,
             linespacing=1.1,
@@ -186,9 +274,9 @@ def fig_bsr_sanity(df, out):
     d = df[df['kernel_id'] == 'CUSPARSE_SPMM_BSR_bs32']
     d = d.dropna(subset=['density_improvement_32', 'speedup'])
     fig, ax = plt.subplots(figsize=(COL_W, 1.75))
-    quadrant_scatter(ax, d['density_improvement_32'], d['speedup'], 2)
+    quadrant_hexbin(ax, d['density_improvement_32'], d['speedup'], (60, 20))
     style_ratio_scatter(ax)
-    annotate_fit(ax, d['density_improvement_32'], d['speedup'],
+    annotate_fit(ax, d, 'density_improvement_32',
                  PAPER_KERNEL_NAMES['CUSPARSE_SPMM_BSR_bs32'])
     ax.set_xlabel(r'Block density improvement ($32{\times}32$)')
     ax.set_ylabel(SPEEDUP_LABEL)
@@ -203,10 +291,10 @@ def fig_improvement_vs_speedup(df, out):
                              sharey=True)
     for ax, k in zip(axes.flat, kernels):
         d = df[df['kernel_id'] == k].dropna(subset=['density_improvement_16', 'speedup'])
-        quadrant_scatter(ax, d['density_improvement_16'], d['speedup'], 2)
+        quadrant_hexbin(ax, d['density_improvement_16'], d['speedup'], 30)
         # No 10x label: it would collide with the next panel's first label.
         style_ratio_scatter(ax, x_majors=(0.1, 0.3, 1, 3))
-        annotate_fit(ax, d['density_improvement_16'], d['speedup'],
+        annotate_fit(ax, d, 'density_improvement_16',
                      PAPER_KERNEL_NAMES.get(k, k))
     fig.supxlabel(r'Block density improvement ($16{\times}16$)', fontsize=9,
                   y=0.005)
@@ -224,9 +312,9 @@ def fig_improvement_vs_speedup_row(df, out):
     fig, axes = plt.subplots(1, 6, figsize=(PAGE_W, 1.5), sharex=True, sharey=True)
     for ax, k in zip(axes, kernels):
         d = df[df['kernel_id'] == k].dropna(subset=['density_improvement_16', 'speedup'])
-        quadrant_scatter(ax, d['density_improvement_16'], d['speedup'], 1.2)
+        quadrant_hexbin(ax, d['density_improvement_16'], d['speedup'], 22)
         style_ratio_scatter(ax, x_majors=(0.1, 1, 5))
-        annotate_fit(ax, d['density_improvement_16'], d['speedup'],
+        annotate_fit(ax, d, 'density_improvement_16',
                      PAPER_KERNEL_NAMES.get(k, k), fs=7.5)
     fig.supxlabel(r'Block density improvement ($16{\times}16$)', fontsize=9, y=0.0)
     axes[0].set_ylabel('Speedup')
@@ -302,32 +390,57 @@ def _legend_top(ax, title, ncol, y=1.01, inline=True):
 
 
 def fig_corr_blocksize_ncols(df, out):
+    """Within-matrix r by block size (n_cols = 256, top), r by n_cols (16x16,
+    middle) and within-matrix elasticity alpha by n_cols with bootstrap 95 %
+    CI (bottom). r green, alpha purple."""
     kernels = _ordered_kernels(df, KERNEL_NAMES)
     bs_metrics = [f'density_improvement_{bs}' for bs in BLOCK_SIZES]
-    corr = compute_imp_correlations(df, 256, bs_metrics, kernels,
-                                    method='pearson', log_transform=True)
+    corr = within_corr_table(df, 256, bs_metrics, kernels)
     top = [(_corr_values(corr, kernels, m), f'${bs}{{\\times}}{bs}$', c, '')
            for m, bs, c in zip(bs_metrics, BLOCK_SIZES, BS_COLORS)]
 
     ncols = sorted(df['n_cols'].unique())
-    bottom = []
-    for nc, c, h in zip(ncols, NCOLS_COLORS, NCOLS_HATCHES):
-        cd = compute_imp_correlations(df, nc, ['density_improvement_16'],
-                                      kernels, method='pearson',
-                                      log_transform=True)
-        bottom.append((_corr_values(cd, kernels, 'density_improvement_16'),
-                       f'{int(nc)}', c, h))
+    mid, bottom, errs = [], [], []
+    for i, nc in enumerate(ncols):
+        d = df[(df['n_cols'] == nc) & (df['strategy'] != 'Original')]
+        cd = within_corr_table(df, nc, ['density_improvement_16'], kernels)
+        mid.append((_corr_values(cd, kernels, 'density_improvement_16'),
+                    f'{int(nc)}', NCOLS_COLORS[i], NCOLS_HATCHES[i]))
+        a_, lo, hi = [], [], []
+        for k in kernels:
+            dk = d[d['kernel_id'] == k]
+            al = within_fit(dk, 'density_improvement_16')[1]
+            ci = within_alpha_ci(dk, 'density_improvement_16')
+            a_.append(al); lo.append(al - ci[0]); hi.append(ci[1] - al)
+        bottom.append((np.array(a_), f'{int(nc)}', ALPHA_NCOLS_COLORS[i],
+                       NCOLS_HATCHES[i]))
+        errs.append((np.array(lo), np.array(hi)))
 
-    fig, (a1, a2) = plt.subplots(2, 1, figsize=(COL_W, 3.2), sharex=True)
+    fig, (a1, a2, a3) = plt.subplots(3, 1, figsize=(COL_W, 4.65), sharex=True)
     _bars(a1, top, kernels)
-    _bars(a2, bottom, kernels)
+    _bars(a2, mid, kernels)
+    _bars(a3, bottom, kernels)
+    n = len(bottom)
+    width = 0.84 / n
+    x = np.arange(len(kernels))
+    for i, (lo, hi) in enumerate(errs):
+        a3.errorbar(x + (i - (n - 1) / 2) * width, bottom[i][0],
+                    yerr=[lo, hi], fmt='none', ecolor='#222222',
+                    elinewidth=0.6, capsize=1.2, capthick=0.6, zorder=4)
+    top_a = max(v.max() + e[1].max() for (v, *_), e in zip(bottom, errs))
+    a3.set_ylim(0, np.ceil(top_a / 0.2) * 0.2 + 1e-9)
     a1.tick_params(axis='x', labelbottom=False)
+    a2.tick_params(axis='x', labelbottom=False)
     _legend_top(a1, 'Block size:', ncol=7)
     _legend_top(a2, r'$n_{\mathrm{cols}}$:', ncol=4)
-    fig.subplots_adjust(left=0.1, right=0.995, top=0.93, bottom=0.1, hspace=0.2)
-    # One label for both panels, centred on the axes (not the tick labels).
-    mid = (a1.get_position().y1 + a2.get_position().y0) / 2
-    fig.text(0.0, mid, 'Pearson correlation of block density and speedup',
+    _legend_top(a3, r'$n_{\mathrm{cols}}$:', ncol=4)
+    fig.subplots_adjust(left=0.1, right=0.995, top=0.95, bottom=0.07,
+                        hspace=0.24)
+    ymid = (a1.get_position().y1 + a2.get_position().y0) / 2
+    fig.text(0.0, ymid, r'Pearson correlation $r_{\log}$ (within matrix)',
+             rotation=90, ha='left', va='center', fontsize=9)
+    p3 = a3.get_position()
+    fig.text(0.0, (p3.y0 + p3.y1) / 2, r'Elasticity $\alpha$',
              rotation=90, ha='left', va='center', fontsize=9)
     fig.savefig(out / 'corr_blocksize_ncols.pdf')
     plt.close(fig)
@@ -335,14 +448,12 @@ def fig_corr_blocksize_ncols(df, out):
 
 def fig_corr_by_metric(df, out):
     kernels = _ordered_kernels(df, KERNEL_NAMES)
-    corr = compute_imp_correlations(df, 256, [m for m, *_ in METRICS],
-                                    kernels, method='pearson',
-                                    log_transform=True)
+    corr = within_corr_table(df, 256, [m for m, *_ in METRICS], kernels)
     series = [(_corr_values(corr, kernels, m), lab, c, h)
               for m, lab, c, h in METRICS]
     fig, ax = plt.subplots(figsize=(COL_W, 2.5))
     _bars(ax, series, kernels)
-    ax.set_ylabel('Pearson corr. with speedup')
+    ax.set_ylabel(r'Pearson $r_{\log}$ with speedup')
     _legend_top(ax, 'Improvement of', ncol=4, inline=False)
     fig.subplots_adjust(left=0.1, right=0.995, top=0.74, bottom=0.16)
     fig.savefig(out / 'corr_by_metric.pdf')
