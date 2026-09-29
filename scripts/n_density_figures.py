@@ -25,6 +25,9 @@ Figures (original matrices, symmetric reordering):
                          one panel per kernel. Above the diagonal, the
                          reordering pays more with the wider dense operand
                          (above / below counted with a 5 % tolerance).
+  corr_blocksize_ncols_beta.pdf
+                         the paper's corr_blocksize_ncols plus a third panel:
+                         median within-matrix elasticity beta by N (95 % CI)
 
 Run from the repo root:
     .venv/Scripts/python.exe scripts/n_density_figures.py [--out plots/n_density]
@@ -505,14 +508,92 @@ def best_reordering_changes(r, out, n_lo=N_VALUES[0], n_hi=N_VALUES[-1]):
     print(t.to_string(index=False))
 
 
+def fig_corr_with_beta(out):
+    """The paper's corr_blocksize_ncols (r by block size at N=256; r by N at
+    16x16) with a third panel: median within-matrix elasticity beta by N,
+    bootstrap 95 % CI. Same kernels, same N colours."""
+    from paper_figures import (_bars, _corr_values, _legend_top, BS_COLORS,
+                               NCOLS_COLORS, NCOLS_HATCHES)
+    from settings import BLOCK_SIZES
+    from correlation_table import compute_imp_correlations
+    df, _ = load_pipeline('original', 'SYMMETRIC')
+    kernels = _ordered_kernels(df, KERNEL_NAMES)
+    bs_metrics = [f'density_improvement_{bs}' for bs in BLOCK_SIZES]
+    corr = compute_imp_correlations(df, 256, bs_metrics, kernels,
+                                    method='pearson', log_transform=True)
+    top = [(_corr_values(corr, kernels, m), f'${bs}{{\\times}}{bs}$', c, '')
+           for m, bs, c in zip(bs_metrics, BLOCK_SIZES, BS_COLORS)]
+    ncols = sorted(df['n_cols'].unique())
+    mid = []
+    for nc, c, h in zip(ncols, NCOLS_COLORS, NCOLS_HATCHES):
+        cd = compute_imp_correlations(df, nc, ['density_improvement_16'],
+                                      kernels, method='pearson',
+                                      log_transform=True)
+        mid.append((_corr_values(cd, kernels, 'density_improvement_16'),
+                    f'{int(nc)}', c, h))
+
+    b = matrix_slopes(all_reorderings())
+    rng = np.random.default_rng(0)
+    bottom, errs, rows = [], [], []
+    for nc, c, h in zip(ncols, NCOLS_COLORS, NCOLS_HATCHES):
+        med, lo, hi = [], [], []
+        for k in kernels:
+            v = b.loc[(b['kernel_id'] == k) & (b['n_cols'] == nc), 'beta'].to_numpy()
+            m = np.median(v)
+            ci = _boot_median(v, rng)
+            med.append(m); lo.append(m - ci[0]); hi.append(ci[1] - m)
+            rows.append((PAPER_KERNEL_NAMES.get(k, k), int(nc), m, ci[0], ci[1],
+                         len(v)))
+        bottom.append((np.array(med), f'{int(nc)}', c, h))
+        errs.append((np.array(lo), np.array(hi)))
+
+    fig, (a1, a2, a3) = plt.subplots(3, 1, figsize=(COL_W, 4.65), sharex=True)
+    _bars(a1, top, kernels)
+    _bars(a2, mid, kernels)
+    _bars(a3, bottom, kernels)
+    n = len(bottom)
+    width = 0.84 / n
+    x = np.arange(len(kernels))
+    for i, (lo, hi) in enumerate(errs):
+        a3.errorbar(x + (i - (n - 1) / 2) * width, bottom[i][0],
+                    yerr=[lo, hi], fmt='none', ecolor='#222222',
+                    elinewidth=0.6, capsize=1.2, capthick=0.6, zorder=4)
+    top_b = max(v.max() + e[1].max() for (v, *_), e in zip(bottom, errs))
+    a3.set_ylim(0, np.ceil(top_b / 0.2) * 0.2 + 1e-9)
+    a1.tick_params(axis='x', labelbottom=False)
+    a2.tick_params(axis='x', labelbottom=False)
+    _legend_top(a1, 'Block size:', ncol=7)
+    _legend_top(a2, r'$n_{\mathrm{cols}}$:', ncol=4)
+    _legend_top(a3, r'$n_{\mathrm{cols}}$:', ncol=4)
+    fig.subplots_adjust(left=0.1, right=0.995, top=0.95, bottom=0.07,
+                        hspace=0.24)
+    ymid = (a1.get_position().y1 + a2.get_position().y0) / 2
+    fig.text(0.0, ymid, 'Pearson correlation of block density and speedup',
+             rotation=90, ha='left', va='center', fontsize=9)
+    p3 = a3.get_position()
+    fig.text(0.0, (p3.y0 + p3.y1) / 2, 'Elasticity $\\beta$',
+             rotation=90, ha='left', va='center', fontsize=9)
+    fig.savefig(out / 'corr_blocksize_ncols_beta.pdf')
+    fig.savefig(out / 'corr_blocksize_ncols_beta.png', dpi=300)
+    plt.close(fig)
+    pd.DataFrame(rows, columns=['kernel', 'n_cols', 'median_beta', 'ci_lo',
+                                'ci_hi', 'n_matrices']).to_csv(
+        out / 'corr_blocksize_ncols_beta.csv', index=False)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     ap.add_argument('--out', default='plots/n_density')
+    ap.add_argument('--only-corr-beta', action='store_true',
+                    help='only the three-panel r / r / beta figure')
     args = ap.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     pu.set_professional_style()
     mpl.rcParams.update(PAPER_RC)
+    if args.only_corr_beta:
+        fig_corr_with_beta(out)
+        return
     d = picked()
     print(d.groupby('pick')['matrix'].nunique().sort_values(ascending=False))
     fig_heatmap(d, out)
@@ -522,6 +603,7 @@ def main():
     b = fig_elasticity(r, out)
     fig_elasticity_centred(r, b, out)
     best_reordering_changes(r, out)
+    fig_corr_with_beta(out)
     print(f'Saved to {out}')
 
 
