@@ -1053,7 +1053,7 @@ def fig_speedup_column(out, n_cols=256):
 # Picking an ordering by block density vs. by another metric
 # ---------------------------------------------------------------------------
 
-PICK_T = 1.1           # a metric prefers an ordering if it is >= 10 % better
+PICK_T = 1.05          # a metric prefers an ordering if it is >= 5 % better
 PICK_MIN_MATRICES = 10  # leave a bar out if fewer matrices have a conflict
 PICK_PANELS = [('SYMMETRIC', 'original'), ('ROW', 'original')]
 PICK_BD = 'density_improvement_16'
