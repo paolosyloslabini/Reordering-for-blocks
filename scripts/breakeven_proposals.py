@@ -46,6 +46,8 @@ KERNELS = ['ACCSPMM_SPMM', 'ASPT_SPMM', 'CUSPARSE_SPMM_BSR_bs32',
 KERNEL_COLORS = dict(zip(KERNELS, ['#2a78d6', '#eb6834', '#1baf7a', '#eda100',
                                    '#e87ba4', '#008300', '#4a3aa7']))
 KNAME = pf.PAPER_KERNEL_NAMES
+# same exclusions as the paper figures; colours stay tied to each kernel
+KERNELS = [k for k in KERNELS if k not in pf.PAPER_EXCLUDED_KERNELS]
 
 REORDER_CSV = {'original': 'results/results_reordering.csv',
                'scrambled': 'results/results_reordering_random.csv'}

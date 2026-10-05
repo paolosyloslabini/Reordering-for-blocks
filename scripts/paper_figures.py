@@ -53,6 +53,10 @@ from settings import (KERNEL_NAMES, GROUPED_SCATTER_EXCLUDE, BLOCK_SIZES,
                       PERMS, get_perm_display)
 from correlation_table import compute_imp_correlations, _ordered_kernels
 
+# Kernels left out of the paper (ASpT barely reacts to reordering).
+PAPER_EXCLUDED_KERNELS = {'ASPT_SPMM'}
+KERNEL_NAMES = {k: v for k, v in KERNEL_NAMES.items() if k not in PAPER_EXCLUDED_KERNELS}
+
 # IEEEtran widths (\columnwidth = 252pt, \textwidth = 516pt).
 COL_W = 3.49
 PAGE_W = 7.16
@@ -111,9 +115,11 @@ C_UP, C_DOWN, C_MIXED = '#006400', '#8B0000', '#A0A0A0'
 # Colour = quantity: correlation r green, elasticity alpha purple
 # (light -> dark = small -> large block size / n_cols).
 BS_COLORS = ['#e5f5e0', '#c7e9c0', '#a1d99b', '#74c476', '#31a354', '#006d2c']
-NCOLS_COLORS = ['#c7e9c0', '#74c476', '#006d2c']
+# r by n_cols uses 16x16 blocks: same green as the 16x16 bar on top (the n_cols = 256
+# bar is that very bar); the widths differ by hatch only
+NCOLS_COLORS = [BS_COLORS[BLOCK_SIZES.index(16)]] * 3
 ALPHA_NCOLS_COLORS = ['#dadaeb', '#9e9ac8', '#54278f']
-NCOLS_HATCHES = ['', '//////', '']
+NCOLS_HATCHES = ['//////', '', '....']   # n_cols = 32, 256, 1024
 
 # Structural metrics (Fig. corr_by_metric). Neutral greys + hatches, so they
 # cannot be mistaken for the reordering palette; block density keeps the
@@ -280,10 +286,10 @@ def fig_improvement_vs_speedup(df, out):
 
 
 def fig_improvement_vs_speedup_row(df, out):
-    """Same as fig_improvement_vs_speedup, six panels in one row (6x1)."""
+    """Same as fig_improvement_vs_speedup, all panels in one row (file name kept: _6x1)."""
     kernels = [k for k in _ordered_kernels(df, KERNEL_NAMES)
                if k not in GROUPED_SCATTER_EXCLUDE]
-    fig, axes = plt.subplots(1, 6, figsize=(PAGE_W, 1.5), sharex=True, sharey=True)
+    fig, axes = plt.subplots(1, len(kernels), figsize=(PAGE_W, 1.5), sharex=True, sharey=True)
     for ax, k in zip(axes, kernels):
         d = df[df['kernel_id'] == k].dropna(subset=['density_improvement_16', 'speedup'])
         quadrant_scatter(ax, d['density_improvement_16'], d['speedup'], 1.2)
@@ -425,11 +431,11 @@ def fig_corr_by_metric(df, out):
     corr = within_corr_table(df, 256, [m for m, *_ in METRICS], kernels)
     series = [(_corr_values(corr, kernels, m), lab, c, h)
               for m, lab, c, h in METRICS]
-    fig, ax = plt.subplots(figsize=(COL_W, 2.5))
+    fig, ax = plt.subplots(figsize=(COL_W, 2.05))
     _bars(ax, series, kernels)
     ax.set_ylabel(r'Pearson $r_{\log}$ with speedup')
-    _legend_top(ax, 'Improvement of', ncol=4, inline=False)
-    fig.subplots_adjust(left=0.1, right=0.995, top=0.74, bottom=0.16)
+    _legend_top(ax, None, ncol=4, inline=False)   # caption says what is improved
+    fig.subplots_adjust(left=0.1, right=0.995, top=0.81, bottom=0.19)
     fig.savefig(out / 'corr_by_metric.pdf')
     plt.close(fig)
 
@@ -966,6 +972,116 @@ def fig_profiles_2x2(out, fname='density_profiles_2x2.pdf'):
     plt.close(fig)
 
 
+def fig_density_combo_wide(out, fname='density_combo_wide.pdf'):
+    """Page-wide merge of density_boxes_2x2 (left) and density_profiles_2x2
+    (right): original / scrambled (rows) x symmetric / row (columns) each, one
+    legend row (coloured squares, plus the dotted Original profile)."""
+    from matplotlib.gridspec import GridSpec
+    from matplotlib.lines import Line2D
+    colors = strategy_colors()
+    colors['Original'] = '#CC0000'
+    colors['Random'] = '#000000'
+    data = {cell: analysis_improvements(*cell) for cell in CELLS_2X2}
+    for cell, d in data.items():
+        data[cell] = d[d['density_improvement_16'] > 0]
+    present = set().union(*(set(d['strategy']) for d in data.values()))
+    box_labels = strategy_order(present)
+    panels = {cell: profile_curves(cell[1], cell[0]) for cell in CELLS_2X2}
+    prof_present = set()
+    for _, curves in panels.values():
+        prof_present |= {display_name(p) for p in curves}
+    prof_labels = [s for s in colors if s in prof_present and s not in ('Original', 'Unscramble')]
+    prof_labels += ['Original'] if 'Original' in prof_present else []
+
+    fig = plt.figure(figsize=(PAGE_W, 2.6))
+    gs = GridSpec(2, 5, figure=fig, width_ratios=[1, 1, 0.42, 1, 1], left=0.075,
+                  right=0.975, top=0.865, bottom=0.125, wspace=0.06, hspace=0.07)
+    B = np.array([[fig.add_subplot(gs[r, c]) for c in (0, 1)] for r in (0, 1)])
+    P = np.array([[fig.add_subplot(gs[r, c]) for c in (3, 4)] for r in (0, 1)])
+
+    # left: box plots, as fig_density_boxes_2x2
+    for (ds, pt), ax in zip(CELLS_2X2, B.flat):
+        d = data[(ds, pt)]
+        pos = [i for i, s in enumerate(box_labels) if s in set(d['strategy'])]
+        vals = [d.loc[d['strategy'] == box_labels[i], 'density_improvement_16'].values
+                for i in pos]
+        boxes(ax, vals, pos, [colors[box_labels[i]] for i in pos], 0.66, lw=0.55)
+        ax.set_xlim(-0.6, len(box_labels) - 0.4)
+        ax.set_xticks([])
+    for r, ds in enumerate(('original', 'scrambled')):
+        vals = [d.loc[d['strategy'] == s, 'density_improvement_16'].values
+                for (dd, _), d in data.items() if dd == ds for s in set(d['strategy'])]
+        lo, hi = _whisker_range(vals, 1.4)
+        for ax in B[r]:
+            style_ratio_boxaxis(ax, lo, hi)
+            if hi / lo > 100:
+                format_ratio_axis(ax.yaxis, [m for m in (0.01, 0.03, 0.1, 0.3, 1, 3, 10, 30)
+                                             if lo <= m <= hi])
+        B[r][1].sharey(B[r][0])
+        B[r][1].tick_params(axis='y', which='both', length=0, labelleft=False)
+
+    # right: performance profiles, as fig_profiles_2x2
+    for (ds, pt), ax in zip(CELLS_2X2, P.flat):
+        n, curves = panels[(ds, pt)]
+        xlo, xhi = (2 ** -3 if pt == 'ROW' else 2 ** -4), 1.04
+        for lab in prof_labels:
+            perm = next((p for p in curves if display_name(p) == lab), None)
+            if perm is None:
+                continue
+            taus = curves[perm][::-1]
+            fracs = np.arange(1, len(taus) + 1) / n
+            xs = np.concatenate([[xhi], taus, [xlo]])
+            ys = np.concatenate([[(taus >= 1 - 1e-9).sum() / n], fracs, [fracs[-1]]])
+            orig = lab == 'Original'
+            ax.step(xs, ys, where='post', color=colors[lab], linewidth=1.0 if orig else 0.75,
+                    linestyle=(0, (1.2, 1.2)) if orig else '-', zorder=4 if orig else 3)
+        ax.set_xscale('log', base=2)
+        ax.set_xlim(xhi, xlo)
+        ax.set_ylim(0, 1.03)
+        ax.xaxis.set_major_locator(mpl.ticker.FixedLocator([1, 0.5, 0.25, 0.125]))
+        ax.xaxis.set_major_formatter(FuncFormatter(lambda v, _: f'{v * 100:g}%'))
+        ax.xaxis.set_minor_locator(mpl.ticker.NullLocator())
+        ax.yaxis.set_major_locator(MultipleLocator(0.25))
+        ax.yaxis.set_minor_locator(MultipleLocator(0.125))
+        ax.yaxis.set_major_formatter(FuncFormatter(lambda v, _: f'{v * 100:.0f}%'))
+        ax.grid(True, which='major', color='#b0b0b0', linewidth=0.6)
+        ax.grid(True, axis='y', which='minor', color='#e4e4e4', linewidth=0.4)
+        ax.set_axisbelow(True)
+        ax.tick_params(labelsize=6.5)
+    for r in (0, 1):
+        P[r][1].tick_params(axis='y', which='both', length=0, labelleft=False)
+    for c in (0, 1):
+        P[0][c].tick_params(axis='x', labelbottom=False)
+    # drop the left panel's 12.5% label, which would touch the right panel's 100%
+    P[1][0].xaxis.set_major_locator(mpl.ticker.FixedLocator([1, 0.5, 0.25]))
+
+    for grid in (B, P):
+        for c, pt in enumerate(('SYMMETRIC', 'ROW')):
+            grid[0][c].set_title(REORDER_TITLE[pt], fontsize=8.5, fontweight='bold', pad=2)
+    for r, ds in enumerate(('original', 'scrambled')):
+        pos = P[r][1].get_position()
+        fig.text(pos.x1 + 0.005, (pos.y0 + pos.y1) / 2, DATASET_TITLE[ds].split()[0],
+                 rotation=270, ha='left', va='center', fontsize=8.5, fontweight='bold')
+    shared_ylabel(fig, B[:, 0], 'Block density improvement', x=0.0)
+    mid = (P[0][0].get_position().y1 + P[1][0].get_position().y0) / 2
+    fig.text(P[0][0].get_position().x0 - 0.062, mid, 'Matrices above threshold',
+             rotation=90, ha='left', va='center', fontsize=8.5)
+    fig.text((P[1][0].get_position().x0 + P[1][1].get_position().x1) / 2, 0.005,
+             'Block density threshold (relative to best)', ha='center', va='bottom',
+             fontsize=8.5)
+
+    labels = box_labels + (['Original'] if 'Original' in prof_labels else [])
+    handles = [Line2D([], [], color=colors[l], lw=1.2, ls=(0, (1.2, 1.2)), label=l)
+               if l == 'Original' else
+               Patch(facecolor=colors[l], edgecolor='#222222', linewidth=0.5, label=l)
+               for l in labels]
+    fig.legend(handles=handles, loc='lower center', bbox_to_anchor=(0.515, 0.905),
+               ncol=len(handles), frameon=False, handlelength=0.9, handleheight=0.9,
+               columnspacing=0.75, handletextpad=0.3, fontsize=7.5)
+    fig.savefig(out / fname)
+    plt.close(fig)
+
+
 def _speedup_cells(n_cols):
     cells, present = {}, set()
     for key in PIPELINES:
@@ -1123,7 +1239,7 @@ def fig_pick_by_block_density(out, panels=PICK_PANELS,
         ylims.append((min(v.min(), 1) / 1.03, max(v.max(), 1) * 1.04))
     heights = [PICK_IN_PER_LOG * np.log(hi / lo) for lo, hi in ylims]
     fig, axes = plt.subplots(len(panels), 1,
-                             figsize=(COL_W, 0.85 + sum(heights)),
+                             figsize=(COL_W, 0.68 + sum(heights)),
                              sharex=True, gridspec_kw=dict(height_ratios=heights))
     axes = np.atleast_1d(axes)
     # label panels by what differs between them
@@ -1183,11 +1299,11 @@ def fig_pick_by_block_density(out, panels=PICK_PANELS,
     handles = [Patch(facecolor=color, hatch=hatch, edgecolor='#222222',
                      linewidth=0.5, label=label)
                for _, label, color, hatch in others]
-    fig.legend(handles=handles, title='Block density vs.', loc='upper center',
+    fig.legend(handles=handles, loc='upper center',   # caption names the comparison
                bbox_to_anchor=(0.58, 1.0), ncol=3, frameon=False,
                handlelength=1.1, handleheight=0.9, columnspacing=0.8,
                handletextpad=0.3, labelspacing=0.25, borderaxespad=0.0)
-    fig.subplots_adjust(left=0.135, right=0.995, top=1 - 0.5 / h,
+    fig.subplots_adjust(left=0.135, right=0.995, top=1 - 0.33 / h,
                         bottom=0.28 / h, hspace=0.08)
     fig.savefig(out / fname)
     plt.close(fig)
@@ -1230,6 +1346,7 @@ def main():
         'row_density_combo': lambda: fig_density_combo(out, 'ROW', 'row_density_combo.pdf'),
         'density_boxes_2x2': lambda: fig_density_boxes_2x2(out),
         'density_profiles_2x2': lambda: fig_profiles_2x2(out),
+        'density_combo_wide': lambda: fig_density_combo_wide(out),
         'sym_all_metrics': lambda: fig_all_metrics(out),
         'speedup_grid_nc256': lambda: fig_speedup_grid(out),
         'speedup_column_nc256': lambda: fig_speedup_column(out),
