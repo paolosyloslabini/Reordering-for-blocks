@@ -7,8 +7,8 @@ Applies permutations in Python, then calls smat CUDA binary.
 import sys
 import argparse
 from smat_utils import run_smat_spmm, parse_smat_output
-from cusparse_utils import print_timer
-from config import ALPHA_DEFAULT, BETA_DEFAULT, SPMM_N_COLS_DEFAULT, N_ITERATIONS_DEFAULT, BSR_BLOCKSIZE_DEFAULT, PERM_TYPE_DEFAULT
+from cusparse_utils import print_timer, check_below_peak
+from config import ALPHA_DEFAULT, BETA_DEFAULT, SPMM_N_COLS_DEFAULT, BSR_BLOCKSIZE_DEFAULT, PERM_TYPE_DEFAULT, PEAK_GFLOPS_FP16_TC
 
 
 def main():
@@ -21,8 +21,9 @@ def main():
     parser.add_argument('--alpha', type=float, default=ALPHA_DEFAULT, help=f'Alpha scalar (default: {ALPHA_DEFAULT})')
     parser.add_argument('--beta', type=float, default=BETA_DEFAULT, help=f'Beta scalar (default: {BETA_DEFAULT})')
     parser.add_argument('--n-cols', type=int, default=SPMM_N_COLS_DEFAULT, help=f'Number of columns in dense matrix B (default: {SPMM_N_COLS_DEFAULT})')
-    parser.add_argument('--n-iterations', type=int, default=N_ITERATIONS_DEFAULT, help=f'Number of timing iterations (default: {N_ITERATIONS_DEFAULT})')
-    parser.add_argument('--blocksize', type=int, default=BSR_BLOCKSIZE_DEFAULT, help=f'Block size for Tensor Core optimization (default: {BSR_BLOCKSIZE_DEFAULT})')
+    parser.add_argument('--n-iterations', type=int, default=10, help='Number of timed launches (default: 10)')
+    parser.add_argument('--n-warmup', type=int, default=3, help='Number of untimed warm-up launches (default: 3)')
+    parser.add_argument('--blocksize', type=int, default=BSR_BLOCKSIZE_DEFAULT, help='Ignored: SMaT tiles are fixed at 16x16 in the binary (kept for yaml compatibility)')
     
     args = parser.parse_args()
     
@@ -37,16 +38,17 @@ def main():
             n_cols=args.n_cols,
             blocksize=args.blocksize,
             n_iterations=args.n_iterations,
+            n_warmup=args.n_warmup,
             alpha=args.alpha,
             beta=args.beta
         )
         
+        operation_ms = results['smat_kernel_ms']
+        check_below_peak("SMaT", results['nnz'], args.n_cols, operation_ms, PEAK_GFLOPS_FP16_TC)
+
         # Print timing results in consistent format
         print_timer("loading", results['loading_ms'])
         print_timer("write", results['write_ms'])
-        
-        # Use kernel time if available, otherwise total time
-        operation_ms = results.get('smat_kernel_ms') or results['smat_total_ms']
         print_timer("operation", operation_ms)
         
         # Print smat output in a box

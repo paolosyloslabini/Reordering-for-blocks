@@ -89,23 +89,41 @@ echo "[3/4] Building ASpT kernels..."
 # Navigate to the GPU SpMM directory
 cd "${ASPT_DIR}/ASpT_SpMM_GPU"
 
-# Define compilation flags using detected architecture
+# Define compilation flags using detected architecture.
+# -include shfl_fix.h maps the pre-Volta __shfl* intrinsics to __shfl*_sync;
+# sspmm_32.cu includes it itself, sspmm_128.cu does not and fails without it.
 ARCH_FLAGS="-gencode arch=compute_${GPU_ARCH},code=sm_${GPU_ARCH}"
-NVCC_FLAGS="-std=c++11 -O3 ${ARCH_FLAGS} --use_fast_math -Xptxas -v,-dlcm=ca"
+NVCC_FLAGS="-std=c++11 -O3 ${ARCH_FLAGS} --use_fast_math -include shfl_fix.h -Xptxas -v,-dlcm=ca"
 
-echo "Compiling sspmm_32 (Single Precision) for sm_${GPU_ARCH}..."
-nvcc ${NVCC_FLAGS} sspmm_32.cu -o sspmm_32
+# Timed launches per run. Upstream hardcodes ITER=1 (a single cold launch);
+# the binaries already average GFLOPS over ITER and scale the validation
+# reference accordingly. Override with ASPT_ITER=<n>.
+ASPT_ITER="${ASPT_ITER:-10}"
+echo "Timed iterations per run (ITER): ${ASPT_ITER}"
 
-echo "Compiling dspmm_32 (Double Precision) for sm_${GPU_ARCH}..."
-nvcc ${NVCC_FLAGS} dspmm_32.cu -o dspmm_32
+# Build from a copy with ITER overridable, leaving the cloned sources untouched.
+build() {
+    local name=$1
+    sed 's|^#define ITER (128/128)|#ifndef ITER\n#define ITER (128/128)\n#endif|' "${name}.cu" > "build_${name}.cu"
+    grep -q '^#ifndef ITER' "build_${name}.cu" || { echo "ERROR: could not patch ITER in ${name}.cu"; exit 1; }
+    echo "Compiling ${name} for sm_${GPU_ARCH}..."
+    nvcc ${NVCC_FLAGS} -DITER=${ASPT_ITER} "build_${name}.cu" -o "${name}"
+    rm -f "build_${name}.cu"
+}
+
+# sspmm_32 for n_cols = 32, sspmm_128 for n_cols a multiple of 64 (see aspt_spmm.py)
+build sspmm_32
+build sspmm_128
+build dspmm_32
 
 # Step 4: Verify
 echo ""
 echo "[4/4] Verifying build..."
-if [ -f "sspmm_32" ] && [ -f "dspmm_32" ]; then
+if [ -f "sspmm_32" ] && [ -f "sspmm_128" ] && [ -f "dspmm_32" ]; then
     echo "✓ Build successful!"
     echo "Binaries created:"
     echo "  - ${ASPT_DIR}/ASpT_SpMM_GPU/sspmm_32"
+    echo "  - ${ASPT_DIR}/ASpT_SpMM_GPU/sspmm_128"
     echo "  - ${ASPT_DIR}/ASpT_SpMM_GPU/dspmm_32"
 else
     echo "ERROR: Build failed - binaries not found"

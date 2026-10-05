@@ -17,3 +17,9 @@ BSR_BLOCKSIZE_DEFAULT = 8
 
 # Permutation Parameters
 PERM_TYPE_DEFAULT = 'ROW'
+
+# Hardware peak throughput (GFLOPS), used to reject physically impossible
+# measurements (e.g. a kernel that silently computed fewer columns than asked).
+# NVIDIA A100: 19.5 TFLOPS FP32 on CUDA cores, 312 TFLOPS FP16 on Tensor Cores.
+PEAK_GFLOPS_FP32 = 19500.0
+PEAK_GFLOPS_FP16_TC = 312000.0

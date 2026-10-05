@@ -85,3 +85,20 @@ def print_timer(label, time_ms):
         time_ms: Time in milliseconds
     """
     print(f"<Timer>[{label}] {time_ms:.6f} ms", flush=True)
+
+
+def check_below_peak(kernel, nnz, n_cols, time_ms, peak_gflops):
+    """
+    Raise if an SpMM time implies more than the hardware peak throughput.
+
+    GFLOPS = 2 * nnz * n_cols / time. A faster-than-peak time means the
+    kernel did not do the work it was asked for, so the run must not be kept.
+    """
+    if time_ms <= 0:
+        raise RuntimeError(f"{kernel}: non-positive time {time_ms} ms")
+    gflops = 2.0 * nnz * n_cols / (time_ms * 1e6)
+    if gflops > peak_gflops:
+        raise RuntimeError(
+            f"{kernel}: implied {gflops:.0f} GFLOPS exceeds hardware peak "
+            f"{peak_gflops:.0f} GFLOPS (nnz={nnz}, n_cols={n_cols}, time={time_ms:.6f} ms)")
+    return gflops

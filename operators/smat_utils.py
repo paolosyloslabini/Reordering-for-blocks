@@ -5,6 +5,7 @@ Handles matrix preparation and calling the smat CUDA binary.
 """
 
 import os
+import re
 import subprocess
 import tempfile
 import time
@@ -40,6 +41,8 @@ def setup_smat_environment():
     Adds locally installed gflags library path to LD_LIBRARY_PATH.
     """
     env = os.environ.copy()
+    # Load all CUDA modules up front so lazy loading is not timed in the first launch.
+    env['CUDA_MODULE_LOADING'] = 'EAGER'
     
     # Check for locally installed gflags
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -57,7 +60,7 @@ def setup_smat_environment():
 
 def run_smat_spmm(matrix_path, perm_path=None, perm_type='ROW',
                   base_perm_path=None, base_perm_type='SYMMETRIC',
-                  n_cols=32, blocksize=8, n_iterations=5,
+                  n_cols=32, blocksize=8, n_iterations=10, n_warmup=3,
                   alpha=1.0, beta=0.0, dtype=np.float32):
     """
     Run SMaT SpMM operation on a matrix with optional permutation.
@@ -78,8 +81,9 @@ def run_smat_spmm(matrix_path, perm_path=None, perm_type='ROW',
         perm_path: Optional path to permutation file
         perm_type: Type of permutation ('ROW', 'SYMMETRIC', or 'ASYMMETRIC')
         n_cols: Number of columns in dense matrix B for SpMM
-        blocksize: Block size for tensor core optimization
-        n_iterations: Number of timing iterations (smat will average internally)
+        blocksize: Unused; SMaT's tile is fixed at 16x16 (MMA_M x MMA_K) in the binary
+        n_iterations: Number of timed launches (smat averages them internally)
+        n_warmup: Number of untimed warm-up launches
         alpha: Alpha scalar (currently not configurable in smat binary)
         beta: Beta scalar (currently not configurable in smat binary)
         dtype: Data type (smat uses float16 internally for tensor cores)
@@ -135,15 +139,21 @@ def run_smat_spmm(matrix_path, perm_path=None, perm_type='ROW',
         # Step 3: Find and call smat binary
         smat_binary = find_smat_binary()
         
-        # SMaT command line arguments based on github.com/spcl/smat
-        # The binary appears to use gflags, common args:
-        # --filename=<path> : input matrix file
-        # --n_cols=<int> : number of columns in dense B matrix
-        # There may be other flags - we'll capture stdout/stderr for timing info
-        
+        # SMaT (github.com/spcl/smat, src/cuda_hgemm/src/main.cu) takes gflags:
+        #   --filename=<mtx>          input matrix
+        #   --n_mult=<k>              B and C get k * MMA_N = 8k columns (default 1, i.e. 8 columns)
+        #   --warmup_iterations, --profiling_iterations
+        # Its --enable_check is a no-op for the sparse kernel (disabled in tester.h),
+        # so correctness cannot be checked through the binary.
+        if n_cols % 8 != 0:
+            raise ValueError(f"SMaT needs n_cols to be a multiple of 8 (MMA_N), got {n_cols}")
+        n_mult = n_cols // 8
         cmd = [
             smat_binary,
             f"--filename={tmp_mtx_path}",
+            f"--n_mult={n_mult}",
+            f"--warmup_iterations={n_warmup}",
+            f"--profiling_iterations={n_iterations}",
         ]
         
         # Run smat binary
@@ -165,40 +175,24 @@ def run_smat_spmm(matrix_path, perm_path=None, perm_type='ROW',
                 f"STDERR:\n{result.stderr}"
             )
         
-        # Step 4: Parse output for timing information
-        # SMaT uses HLOG macro and logs profiling time
-        # Pattern: "exit, profiling time: XXX.XXX ms"
-        # Also writes to results_smat.csv: "filename,time_ms"
-        kernel_ms = None
         output = result.stdout + result.stderr
-        
-        # Parse SMaT output for timing
-        # Look for: "profiling time: XXX.XXX ms" or similar patterns
-        for line in output.split('\n'):
-            # Match patterns like "profiling time: 123.456 ms"
-            if 'profiling time' in line.lower() and 'ms' in line.lower():
-                try:
-                    # Extract number before 'ms'
-                    parts = line.split('ms')[0].rsplit(':', 1)
-                    if len(parts) == 2:
-                        time_str = parts[1].strip()
-                        kernel_ms = float(time_str)
-                        break
-                except (ValueError, IndexError):
-                    pass
-            
-            # Fallback: look for just a float followed by ms
-            if kernel_ms is None and 'ms' in line.lower():
-                try:
-                    # Try to find pattern like "XXX.XXX ms"
-                    import re
-                    match = re.search(r'(\d+\.?\d*)\s*ms', line, re.IGNORECASE)
-                    if match:
-                        kernel_ms = float(match.group(1))
-                except:
-                    pass
+
+        # The binary logs "... N_MULT: <k>"; make sure it ran at the requested width.
+        match = re.search(r'N_MULT:\s*(\d+)', output)
+        if match is None or int(match.group(1)) != n_mult:
+            raise RuntimeError(
+                f"SMaT did not report N_MULT={n_mult} (n_cols={n_cols}); got "
+                f"{match.group(1) if match else 'no N_MULT line'}\n{output}")
+
+        # Kernel time, averaged over the profiling iterations:
+        #   "Mma-CBT-Kernel exit, profiling time: 1.234 ms (...)"
+        match = re.search(r'exit, profiling time:\s*([0-9.]+)\s*ms', output)
+        if match is None:
+            raise RuntimeError(f"Could not find SMaT profiling time in output\n{output}")
+        kernel_ms = float(match.group(1))
         
         return {
+            'nnz': A_cpu.nnz,
             'loading_ms': loading_ms,
             'write_ms': write_ms,
             'smat_total_ms': total_ms,

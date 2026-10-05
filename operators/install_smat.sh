@@ -51,8 +51,12 @@ echo ""
 echo "[2/5] Cloning SMaT repository..."
 if [ -d "${SMAT_DIR}" ]; then
     echo "Directory already exists: ${SMAT_DIR}"
-    read -p "Update existing installation? (y/n) " -n 1 -r
-    echo
+    # Only prompt on a terminal, so the script also runs non-interactively (keeps the checkout)
+    REPLY=n
+    if [ -t 0 ]; then
+        read -p "Update existing installation? (y/n) " -n 1 -r
+        echo
+    fi
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         cd "${SMAT_DIR}"
         git fetch origin
