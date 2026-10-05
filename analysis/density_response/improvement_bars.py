@@ -35,6 +35,8 @@ N_COLS = n_cols_from_argv(default=32)
 GOOD, BAD, NEUTRAL = '#006400', '#8B0000', '#A0A0A0'
 KEPT = '#000000'    # strips figure: kept-original dots sit on 1x and must stay visible
 GAIN = '#6A3D9A'    # strips figure: crossbar for the gain among faster matrices
+# ASpT is left out of the paper (it barely reacts to reordering)
+KERNEL_NAMES = {k: v for k, v in KERNEL_NAMES.items() if k != 'ASPT_SPMM'}
 KERNEL_ORDER = sorted(KERNEL_NAMES.values(), key=str.lower)   # as in the paper figures
 CELLS = [('original', 'SYMMETRIC'), ('original', 'ROW'),
          ('scrambled', 'SYMMETRIC'), ('scrambled', 'ROW')]

@@ -53,6 +53,10 @@ from settings import (KERNEL_NAMES, GROUPED_SCATTER_EXCLUDE, BLOCK_SIZES,
                       PERMS, get_perm_display)
 from correlation_table import compute_imp_correlations, _ordered_kernels
 
+# Kernels left out of the paper (ASpT barely reacts to reordering).
+PAPER_EXCLUDED_KERNELS = {'ASPT_SPMM'}
+KERNEL_NAMES = {k: v for k, v in KERNEL_NAMES.items() if k not in PAPER_EXCLUDED_KERNELS}
+
 # IEEEtran widths (\columnwidth = 252pt, \textwidth = 516pt).
 COL_W = 3.49
 PAGE_W = 7.16
@@ -280,10 +284,10 @@ def fig_improvement_vs_speedup(df, out):
 
 
 def fig_improvement_vs_speedup_row(df, out):
-    """Same as fig_improvement_vs_speedup, six panels in one row (6x1)."""
+    """Same as fig_improvement_vs_speedup, all panels in one row (file name kept: _6x1)."""
     kernels = [k for k in _ordered_kernels(df, KERNEL_NAMES)
                if k not in GROUPED_SCATTER_EXCLUDE]
-    fig, axes = plt.subplots(1, 6, figsize=(PAGE_W, 1.5), sharex=True, sharey=True)
+    fig, axes = plt.subplots(1, len(kernels), figsize=(PAGE_W, 1.5), sharex=True, sharey=True)
     for ax, k in zip(axes, kernels):
         d = df[df['kernel_id'] == k].dropna(subset=['density_improvement_16', 'speedup'])
         quadrant_scatter(ax, d['density_improvement_16'], d['speedup'], 1.2)
