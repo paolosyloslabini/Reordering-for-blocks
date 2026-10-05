@@ -48,12 +48,20 @@ Shared plotting utilities and style configurations.
 
 ### Paper figures
 
-Each writes PDFs (and PNGs) to `plots/paper/`, sized for the IEEE layout:
+All figures used by the paper, in one go (about 5 minutes):
+
+```bash
+bash scripts/make_paper_figures.sh        # PY=<python> to override the Windows venv
+```
+
+The paper repo's `plots/MANIFEST` lists the files the paper uses and its `sync_plots.sh` copies them.
+The individual scripts write PDFs (and PNGs) to `plots/paper/`, sized for the IEEE layout:
 
 ```bash
 python scripts/paper_figures.py                   # most paper figures
 python scripts/gain_figures.py                    # gain_vs_start_block_density, gain_vs_start_density
 python scripts/improvement_bars.py --n-cols=256   # improvement_strips_nc256_original_symmetric (+ bars/strips variants)
+python scripts/breakeven_proposals.py             # rcm_breakeven (+ plots/breakeven_proposals/)
 ```
 
 `gain_figures.py` and `improvement_bars.py` share loading and styling in `figure_common.py`.

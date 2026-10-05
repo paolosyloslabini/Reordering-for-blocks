@@ -26,6 +26,7 @@ Run from the repo root (needs results/ and datasets/):
 import argparse
 import contextlib
 import io
+import shutil
 from pathlib import Path
 
 import matplotlib as mpl
@@ -362,6 +363,10 @@ def main():
     d.to_csv(out / 'breakeven_table.csv', index=False)
     summary(d, out)
     fig_a(d, out)
+    # The paper's Fig. rcm_breakeven is fig_a; keep a copy next to the other paper figures
+    paper = Path('plots/paper')
+    paper.mkdir(parents=True, exist_ok=True)
+    shutil.copy(out / 'A_paid_off_curves_rcm.pdf', paper / 'rcm_breakeven.pdf')
     fig_b(d, out)
     fig_c(d, out)
     fig_d(d, out)
