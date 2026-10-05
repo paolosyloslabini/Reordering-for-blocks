@@ -1,8 +1,9 @@
-"""How often the densest reordering helps, and by how much when it does (N = 32).
+"""How often the densest reordering helps, and by how much when it does.
 
-Two figures from the same data: improvement_bars_nc32 (shares + gain among
-improved) and improvement_strips_nc32 (the full per-matrix distribution as a
-sina plot, with the same shares and gain marked).
+Two figures from the same data: improvement_bars_nc<N> (shares + gain among
+improved) and improvement_strips_nc<N> (the full per-matrix distribution as a
+sina plot, with the same shares and gain marked); improvement_strips_nc<N>_original_symmetric
+is the one-panel version used in the paper.
 
 Four cells: {original, scrambled} matrices x {symmetric, row} reordering.
 For every (matrix, kernel) the candidates are that cell's reorderings; the
@@ -15,9 +16,12 @@ Bottom of each cell: share of matrices where the chosen reordering was faster
 Top of each cell: geometric-mean speedup among improved matrices, with a 95%
 bootstrap interval over matrices.
 
-All kernels use 32-column runs. ASpT, which barely reacts to reordering, shows
-what timing noise alone produces (about half "improved", by about 10%).
-Impossible cuSPARSE-BSR / SMaT runs are dropped, as elsewhere.
+For cuSPARSE-BSR and SMaT, runs whose padded 32x32 block work would exceed the
+hardware peak are dropped.
+
+Dense operand: --n-cols=N (default 256, as in the paper).
+Output: plots/paper/improvement_{bars,strips}_nc<N>*.{pdf,png} and improvement_bars_nc<N>.csv
+Run from anywhere:  python scripts/improvement_bars.py --n-cols=256
 """
 import matplotlib.pyplot as plt
 import numpy as np
@@ -25,12 +29,12 @@ import pandas as pd
 from matplotlib.gridspec import GridSpec
 from matplotlib.patches import Patch, Rectangle
 
-from common import (COL_W, KERNEL_NAMES, OUT, PAGE_W, load_pipeline,
-                    n_cols_from_argv, save, style)
-from decision_test import PEAK_TFLOPS
+from figure_common import (COL_W, KERNEL_NAMES, OUT, PAGE_W, load_pipeline,
+                           n_cols_from_argv, save, style)
 
-# all kernels at the same width: the cluster logs confirm SMaT/ASpT honoured it
-N_COLS = n_cols_from_argv(default=32)
+N_COLS = n_cols_from_argv(default=256)
+# Hardware peak (TFLOPS) of the padded block work, used to drop impossible runs
+PEAK_TFLOPS = {'CUSPARSE_SPMM_BSR_bs32': 19.5, 'SMAT_SPMM_bs32': 312.0}
 # Paper palette (scripts/paper_figures.py): improved, degraded, neutral.
 GOOD, BAD, NEUTRAL = '#006400', '#8B0000', '#A0A0A0'
 KEPT = '#000000'    # strips figure: kept-original dots sit on 1x and must stay visible

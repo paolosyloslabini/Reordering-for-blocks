@@ -1,4 +1,4 @@
-"""Shared loading and styling for the density-response figures.
+"""Shared loading and styling for gain_figures.py and improvement_bars.py.
 
 Data come from the committed results CSVs through ``plot_utils``, with the same
 matrix filters as the paper (``scripts/filter_config.yaml``).
@@ -13,8 +13,8 @@ import matplotlib as mpl
 import numpy as np
 import pandas as pd
 
-ROOT = Path(__file__).resolve().parents[2]
-OUT = Path(__file__).resolve().parent / 'figures'
+ROOT = Path(__file__).resolve().parents[1]
+OUT = ROOT / 'plots' / 'paper'
 sys.path.insert(0, str(ROOT / 'scripts'))
 os.chdir(ROOT)
 import plot_utils as pu  # noqa: E402
@@ -46,26 +46,14 @@ KERNEL_NAMES = {
     'CUSPARSE_SPMM_CSR': 'cuSPARSE-CSR',
     'ASPT_SPMM': 'ASpT',
 }
-# SMaT and ASpT ignore the n_cols argument: every run used 32 columns.
-FIXED_32_COLS = {'SMAT_SPMM_bs32', 'ASPT_SPMM'}
 
 
 def n_cols_from_argv(default=256):
-    """Dense-operand width from ``--n-cols=N`` on the command line (32 or 256)."""
+    """Dense-operand width from ``--n-cols=N`` on the command line."""
     for arg in sys.argv[1:]:
         if arg.startswith('--n-cols='):
             return int(arg.split('=', 1)[1])
     return default
-
-
-def kernel_width(kernel_ids, n_cols):
-    """Width to select per row: SMaT/ASpT always use their real 32-column runs."""
-    return np.where(pd.Series(kernel_ids).isin(FIXED_32_COLS).values, 32, n_cols)
-
-
-def kernel_label(kernel_id, n_cols):
-    name = KERNEL_NAMES[kernel_id]
-    return name + (' (32 cols)' if kernel_id in FIXED_32_COLS and n_cols != 32 else '')
 
 
 def style():
@@ -98,7 +86,7 @@ def load_pipeline(dataset, perm_type):
 def save(fig, name, tight=False):
     """tight: crop the page to the drawn content (no blank band above a
     legend), as the paper places the PDF at its natural size."""
-    OUT.mkdir(exist_ok=True)
+    OUT.mkdir(parents=True, exist_ok=True)
     kw = dict(bbox_inches='tight', pad_inches=0.01) if tight else {}
     for ext in ('pdf', 'png'):
         fig.savefig(OUT / f'{name}.{ext}', dpi=300, **kw)

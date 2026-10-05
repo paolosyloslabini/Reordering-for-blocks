@@ -71,10 +71,9 @@ def run_smat_spmm(matrix_path, perm_path=None, perm_type='ROW',
     3. Call smat binary with the temporary file
     4. Parse timing output from smat's HLOG messages
     
-    NOTE: SMaT binary uses CUDA events internally for accurate GPU timing.
-    The timing is measured inside the binary with proper synchronization,
-    not from the Python subprocess wrapper. We parse the profiling time
-    from smat's output logs.
+    NOTE: the kernel time is measured inside the binary (average over the
+    profiling iterations, after the warm-up launches, synchronised at the end),
+    not from the Python subprocess wrapper. We parse it from smat's log.
     
     Args:
         matrix_path: Path to original Matrix Market file
@@ -141,10 +140,8 @@ def run_smat_spmm(matrix_path, perm_path=None, perm_type='ROW',
         
         # SMaT (github.com/spcl/smat, src/cuda_hgemm/src/main.cu) takes gflags:
         #   --filename=<mtx>          input matrix
-        #   --n_mult=<k>              B and C get k * MMA_N = 8k columns (default 1, i.e. 8 columns)
+        #   --n_mult=<k>              B and C get k * MMA_N = 8k columns
         #   --warmup_iterations, --profiling_iterations
-        # Its --enable_check is a no-op for the sparse kernel (disabled in tester.h),
-        # so correctness cannot be checked through the binary.
         if n_cols % 8 != 0:
             raise ValueError(f"SMaT needs n_cols to be a multiple of 8 (MMA_N), got {n_cols}")
         n_mult = n_cols // 8

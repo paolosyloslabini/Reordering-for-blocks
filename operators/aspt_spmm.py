@@ -50,10 +50,8 @@ def main():
     transfer_ms = (time.perf_counter() - t0) * 1000
 
     # 4. Run ASpT
-    # sspmm_32 computes exactly 32 output columns (one 32-wide slice); sspmm_128
-    # tiles B in 64-column slices (grid z = n_cols/64), so it handles any
-    # multiple of 64. Running sspmm_32 with n_cols > 32 leaves the other columns
-    # uncomputed while still reporting GFLOPS for n_cols.
+    # sspmm_32 computes 32 output columns; sspmm_128 tiles B in 64-column
+    # slices (grid z = n_cols/64), so it handles any multiple of 64.
     if args.n_cols == 32:
         binary_name = "sspmm_32"
     elif args.n_cols % 64 == 0:

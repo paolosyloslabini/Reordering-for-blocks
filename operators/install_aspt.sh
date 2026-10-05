@@ -90,18 +90,17 @@ echo "[3/4] Building ASpT kernels..."
 cd "${ASPT_DIR}/ASpT_SpMM_GPU"
 
 # Define compilation flags using detected architecture.
-# -include shfl_fix.h maps the pre-Volta __shfl* intrinsics to __shfl*_sync;
-# sspmm_32.cu includes it itself, sspmm_128.cu does not and fails without it.
+# -include shfl_fix.h maps the __shfl* intrinsics to __shfl*_sync (needed on sm_70+;
+# sspmm_32.cu includes it itself, sspmm_128.cu does not).
 ARCH_FLAGS="-gencode arch=compute_${GPU_ARCH},code=sm_${GPU_ARCH}"
 NVCC_FLAGS="-std=c++11 -O3 ${ARCH_FLAGS} --use_fast_math -include shfl_fix.h -Xptxas -v,-dlcm=ca"
 
-# Timed launches per run. Upstream hardcodes ITER=1 (a single cold launch);
-# the binaries already average GFLOPS over ITER and scale the validation
-# reference accordingly. Override with ASPT_ITER=<n>.
+# Timed launches per run (ITER). The binaries average GFLOPS over ITER and
+# scale the validation reference accordingly. Override with ASPT_ITER=<n>.
 ASPT_ITER="${ASPT_ITER:-10}"
 echo "Timed iterations per run (ITER): ${ASPT_ITER}"
 
-# Build from a copy with ITER overridable, leaving the cloned sources untouched.
+# Build from a copy with ITER settable from the command line, leaving the cloned sources untouched.
 build() {
     local name=$1
     sed 's|^#define ITER (128/128)|#ifndef ITER\n#define ITER (128/128)\n#endif|' "${name}.cu" > "build_${name}.cu"

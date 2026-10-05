@@ -5,7 +5,8 @@ starting state of the matrix (original SuiteSparse matrices only).
   gain_vs_start_density        x = nnz / (rows * cols), which no permutation changes
 
 Lines are kernel-smoothed medians, bands the interquartile range (Gaussian kernel\nin log10 x, bandwidth 0.15; dropped where the effective sample is under 25).
-Run from anywhere:  python analysis/density_response/gain_figures.py
+Output: plots/paper/gain_vs_start_*.{pdf,png}
+Run from anywhere:  python scripts/gain_figures.py
 """
 import matplotlib as mpl
 import matplotlib.pyplot as plt
@@ -13,7 +14,7 @@ import numpy as np
 import pandas as pd
 from matplotlib.patches import Patch
 
-from common import COL_W, kernel_quantiles, load_pipeline, save, style
+from figure_common import COL_W, kernel_quantiles, load_pipeline, save, style
 from settings import PERMS
 
 TOP = ['RCM', 'AMD', 'Rabbit', 'DTC-LSH']

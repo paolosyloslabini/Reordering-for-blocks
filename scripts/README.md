@@ -46,6 +46,18 @@ Break-even analysis plots (minimum SpMM operations for reordering to pay for its
 
 Shared plotting utilities and style configurations.
 
+### Paper figures
+
+Each writes PDFs (and PNGs) to `plots/paper/`, sized for the IEEE layout:
+
+```bash
+python scripts/paper_figures.py                   # most paper figures
+python scripts/gain_figures.py                    # gain_vs_start_block_density, gain_vs_start_density
+python scripts/improvement_bars.py --n-cols=256   # improvement_strips_nc256_original_symmetric (+ bars/strips variants)
+```
+
+`gain_figures.py` and `improvement_bars.py` share loading and styling in `figure_common.py`.
+
 ### job_check.py
 
 Monitors SLURM job status and generates reports.
