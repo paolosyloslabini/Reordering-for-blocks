@@ -25,11 +25,12 @@ import pandas as pd
 from matplotlib.gridspec import GridSpec
 from matplotlib.patches import Patch, Rectangle
 
-from common import (COL_W, FIXED_32_COLS, KERNEL_NAMES, OUT, PAGE_W, kernel_width, load_pipeline,
+from common import (COL_W, KERNEL_NAMES, OUT, PAGE_W, load_pipeline,
                     n_cols_from_argv, save, style)
 from decision_test import PEAK_TFLOPS
 
-N_COLS = n_cols_from_argv(default=32)   # --n-cols=256: SMaT/ASpT stay at 32, as elsewhere
+# all kernels at the same width: the cluster logs confirm SMaT/ASpT honoured it
+N_COLS = n_cols_from_argv(default=32)
 # Paper palette (scripts/paper_figures.py): improved, degraded, neutral.
 GOOD, BAD, NEUTRAL = '#006400', '#8B0000', '#A0A0A0'
 KEPT = '#000000'    # strips figure: kept-original dots sit on 1x and must stay visible
@@ -43,7 +44,7 @@ TITLES = {'original': 'Original matrices', 'scrambled': 'Scrambled matrices',
 
 def densest_speedups(dataset, perm_type):
     df = load_pipeline(dataset, perm_type)
-    df = df[(df['n_cols'] == kernel_width(df['kernel_id'], N_COLS)) & (df['strategy'] != 'Original')
+    df = df[(df['n_cols'] == N_COLS) & (df['strategy'] != 'Original')
             & (df['speedup'] > 0) & np.isfinite(df['speedup'])
             & (df['block_density_16'] > 0) & (df['block_density_16_original'] > 0)]
     for k, peak in PEAK_TFLOPS.items():
@@ -258,7 +259,6 @@ def strips_figure(raw, results, rng, cells=CELLS, width=PAGE_W, suffix=''):
         labs = axes[-1][c].set_xticklabels(
             [n.replace('cuSPARSE-', 'cuSPARSE\n').replace('-SpMM', '-\nSpMM')
               .replace('FlashSparse', 'Flash-\nSparse')
-             + ('\n(32 cols)' if N_COLS != 32 and by_name[n] in FIXED_32_COLS else '')
              for n in names],
             linespacing=0.9, fontsize=6.5 if single else 7.5)
         # the two adjacent "cuSPARSE" labels are wider than a strip: push apart
