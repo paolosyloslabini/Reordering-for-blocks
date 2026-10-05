@@ -1055,10 +1055,10 @@ def fig_speedup_column(out, n_cols=256):
 
 PICK_T = 1.05          # a metric prefers an ordering if it is >= 5 % better
 PICK_MIN_MATRICES = 10  # leave a bar out if fewer matrices have a conflict
-PICK_PANELS = [('SYMMETRIC', 'original'), ('ROW', 'original')]
+PICK_PANELS = [('SYMMETRIC', 'original'), ('SYMMETRIC', 'scrambled')]
 PICK_BD = 'density_improvement_16'
-PICK_YLIM = (0.87, 1.78)
-PICK_WORSE_EDGE = '#d62020'  # outline of a bar below 1x: block density's pick was slower
+PICK_IN_PER_LOG = 1.05 / np.log(1.78 / 0.87)  # panel inches per unit of log(y)
+PICK_YTICKS = (0.75, 0.9, 1, 1.25, 1.5, 2)
 
 
 def _pick_candidates(dataset, perm_type, n_cols=256):
@@ -1108,49 +1108,52 @@ def pick_by_block_density(d, kernels):
 def fig_pick_by_block_density(out, panels=PICK_PANELS,
                               fname='pick_by_block_density.pdf', csv=None,
                               n_cols=256):
-    """Bars rise from the bottom of the axis (so values near 1x stay visible);
-    above the red dashed 1x line = picking the ordering block density prefers
-    beat picking the one the other metric prefers. Red outline: below 1x.
-    Dashed outline, faded fill: fewer than PICK_MIN_MATRICES matrices.
-    Same fills as corr_by_metric."""
+    """Bars start at the red dashed 1x line on a log axis: up = picking the
+    ordering block density prefers beat picking the one the other metric
+    prefers, down = it lost. Same fills as corr_by_metric."""
     df, _ = load_pipeline('original', 'SYMMETRIC')
     kernels = _ordered_kernels(df, KERNEL_NAMES)
+    results = [pick_by_block_density(_pick_candidates(dataset, perm_type, n_cols), kernels)
+               for perm_type, dataset in panels]
+    # each panel's y-range hugs its bars; heights follow the (log) range, so
+    # all panels share one scale
+    ylims = []
+    for t, _ in results:
+        v = t['advantage_all'].dropna()
+        ylims.append((min(v.min(), 1) / 1.03, max(v.max(), 1) * 1.04))
+    heights = [PICK_IN_PER_LOG * np.log(hi / lo) for lo, hi in ylims]
     fig, axes = plt.subplots(len(panels), 1,
-                             figsize=(COL_W, 0.55 + 1.05 * len(panels)),
-                             sharex=True)
+                             figsize=(COL_W, 0.85 + sum(heights)),
+                             sharex=True, gridspec_kw=dict(height_ratios=heights))
+    axes = np.atleast_1d(axes)
+    # label panels by what differs between them
+    by_dataset = len({p for p, _ in panels}) == 1
     others = METRICS[:-1]
-    n, width = len(others), 0.84 / len(others)
+    width = 0.84 / len(others)
     x = np.arange(len(kernels))
     tabs = []
-    for ax, (perm_type, dataset) in zip(axes, panels):
-        t, share = pick_by_block_density(
-            _pick_candidates(dataset, perm_type, n_cols), kernels)
+    for ax, (perm_type, dataset), (t, share), ylim in zip(axes, panels, results, ylims):
         tabs.append(t.assign(reordering=perm_type.lower(), matrices=dataset,
                              conflict_share=round(share, 4)))
-        for i, (m, label, color, hatch) in enumerate(others):
+        # profile sums per-row spans, which a row permutation cannot change
+        shown = [o for o in others
+                 if not (perm_type == 'ROW' and o[0] == 'profile_improvement')]
+        n = len(shown)
+        for i, (m, label, color, hatch) in enumerate(shown):
             tm = t[t['metric_id'] == m].set_index('kernel').loc[
                 [PAPER_KERNEL_NAMES.get(k, k) for k in kernels]]
             v = tm['advantage_all'].values
-            few = tm['advantage'].isna().values
-            # no conflicting pair at all: empty dashed placeholder up to 1x
+            # no conflicting pair at all: zero-height bar at 1x
             v = np.where(np.isnan(v), 1.0, v)
             empty = np.isnan(tm['advantage_all'].values)
-            # bars below 1x (block density picked the slower ordering): red
-            # outline, fill kept so the metric stays readable
-            worse = v < 1
-            edge = np.where(worse, PICK_WORSE_EDGE, '#222222')
-            lw = np.where(worse, 1.1, 0.5)
             xs = x + (i - (n - 1) / 2) * width
-            for sel, ls, alpha in ((~few, '-', 1.0), (few, (0, (2, 1.2)), 0.35)):
-                fill = np.array([mpl.colors.to_rgba(color, 0 if e else alpha)
-                                 for e in empty[sel]]).reshape(-1, 4)
-                ax.bar(xs[sel], v[sel] - PICK_YLIM[0], width, bottom=PICK_YLIM[0],
-                       color=fill, hatch=hatch,
-                       edgecolor=edge[sel], linewidth=np.maximum(lw[sel], 0.7 * (ls != '-')),
-                       linestyle=ls, zorder=3)
+            fill = np.array([mpl.colors.to_rgba(color, 0 if e else 1)
+                             for e in empty]).reshape(-1, 4)
+            ax.bar(xs, v - 1, width, bottom=1, color=fill, hatch=hatch,
+                   edgecolor='#222222', linewidth=0.5, zorder=3)
         ax.set_yscale('log')
-        ax.set_ylim(*PICK_YLIM)
-        format_ratio_axis(ax.yaxis, (0.9, 1, 1.25, 1.5))
+        ax.set_ylim(*ylim)
+        format_ratio_axis(ax.yaxis, [y for y in PICK_YTICKS if ylim[0] <= y <= ylim[1]])
         ax.axhline(1, color='#CC0000', linestyle='--', lw=0.8, zorder=4)
         ax.grid(True, axis='y', which='major', color='#b0b0b0', linewidth=0.6)
         ax.grid(False, axis='x', which='both')
@@ -1158,8 +1161,8 @@ def fig_pick_by_block_density(out, panels=PICK_PANELS,
         ax.set_axisbelow(True)
         ax.set_xlim(-0.5, len(kernels) - 0.5)
         pct = f'{100 * share:.0f}%' if share >= 0.01 else '<1%'
-        ax.text(0.985, 0.95, f'{REORDER_TITLE[perm_type]}\n'
-                f'conflicting verdicts: {pct}', transform=ax.transAxes,
+        title = DATASET_TITLE[dataset] if by_dataset else REORDER_TITLE[perm_type]
+        ax.text(0.985, 0.95, f'{title} ({pct} conflicting)', transform=ax.transAxes,
                 ha='right', va='top', fontsize=7.5, linespacing=1.1, zorder=6,
                 bbox=dict(boxstyle='square,pad=0.15', fc='white', ec='none',
                           alpha=0.85))
@@ -1180,22 +1183,12 @@ def fig_pick_by_block_density(out, panels=PICK_PANELS,
     handles = [Patch(facecolor=color, hatch=hatch, edgecolor='#222222',
                      linewidth=0.5, label=label)
                for _, label, color, hatch in others]
-    # outline keys sit inside the top panel, top left, where it is empty
-    axes[0].legend(handles=[Patch(facecolor='white', edgecolor=PICK_WORSE_EDGE,
-                                  linewidth=1.1, label='Slower pick'),
-                            Patch(facecolor='white', edgecolor='#222222',
-                                  linewidth=0.7, linestyle=(0, (2, 1.2)),
-                                  label=f'< {PICK_MIN_MATRICES} matrices')],
-                   labelspacing=0.25,
-                   loc='upper left', frameon=False, fontsize=7.5,
-                   handlelength=1.1, handleheight=0.9, handletextpad=0.3,
-                   borderaxespad=0.3)
     fig.legend(handles=handles, title='Block density vs.', loc='upper center',
                bbox_to_anchor=(0.58, 1.0), ncol=3, frameon=False,
                handlelength=1.1, handleheight=0.9, columnspacing=0.8,
                handletextpad=0.3, labelspacing=0.25, borderaxespad=0.0)
     fig.subplots_adjust(left=0.135, right=0.995, top=1 - 0.5 / h,
-                        bottom=0.28 / h, hspace=0)
+                        bottom=0.28 / h, hspace=0.08)
     fig.savefig(out / fname)
     plt.close(fig)
     if csv is not None:

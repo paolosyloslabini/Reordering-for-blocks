@@ -25,10 +25,11 @@ import pandas as pd
 from matplotlib.gridspec import GridSpec
 from matplotlib.patches import Patch, Rectangle
 
-from common import KERNEL_NAMES, OUT, PAGE_W, load_pipeline, save, style
+from common import (COL_W, FIXED_32_COLS, KERNEL_NAMES, OUT, PAGE_W, kernel_width, load_pipeline,
+                    n_cols_from_argv, save, style)
 from decision_test import PEAK_TFLOPS
 
-N_COLS = 32
+N_COLS = n_cols_from_argv(default=32)   # --n-cols=256: SMaT/ASpT stay at 32, as elsewhere
 # Paper palette (scripts/paper_figures.py): improved, degraded, neutral.
 GOOD, BAD, NEUTRAL = '#006400', '#8B0000', '#A0A0A0'
 KEPT = '#000000'    # strips figure: kept-original dots sit on 1x and must stay visible
@@ -42,7 +43,7 @@ TITLES = {'original': 'Original matrices', 'scrambled': 'Scrambled matrices',
 
 def densest_speedups(dataset, perm_type):
     df = load_pipeline(dataset, perm_type)
-    df = df[(df['n_cols'] == N_COLS) & (df['strategy'] != 'Original')
+    df = df[(df['n_cols'] == kernel_width(df['kernel_id'], N_COLS)) & (df['strategy'] != 'Original')
             & (df['speedup'] > 0) & np.isfinite(df['speedup'])
             & (df['block_density_16'] > 0) & (df['block_density_16_original'] > 0)]
     for k, peak in PEAK_TFLOPS.items():
@@ -161,14 +162,14 @@ def figure(results):
     fig.legend(handles=handles, loc='lower center', bbox_to_anchor=(0.52, 0.935),
                ncol=3, frameon=False, handlelength=0.9, handleheight=0.9,
                columnspacing=1.2, handletextpad=0.35)
-    save(fig, 'improvement_bars_nc32')
+    save(fig, f'improvement_bars_nc{N_COLS}')
     plt.close(fig)
 
 
 class CrossbarHandle:
     """Legend entry for the strips crossbar: a box with a line through it."""
     def get_label(self):
-        return 'Gain among faster (line) and 95% CI (box)'
+        return 'Gain among faster'
 
 
 class CrossbarHandler:
@@ -185,18 +186,25 @@ class CrossbarHandler:
         return box
 
 
-def strips_figure(raw, results, rng):
-    """Sina plot of per-matrix speedups per kernel, paper style."""
+def strips_figure(raw, results, rng, cells=CELLS, width=PAGE_W, suffix=''):
+    """Sina plot of per-matrix speedups per kernel, paper style.
+
+    ``cells`` picks a subset of the four panels (e.g. only original/symmetric,
+    drawn one column wide with ``width=COL_W``)."""
     import matplotlib as mpl
     import matplotlib.patheffects as pe
     from matplotlib.ticker import LogLocator, NullFormatter
     names = KERNEL_ORDER
     by_name = {v: k for k, v in KERNEL_NAMES.items()}
     ylims = {'original': (1 / 6, 12), 'scrambled': (1 / 6, 48)}
-    fig, axes = plt.subplots(2, 2, figsize=(PAGE_W, 3.5), sharex=True, sharey='row')
-    for r, ds in enumerate(('original', 'scrambled')):
+    dss = [d for d in ('original', 'scrambled') if any(c[0] == d for c in cells)]
+    pts = [p for p in ('SYMMETRIC', 'ROW') if any(c[1] == p for c in cells)]
+    single = len(dss) * len(pts) == 1
+    fig, axes = plt.subplots(len(dss), len(pts), sharex=True, sharey='row', squeeze=False,
+                             figsize=(width, 1.85 if single else 1.75 * len(dss)))
+    for r, ds in enumerate(dss):
         lo, hi = ylims[ds]
-        for c, pt in enumerate(('SYMMETRIC', 'ROW')):
+        for c, pt in enumerate(pts):
             ax = axes[r][c]
             d = raw[(ds, pt)]
             res = results[(ds, pt)].set_index('kernel')
@@ -243,13 +251,16 @@ def strips_figure(raw, results, rng):
             kernel_separators(ax, len(names))
             if c == 1:   # shared y: no tick marks poking into the gap between columns
                 ax.tick_params(axis='y', which='both', length=0, labelleft=False)
-    for c, pt in enumerate(('SYMMETRIC', 'ROW')):
-        axes[0][c].set_title(TITLES[pt].capitalize(), fontsize=9, fontweight='bold', pad=3)
-        axes[1][c].set_xticks(np.arange(len(names)))
-        labs = axes[1][c].set_xticklabels(
+    for c, pt in enumerate(pts):
+        if not single:
+            axes[0][c].set_title(TITLES[pt].capitalize(), fontsize=9, fontweight='bold', pad=3)
+        axes[-1][c].set_xticks(np.arange(len(names)))
+        labs = axes[-1][c].set_xticklabels(
             [n.replace('cuSPARSE-', 'cuSPARSE\n').replace('-SpMM', '-\nSpMM')
-              .replace('FlashSparse', 'Flash-\nSparse') for n in names],
-            linespacing=0.9, fontsize=7.5)
+              .replace('FlashSparse', 'Flash-\nSparse')
+             + ('\n(32 cols)' if N_COLS != 32 and by_name[n] in FIXED_32_COLS else '')
+             for n in names],
+            linespacing=0.9, fontsize=6.5 if single else 7.5)
         # the two adjacent "cuSPARSE" labels are wider than a strip: push apart
         from matplotlib.transforms import ScaledTranslation
         for lab, n in zip(labs, names):
@@ -257,25 +268,33 @@ def strips_figure(raw, results, rng):
             if dx:
                 lab.set_transform(lab.get_transform()
                                   + ScaledTranslation(dx / 72, 0, fig.dpi_scale_trans))
-    fig.subplots_adjust(left=0.085, right=0.965, top=0.89, bottom=0.085, wspace=0.012,
-                        hspace=0.05)
-    for r, ds in enumerate(('original', 'scrambled')):
-        pos = axes[r][1].get_position()
-        fig.text(pos.x1 + 0.004, (pos.y0 + pos.y1) / 2, TITLES[ds], rotation=270,
-                 ha='left', va='center', fontsize=9, fontweight='bold')
-    mid = (axes[0][0].get_position().y1 + axes[1][0].get_position().y0) / 2
-    fig.text(0.028, mid, 'Speedup of the densest candidate', rotation=90,
-             ha='left', va='center', fontsize=9)
+    if single:
+        fig.subplots_adjust(left=0.15, right=0.99, top=0.88, bottom=0.2)
+    else:
+        fig.subplots_adjust(left=0.085, right=0.965, top=0.89, bottom=0.085, wspace=0.012,
+                            hspace=0.05)
+        for r, ds in enumerate(dss):
+            pos = axes[r][-1].get_position()
+            fig.text(pos.x1 + 0.004, (pos.y0 + pos.y1) / 2, TITLES[ds], rotation=270,
+                     ha='left', va='center', fontsize=9, fontweight='bold')
+    if single:
+        axes[0][0].set_ylabel('Speedup of the matrix with\nhighest block density', fontsize=7.5,
+                              labelpad=1, linespacing=0.95)
+    else:
+        mid = (axes[0][0].get_position().y1 + axes[-1][0].get_position().y0) / 2
+        fig.text(0.028, mid, 'Speedup of the densest candidate', rotation=90,
+                 ha='left', va='center', fontsize=9)
     handles = [Patch(facecolor=GOOD, edgecolor='#222222', linewidth=0.5, label='Faster'),
                Patch(facecolor=BAD, edgecolor='#222222', linewidth=0.5, label='Slower'),
                Patch(facecolor=KEPT, edgecolor='#222222', linewidth=0.5,
                      label='Kept original'),
                CrossbarHandle()]
-    fig.legend(handles=handles, loc='lower center', bbox_to_anchor=(0.52, 0.925),
+    fig.legend(handles=handles, loc='lower center',
+               bbox_to_anchor=(0.56, 0.875) if single else (0.52, 0.925),
                ncol=4, frameon=False, handlelength=0.9, handleheight=0.9,
                columnspacing=1.2, handletextpad=0.35,
                handler_map={CrossbarHandle: CrossbarHandler()})
-    save(fig, 'improvement_strips_nc32')
+    save(fig, f'improvement_strips_nc{N_COLS}{suffix}')
     plt.close(fig)
 
 
@@ -291,9 +310,11 @@ def main():
         print(f'== {ds} / {pt}')
         print(r.round(3).to_string(index=False))
     OUT.mkdir(exist_ok=True)
-    pd.concat(tables).round(4).to_csv(OUT / 'improvement_bars_nc32.csv', index=False)
+    pd.concat(tables).round(4).to_csv(OUT / f'improvement_bars_nc{N_COLS}.csv', index=False)
     figure(results)
     strips_figure(raw, results, np.random.default_rng(1))
+    strips_figure(raw, results, np.random.default_rng(1), cells=[('original', 'SYMMETRIC')],
+                  width=COL_W, suffix='_original_symmetric')
 
 
 if __name__ == '__main__':
