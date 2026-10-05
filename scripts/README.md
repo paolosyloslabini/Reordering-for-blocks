@@ -48,7 +48,7 @@ Shared plotting utilities and style configurations.
 
 ### Paper figures
 
-All figures used by the paper, in one go (about 5 minutes):
+All figures used by the paper, in one go (about a minute):
 
 ```bash
 bash scripts/make_paper_figures.sh        # PY=<python> to override the Windows venv

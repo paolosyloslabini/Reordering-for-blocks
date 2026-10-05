@@ -21,6 +21,3 @@ PY="${PY:-.venv/Scripts/python.exe}"
 # Spy grid of wing_nodal under every reordering (from the committed plots/spy_plots/wing_nodal_spy.png)
 "$PY" scripts/spy_relayout.py plots/spy_plots/wing_nodal_spy.png plots/paper/wing_nodal_spy_4x3.png 3 4 3.49
 "$PY" scripts/spy_relayout.py plots/spy_plots/wing_nodal_spy.png plots/paper/wing_nodal_spy_6x2.png 2 6 7.16
-
-# plots/original_symmetric/: speedup profiles and the other per-pipeline plots
-"$PY" scripts/plot.py
