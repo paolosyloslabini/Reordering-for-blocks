@@ -115,9 +115,11 @@ C_UP, C_DOWN, C_MIXED = '#006400', '#8B0000', '#A0A0A0'
 # Colour = quantity: correlation r green, elasticity alpha purple
 # (light -> dark = small -> large block size / n_cols).
 BS_COLORS = ['#e5f5e0', '#c7e9c0', '#a1d99b', '#74c476', '#31a354', '#006d2c']
-NCOLS_COLORS = ['#c7e9c0', '#74c476', '#006d2c']
+# r by n_cols uses 16x16 blocks: same green as the 16x16 bar on top (the n_cols = 256
+# bar is that very bar); the widths differ by hatch only
+NCOLS_COLORS = [BS_COLORS[BLOCK_SIZES.index(16)]] * 3
 ALPHA_NCOLS_COLORS = ['#dadaeb', '#9e9ac8', '#54278f']
-NCOLS_HATCHES = ['', '//////', '']
+NCOLS_HATCHES = ['//////', '', '....']   # n_cols = 32, 256, 1024
 
 # Structural metrics (Fig. corr_by_metric). Neutral greys + hatches, so they
 # cannot be mistaken for the reordering palette; block density keeps the
