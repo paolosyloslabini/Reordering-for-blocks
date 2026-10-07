@@ -2,8 +2,9 @@
 
 Two figures from the same data: improvement_bars_nc<N> (shares + gain among
 improved) and improvement_strips_nc<N> (the full per-matrix distribution as a
-sina plot, with the same shares and gain marked); improvement_strips_nc<N>_original_symmetric
-is the one-panel version used in the paper.
+sina plot, with the same shares and gain marked). improvement_strips_nc<N>_symmetric
+(original above scrambled matrices, one column wide) is the version used in the paper;
+improvement_strips_nc<N>_original_symmetric is its earlier one-panel form.
 
 Four cells: {original, scrambled} matrices x {symmetric, row} reordering.
 For every (matrix, kernel) the candidates are that cell's reorderings; the
@@ -193,16 +194,88 @@ class CrossbarHandler:
         return box
 
 
+def draw_strips(ax, d, res, lo, hi, rng, pct_size=7):
+    """One sina panel: per-matrix speedups per kernel with the gain crossbar and
+    the faster/slower shares, on a log speedup axis clipped to [lo, hi]."""
+    import matplotlib as mpl
+    import matplotlib.patheffects as pe
+    from matplotlib.ticker import NullFormatter
+    names = KERNEL_ORDER
+    by_name = {v: k for k, v in KERNEL_NAMES.items()}
+    for i, name in enumerate(names):
+        s = d.loc[d['kernel_id'] == by_name[name], 'speedup'].values
+        ls = np.log(np.clip(s, lo, hi))
+        # sina jitter: horizontal spread proportional to local density
+        grid = np.linspace(np.log(lo), np.log(hi), 300)
+        bw = 0.12
+        dens = np.exp(-0.5 * ((grid[:, None] - ls[None, :]) / bw) ** 2).sum(1)
+        width = 0.42 * np.interp(ls, grid, dens) / dens.max()
+        xj = i + rng.uniform(-1, 1, len(s)) * width
+        col = np.where(s > 1, GOOD, np.where(s < 1, BAD, KEPT))
+        ax.scatter(xj, np.exp(ls), s=1.6, c=col, alpha=0.55, lw=0,
+                   rasterized=True, zorder=3)
+        # gain among improved: crossbar = box over the 95% interval,
+        # thicker line at the geometric mean
+        g, glo, ghi = res.loc[name, ['gain_improved', 'gain_lo', 'gain_hi']]
+        half = 0.24
+        ax.add_patch(Rectangle((i - half, glo), 2 * half, ghi - glo,
+                               facecolor='white', alpha=0.75, edgecolor=GAIN,
+                               linewidth=0.6, zorder=5))
+        ax.plot([i - half, i + half], [g, g], color=GAIN, lw=1.4, zorder=6,
+                solid_capstyle='butt')
+        # shares: faster along the top edge, slower along the bottom edge
+        up, down = res.loc[name, 'improved'], res.loc[name, 'slower']
+        halo = [pe.withStroke(linewidth=1.8, foreground='white')]
+        ax.text(i, 0.985, f'{up:.0%}↑', color=GOOD, ha='center', va='top',
+                transform=ax.get_xaxis_transform(), fontsize=pct_size,
+                fontweight='bold', zorder=7, path_effects=halo)
+        ax.text(i, 0.015, f'{down:.0%}↓', color=BAD, ha='center', va='bottom',
+                transform=ax.get_xaxis_transform(), fontsize=pct_size,
+                fontweight='bold', zorder=7, path_effects=halo)
+    ax.set_yscale('log')
+    ax.set_ylim(lo, hi)
+    majors = [m for m in (0.2, 0.5, 1, 2, 5, 10, 20) if lo <= m <= hi]
+    ax.yaxis.set_major_locator(mpl.ticker.FixedLocator(majors))
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f'{v:g}×'))
+    ax.yaxis.set_minor_locator(mpl.ticker.FixedLocator(
+        [m * k for m in (0.1, 1, 10) for k in range(2, 10) if lo <= m * k <= hi]))
+    ax.yaxis.set_minor_formatter(NullFormatter())
+    ax.grid(True, axis='y', which='major', color='#b0b0b0', linewidth=0.6)
+    ax.grid(True, axis='y', which='minor', color='#e4e4e4', linewidth=0.4)
+    kernel_separators(ax, len(names))
+
+
+def kernel_xticklabels(fig, ax, fontsize):
+    from matplotlib.transforms import ScaledTranslation
+    names = KERNEL_ORDER
+    ax.set_xticks(np.arange(len(names)))
+    labs = ax.set_xticklabels(
+        [n.replace('cuSPARSE-', 'cuSPARSE\n').replace('-SpMM', '-\nSpMM')
+          .replace('FlashSparse', 'Flash-\nSparse')
+         for n in names],
+        linespacing=0.9, fontsize=fontsize)
+    # the two adjacent "cuSPARSE" labels are wider than a strip: push apart
+    for lab, n in zip(labs, names):
+        dx = {'cuSPARSE-BSR': -2.5, 'cuSPARSE-CSR': 2.5}.get(n, 0)
+        if dx:
+            lab.set_transform(lab.get_transform()
+                              + ScaledTranslation(dx / 72, 0, fig.dpi_scale_trans))
+
+
+def strips_legend_handles():
+    handles = [Patch(facecolor=GOOD, edgecolor='#222222', linewidth=0.5, label='Faster'),
+               Patch(facecolor=BAD, edgecolor='#222222', linewidth=0.5, label='Slower'),
+               Patch(facecolor=KEPT, edgecolor='#222222', linewidth=0.5,
+                     label='Kept original'),
+               CrossbarHandle()]
+    return handles
+
+
 def strips_figure(raw, results, rng, cells=CELLS, width=PAGE_W, suffix=''):
     """Sina plot of per-matrix speedups per kernel, paper style.
 
     ``cells`` picks a subset of the four panels (e.g. only original/symmetric,
     drawn one column wide with ``width=COL_W``)."""
-    import matplotlib as mpl
-    import matplotlib.patheffects as pe
-    from matplotlib.ticker import LogLocator, NullFormatter
-    names = KERNEL_ORDER
-    by_name = {v: k for k, v in KERNEL_NAMES.items()}
     ylims = {'original': (1 / 6, 12), 'scrambled': (1 / 6, 48)}
     dss = [d for d in ('original', 'scrambled') if any(c[0] == d for c in cells)]
     pts = [p for p in ('SYMMETRIC', 'ROW') if any(c[1] == p for c in cells)]
@@ -212,68 +285,14 @@ def strips_figure(raw, results, rng, cells=CELLS, width=PAGE_W, suffix=''):
     for r, ds in enumerate(dss):
         lo, hi = ylims[ds]
         for c, pt in enumerate(pts):
-            ax = axes[r][c]
-            d = raw[(ds, pt)]
-            res = results[(ds, pt)].set_index('kernel')
-            for i, name in enumerate(names):
-                s = d.loc[d['kernel_id'] == by_name[name], 'speedup'].values
-                ls = np.log(np.clip(s, lo, hi))
-                # sina jitter: horizontal spread proportional to local density
-                grid = np.linspace(np.log(lo), np.log(hi), 300)
-                bw = 0.12
-                dens = np.exp(-0.5 * ((grid[:, None] - ls[None, :]) / bw) ** 2).sum(1)
-                width = 0.42 * np.interp(ls, grid, dens) / dens.max()
-                xj = i + rng.uniform(-1, 1, len(s)) * width
-                col = np.where(s > 1, GOOD, np.where(s < 1, BAD, KEPT))
-                ax.scatter(xj, np.exp(ls), s=1.6, c=col, alpha=0.55, lw=0,
-                           rasterized=True, zorder=3)
-                # gain among improved: crossbar = box over the 95% interval,
-                # thicker line at the geometric mean
-                g, glo, ghi = res.loc[name, ['gain_improved', 'gain_lo', 'gain_hi']]
-                half = 0.24
-                ax.add_patch(Rectangle((i - half, glo), 2 * half, ghi - glo,
-                                       facecolor='white', alpha=0.75, edgecolor=GAIN,
-                                       linewidth=0.6, zorder=5))
-                ax.plot([i - half, i + half], [g, g], color=GAIN, lw=1.4, zorder=6,
-                        solid_capstyle='butt')
-                # shares: faster along the top edge, slower along the bottom edge
-                up, down = res.loc[name, 'improved'], res.loc[name, 'slower']
-                halo = [pe.withStroke(linewidth=1.8, foreground='white')]
-                ax.text(i, 0.985, f'{up:.0%}↑', color=GOOD, ha='center', va='top',
-                        transform=ax.get_xaxis_transform(), fontsize=7,
-                        fontweight='bold', zorder=7, path_effects=halo)
-                ax.text(i, 0.015, f'{down:.0%}↓', color=BAD, ha='center', va='bottom',
-                        transform=ax.get_xaxis_transform(), fontsize=7,
-                        fontweight='bold', zorder=7, path_effects=halo)
-            ax.set_yscale('log')
-            ax.set_ylim(lo, hi)
-            majors = [m for m in (0.2, 0.5, 1, 2, 5, 10, 20) if lo <= m <= hi]
-            ax.yaxis.set_major_locator(mpl.ticker.FixedLocator(majors))
-            ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f'{v:g}×'))
-            ax.yaxis.set_minor_locator(mpl.ticker.FixedLocator(
-                [m * k for m in (0.1, 1, 10) for k in range(2, 10) if lo <= m * k <= hi]))
-            ax.yaxis.set_minor_formatter(NullFormatter())
-            ax.grid(True, axis='y', which='major', color='#b0b0b0', linewidth=0.6)
-            ax.grid(True, axis='y', which='minor', color='#e4e4e4', linewidth=0.4)
-            kernel_separators(ax, len(names))
+            draw_strips(axes[r][c], raw[(ds, pt)], results[(ds, pt)].set_index('kernel'),
+                        lo, hi, rng)
             if c == 1:   # shared y: no tick marks poking into the gap between columns
-                ax.tick_params(axis='y', which='both', length=0, labelleft=False)
+                axes[r][c].tick_params(axis='y', which='both', length=0, labelleft=False)
     for c, pt in enumerate(pts):
         if not single:
             axes[0][c].set_title(TITLES[pt].capitalize(), fontsize=9, fontweight='bold', pad=3)
-        axes[-1][c].set_xticks(np.arange(len(names)))
-        labs = axes[-1][c].set_xticklabels(
-            [n.replace('cuSPARSE-', 'cuSPARSE\n').replace('-SpMM', '-\nSpMM')
-              .replace('FlashSparse', 'Flash-\nSparse')
-             for n in names],
-            linespacing=0.9, fontsize=6.5 if single else 7.5)
-        # the two adjacent "cuSPARSE" labels are wider than a strip: push apart
-        from matplotlib.transforms import ScaledTranslation
-        for lab, n in zip(labs, names):
-            dx = {'cuSPARSE-BSR': -2.5, 'cuSPARSE-CSR': 2.5}.get(n, 0)
-            if dx:
-                lab.set_transform(lab.get_transform()
-                                  + ScaledTranslation(dx / 72, 0, fig.dpi_scale_trans))
+        kernel_xticklabels(fig, axes[-1][c], 6.5 if single else 7.5)
     if single:
         fig.subplots_adjust(left=0.15, right=0.99, top=0.88, bottom=0.2)
     else:
@@ -290,17 +309,41 @@ def strips_figure(raw, results, rng, cells=CELLS, width=PAGE_W, suffix=''):
         mid = (axes[0][0].get_position().y1 + axes[-1][0].get_position().y0) / 2
         fig.text(0.028, mid, 'Speedup of the densest candidate', rotation=90,
                  ha='left', va='center', fontsize=9)
-    handles = [Patch(facecolor=GOOD, edgecolor='#222222', linewidth=0.5, label='Faster'),
-               Patch(facecolor=BAD, edgecolor='#222222', linewidth=0.5, label='Slower'),
-               Patch(facecolor=KEPT, edgecolor='#222222', linewidth=0.5,
-                     label='Kept original'),
-               CrossbarHandle()]
+    handles = strips_legend_handles()
     fig.legend(handles=handles, loc='lower center',
                bbox_to_anchor=(0.56, 0.875) if single else (0.52, 0.925),
                ncol=4, frameon=False, handlelength=0.9, handleheight=0.9,
                columnspacing=1.2, handletextpad=0.35,
                handler_map={CrossbarHandle: CrossbarHandler()})
     save(fig, f'improvement_strips_nc{N_COLS}{suffix}')
+    plt.close(fig)
+
+
+def strips_stacked_figure(raw, results, rng, pt='SYMMETRIC', height=2.2):
+    """Original (top) and scrambled (bottom) matrices for one reordering type,
+    stacked one column wide with a shared legend, y label and kernel labels."""
+    ylims = {'original': (1 / 6, 12), 'scrambled': (1 / 6, 48)}
+    fig, axes = plt.subplots(2, 1, sharex=True, figsize=(COL_W, height))
+    for ax, ds in zip(axes, ('original', 'scrambled')):
+        lo, hi = ylims[ds]
+        draw_strips(ax, raw[(ds, pt)], results[(ds, pt)].set_index('kernel'), lo, hi, rng,
+                    pct_size=6.5)
+        ax.tick_params(axis='y', labelsize=6.5)
+    kernel_xticklabels(fig, axes[-1], 6.5)
+    axes[-1].tick_params(axis='x', pad=1.5)
+    fig.subplots_adjust(left=0.11, right=0.955, top=0.925, bottom=0.135, hspace=0.06)
+    for ax, ds in zip(axes, ('original', 'scrambled')):
+        pos = ax.get_position()
+        fig.text(pos.x1 + 0.006, (pos.y0 + pos.y1) / 2, TITLES[ds].split()[0], rotation=270,
+                 ha='left', va='center', fontsize=7, fontweight='bold')
+    fig.text(0.005, (axes[0].get_position().y1 + axes[1].get_position().y0) / 2,
+             'Speedup of the matrix with highest block density', rotation=90,
+             ha='left', va='center', fontsize=7)
+    fig.legend(handles=strips_legend_handles(), loc='lower center',
+               bbox_to_anchor=(0.55, 0.925), ncol=4, frameon=False, handlelength=0.9,
+               handleheight=0.9, columnspacing=1.0, handletextpad=0.35, borderaxespad=0,
+               borderpad=0.1, fontsize=7, handler_map={CrossbarHandle: CrossbarHandler()})
+    save(fig, f'improvement_strips_nc{N_COLS}_{pt.lower()}', tight=True)
     plt.close(fig)
 
 
@@ -321,6 +364,7 @@ def main():
     strips_figure(raw, results, np.random.default_rng(1))
     strips_figure(raw, results, np.random.default_rng(1), cells=[('original', 'SYMMETRIC')],
                   width=COL_W, suffix='_original_symmetric')
+    strips_stacked_figure(raw, results, np.random.default_rng(1))
 
 
 if __name__ == '__main__':
