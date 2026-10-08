@@ -1311,11 +1311,30 @@ def fig_pick_by_block_density(out, panels=PICK_PANELS,
         pd.concat(tabs).drop(columns='metric_id').round(3).to_csv(csv, index=False)
 
 
+def correlation_ops(perm_type='SYMMETRIC'):
+    """Ops of the original matrices for the correlation figures: one pipeline
+    (SYMMETRIC or ROW) or BOTH pooled. When pooling, row strategies get a
+    ' (row)' suffix so the within-matrix fit keeps the symmetric and the row
+    ordering of the same algorithm as separate orderings."""
+    if perm_type != 'BOTH':
+        return load_pipeline('original', perm_type)[0]
+    sym = load_pipeline('original', 'SYMMETRIC')[0]
+    row = load_pipeline('original', 'ROW')[0].copy()
+    row = row[row['strategy'] != 'Original']
+    row['strategy'] = row['strategy'].astype(str) + ' (row)'
+    return pd.concat([sym, row], ignore_index=True)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     ap.add_argument('--out', default='plots/paper')
     ap.add_argument('--only', nargs='+', metavar='NAME',
                     help='only these figures (output names without .pdf)')
+    ap.add_argument('--perm-type', default='SYMMETRIC',
+                    choices=['SYMMETRIC', 'ROW', 'BOTH'],
+                    help='reorderings used by the correlation figures '
+                         '(bsr_sanity, improvement_vs_speedup*, '
+                         'corr_blocksize_ncols, corr_by_metric)')
     args = ap.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -1324,7 +1343,7 @@ def main():
     mpl.rcParams.update(PAPER_RC)
 
     def ops():
-        df, _ = load_pipeline("original", "SYMMETRIC")
+        df = correlation_ops(args.perm_type)
         df256 = df[(df['strategy'] != 'Original') & (df['n_cols'] == 256)]
         return df, df256
 
